@@ -99,7 +99,7 @@ async def on_member_update(before, after):
             conn.commit()
 
     if discord.utils.get(after.roles, name=MEMBER_ROLE) is not None:
-        print('Eclipse Member role assigned:', after)  # Debug print
+        print(MEMBER_ROLE,'role assigned:', after)  # Debug print
         # Insert or replace the Member role in the database when assigned
         c.execute("UPDATE members SET role = ? WHERE userid = ?", (MEMBER_ROLE, str(userid_after)))
         conn.commit()
@@ -125,7 +125,7 @@ async def on_presence_update(before, after):
             c.execute("INSERT INTO members (userid, username, nickname) VALUES (?, ?, ?)", (str(before.id), str(before), str(before.nick)))
             conn.commit()
             if discord.utils.get(after.roles, name=MEMBER_ROLE) is not None:
-                print('Eclipse Member role assigned:', after)  # Debug print
+                print(MEMBER_ROLE, 'role assigned:', after)  # Debug print
                 # Insert or replace the Member role in the database when assigned
                 c.execute("UPDATE members SET role = ? WHERE userid = ?", (MEMBER_ROLE, str(after.id)))
                 conn.commit()
