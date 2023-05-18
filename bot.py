@@ -230,7 +230,7 @@ async def inactive(ctx):
             embed.add_field(name="Username", value=member_data[4])
             embed.add_field(name="Nickname", value=member_data[1] if member_data[1] else "Not set")
             #embed.add_field(name="Role", value=member_data[2] if member_data[2] else "Not set")
-            embed.add_field(name="Timestamp", value=convert_timestamp(member_data[3]) if member_data[3] else "Not available")
+            embed.add_field(name="Offline Since", value=convert_timestamp(member_data[3]) if member_data[3] else "Not available")
             #embed.add_field(name="\u200b", value="\u200b")  # Add a blank field for spacing
         embeds.append(embed)
 
