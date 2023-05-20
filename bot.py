@@ -14,7 +14,7 @@ ALLOWED_USERS = config.ALLOWED_USERS
 GUILD_ID = config.GUILD_ID  # Replace YOUR_SERVER_ID with the actual ID of your server in the config file
 CHANNEL_ID = config.CHANNEL_ID  # Replace the channel ID with the channel ID where to bot should report leave messages.
 MEMBER_ROLE = config.MEMBER_ROLE  # Replace Member Role name with your specific tracked role name in the config file.
-INACTIVE_DAYS = config.INACTIVE_DAYS  # Number of days until a member in considered Inacitve.
+INACTIVE_DAYS = config.INACTIVE_DAYS  # Number of days until a member in considered Inactive.
 
 conn = sqlite3.connect('members.db')
 c = conn.cursor()
@@ -32,13 +32,13 @@ async def on_ready():
 async def on_member_join(member):
     print('Member joined:', member)
     # Insert the user ID into the database when a user joins Discord
-    c.execute("INSERT OR IGNORE INTO members (userid, nickname, username, joindate) VALUES (?, ?, ?, ?)", (str(member.id), str(member.nick), str(member), int(time.time)))
+    c.execute("INSERT OR IGNORE INTO members (userid, nickname, username, joindate) VALUES (?, ?, ?, ?)", (str(member.id), str(member.nick), str(member), int(time.time())))
     conn.commit()
 
 @bot.event
 async def on_member_remove(member):
-    if member.guild.id == GUILD_ID:  # Replace YOUR_SERVER_ID with the actual ID of your server
-        channel = bot.get_channel(CHANNEL_ID)  # Replace the channel ID with your desired channel ID
+    if member.guild.id == GUILD_ID:
+        channel = bot.get_channel(CHANNEL_ID)
         user_id = str(member.id)
         await channel.send(f"User {user_id} has left the server.")
 
