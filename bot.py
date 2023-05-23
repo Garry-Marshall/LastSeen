@@ -56,25 +56,6 @@ async def on_member_remove(member):
 
 @bot.event
 async def on_member_update(before, after):
-    print('Member updated:', after)  # Debug print
-    if after.nick is not None:
-        if before.nick != after.nick:
-            print('Nickname changed:', after.nick)  # Debug print
-            # Update the existing record with the new nickname
-            c.execute("UPDATE members SET nickname = ? WHERE userid = ?", (str(after.nick), str(after.id)))
-            conn.commit()
-
-    if discord.utils.get(after.roles, name=MEMBER_ROLE) is not None:
-        print(MEMBER_ROLE, 'role assigned:', after)  # Debug print
-        # Insert or replace the Member role in the database when assigned
-        c.execute("UPDATE members SET role = ? WHERE userid = ?", (MEMBER_ROLE, str(userid_after)))
-        conn.commit()
-    else:
-        c.execute("UPDATE members SET role = ? WHERE userid = ?", ('Guest', str(userid_after)))
-        conn.commit()
-
-@bot.event
-async def on_member_update(before, after):
     nickname_before = before.nick
     nickname_after = after.nick
     userid_before = before.id
@@ -96,6 +77,13 @@ async def on_member_update(before, after):
                 print('Insert a new record with the user ID and nickname')
                 c.execute("INSERT INTO members (userid, nickname) VALUES (?, ?)", (str(userid_before), str(nickname_after)))
                 c.execute("INSERT INTO members (userid, username) VALUES (?, ?)", (str(userid_before), str(username_after)))
+            conn.commit()
+
+    if after is not None:
+        if before != after:
+            print('Username changed from:', username_before, ' to: ', username_after)  # Debug print
+            # Update the existing record with the new username
+            c.execute("UPDATE members SET username = ? WHERE userid = ?", (str(username_after), str(userid_after)))
             conn.commit()
 
     if discord.utils.get(after.roles, name=MEMBER_ROLE) is not None:
