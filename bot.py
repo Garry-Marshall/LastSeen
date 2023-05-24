@@ -49,7 +49,7 @@ async def on_member_remove(member):
         if result:
             nickname = result[1] if result[1] else "Not set"
             role = result[2] if result[2] else "Not set"
-            joindate = value=convert_timestamp(result[5]) if result[5] else "Unknown"
+            joindate = convert_timestamp(result[5]) if result[5] else "Unknown"
             await channel.send(f"Nickname: {nickname}\nRole: {role}\nJoin Date: {joindate}")
         else:
             await channel.send("User not found in the database.")
