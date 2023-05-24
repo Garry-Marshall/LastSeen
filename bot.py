@@ -40,17 +40,17 @@ async def on_member_remove(member):
     if member.guild.id == GUILD_ID:
         channel = bot.get_channel(CHANNEL_ID)
         user_id = str(member.id)
-        await channel.send(f"User {user_id} has left the server.")
+        username = str(member)
+        await channel.send(f"User {username} ({user_id}) has left the server.")
 
-        # Execute the code from !whois for the user
         c.execute("SELECT * FROM members WHERE userid = ?", (user_id,))
         result = c.fetchone()
 
         if result:
             nickname = result[1] if result[1] else "Not set"
             role = result[2] if result[2] else "Not set"
-            #timestamp = convert_timestamp(result[3]) if result[3] else "Not available"
-            await channel.send(f"Nickname: {nickname}\nRole: {role}")
+            joindate = value=convert_timestamp(result[5]) if result[5] else "Unknown"
+            await channel.send(f"Nickname: {nickname}\nRole: {role}\nJoin Date: {joindate}")
         else:
             await channel.send("User not found in the database.")
 
