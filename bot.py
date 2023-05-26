@@ -21,7 +21,7 @@ c = conn.cursor()
 
 # Create the members table if it doesn't exist
 c.execute('''CREATE TABLE IF NOT EXISTS members
-             (userid TEXT PRIMARY KEY, nickname TEXT, role TEXT, timestamp INTEGER, username TEXT, joindate INTEGER)''')
+             (userid TEXT PRIMARY KEY, nickname TEXT, role TEXT, timestamp INTEGER, username TEXT, joindate INTEGER, inactive INTEGER DEFAULT 0)''')
 
 @bot.event
 async def on_ready():
@@ -41,16 +41,27 @@ async def on_member_remove(member):
         channel = bot.get_channel(CHANNEL_ID)
         user_id = str(member.id)
         username = str(member)
-        await channel.send(f"User {username} ({user_id}) has left the server.")
 
         c.execute("SELECT * FROM members WHERE userid = ?", (user_id,))
         result = c.fetchone()
 
         if result:
             nickname = result[1] if result[1] else "Not set"
-            role = result[2] if result[2] else "Not set"
+            role = result[2] if result[2] else "Guest"
             joindate = convert_timestamp(result[5]) if result[5] else "Unknown"
-            await channel.send(f"Nickname: {nickname}\nRole: {role}\nJoin Date: {joindate}")
+
+            # Update the 'inactive' field to 1 when a member leaves
+            c.execute("UPDATE members SET inactive = 1 WHERE userid = ?", (user_id,))
+            conn.commit()
+
+            # Create an embed to display the member information
+            embed = discord.Embed(title="Member Removed", color=0xff0000)
+            embed.add_field(name="Username", value=username, inline=False)
+            embed.add_field(name="Nickname", value=nickname, inline=False)
+            embed.add_field(name="Role", value=role, inline=False)
+            embed.add_field(name="Join Date", value=joindate, inline=False)
+
+            await channel.send(embed=embed)
         else:
             await channel.send("User not found in the database.")
 
@@ -202,7 +213,7 @@ async def inactive(ctx):
         await ctx.send("Sorry, you are not allowed to use this command.")
         return
     # Retrieve inactive members from the database
-    c.execute("SELECT * FROM members WHERE timestamp IS NOT NULL AND timestamp != 0 AND timestamp <= ? AND role = ?",
+    c.execute("SELECT * FROM members WHERE inactive = 0 AND timestamp IS NOT NULL AND timestamp != 0 AND timestamp <= ? AND role = ?",
               (int(time.time()) - (INACTIVE_DAYS * 24 * 60 * 60), MEMBER_ROLE))
     inactive_members = c.fetchall()
 
