@@ -103,6 +103,14 @@ async def on_member_update(before, after):
         c.execute("UPDATE members SET role = ? WHERE userid = ?", (MEMBER_ROLE, str(userid_after)))
         conn.commit()
 
+    #if after.guild.id == GUILD_ID:
+    if before.roles != after.roles:
+        if discord.utils.get(after.roles, name="Eclipse Member") is None:
+            # Update the 'Role' field to 'Guest' when 'Eclipse Member' role is removed
+            print('Guest role assigned:', after)  # Debug print
+            c.execute("UPDATE members SET role = 'Guest' WHERE userid = ?", (str(after.id),))
+            conn.commit()
+
 @bot.event
 async def on_presence_update(before, after):
     if before.status != after.status and after.status == discord.Status.offline:
@@ -117,6 +125,7 @@ async def on_presence_update(before, after):
         if result:
             print(after, 'changed status from', before.status, 'to', after.status)
             c.execute("UPDATE members SET timestamp = ? WHERE userid = ?", (int(0), str(after.id)))
+            c.execute("UPDATE members SET username = ? WHERE userid = ?", (str(after), str(after.id))) # Write back username to accommodate for name changes.
             conn.commit()
         else:
             #User does not yet exist in db
