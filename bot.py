@@ -105,8 +105,8 @@ async def on_member_update(before, after):
 
     #if after.guild.id == GUILD_ID:
     if before.roles != after.roles:
-        if discord.utils.get(after.roles, name="Eclipse Member") is None:
-            # Update the 'Role' field to 'Guest' when 'Eclipse Member' role is removed
+        if discord.utils.get(after.roles, name=MEMBER_ROLE) is None:
+            # Update the 'Role' field to 'Guest' when MEMBER_ROLE role is removed
             print('Guest role assigned:', after)  # Debug print
             c.execute("UPDATE members SET role = 'Guest' WHERE userid = ?", (str(after.id),))
             conn.commit()
