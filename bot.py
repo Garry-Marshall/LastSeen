@@ -126,6 +126,7 @@ async def on_presence_update(before, after):
             print(after, 'changed status from', before.status, 'to', after.status)
             c.execute("UPDATE members SET timestamp = ? WHERE userid = ?", (int(0), str(after.id)))
             c.execute("UPDATE members SET username = ? WHERE userid = ?", (str(after), str(after.id))) # Write back username to accommodate for name changes.
+            c.execute("UPDATE members SET joindate = ? WHERE userid = ?", (int(after.joined_at.timestamp()), str(after.id)))  # Update the joindate field in the database on every presence update
             conn.commit()
         else:
             #User does not yet exist in db
@@ -151,33 +152,42 @@ async def whois(ctx, *, username):
     if ctx.author.id not in ALLOWED_USERS:
         await ctx.send("Sorry, you are not allowed to use this command.")
         return
+
     # Remove the '<@' and '>' symbol from the input if present
     if username.startswith('<@') and username.endswith('>'):
         username = username[2:-1]
+
     username = username.lower()
- 
+
     # Retrieve member information from the database
-    c.execute("SELECT * FROM members WHERE lower(username) = ? OR userid = ? OR lower(nickname) = ?", (username, username, username))
+    c.execute("SELECT * FROM members WHERE lower(username) = ? OR userid = ? OR lower(nickname) = ?",
+              (username, username, username))
     member_data = c.fetchone()
 
     if member_data is None:
-        await ctx.send("User not found.")
+        await ctx.send("User not found in the database.")
         return
 
     embed = discord.Embed(title="User Information", color=discord.Color.blue())
     embed.add_field(name="User ID", value=member_data[0], inline=False)
-    if member_data[1] == "None":
-        embed.add_field(name="Nickname", value=username[0:-5])
-    else:
-        embed.add_field(name="Nickname", value=member_data[1] if member_data[1] else "Not set")
+    embed.add_field(name="Nickname", value=member_data[1] if member_data[1] else "Not set")
     embed.add_field(name="Username", value=member_data[4] if member_data[4] else "Not set", inline=False)
     embed.add_field(name="Role", value=member_data[2] if member_data[2] else "Guest", inline=False)
-    embed.add_field(name="Member since", value=convert_timestamp(member_data[5]) if member_data[5] else "Not available", inline=False)
-    embed.add_field(name="Offline since", value=convert_timestamp(member_data[3]) if member_data[3] else "Not available")
-    await ctx.send(embed=embed)
 
-def convert_timestamp(timestamp):
-    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+    join_date = member_data[5]
+    if join_date:
+        join_date=format_join_date(member_data[5])
+        
+    else:
+        # Fallback to member's join date if stored join date is not available
+        member = ctx.guild.get_member(int(member_data[0]))
+        if member:
+            join_date = discord.utils.format_dt(member.joined_at, 'F')
+
+    embed.add_field(name="Member since", value=join_date, inline=False)
+    embed.add_field(name="Offline since", value=convert_timestamp(member_data[3]) if member_data[3] else "Not available")
+
+    await ctx.send(embed=embed)
 
 @bot.command(aliases=['seen'])
 async def lastseen(ctx, *, arg):
@@ -247,6 +257,9 @@ async def inactive(ctx):
 
 def convert_timestamp(timestamp):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
+
+def format_join_date(timestamp):
+    return time.strftime("%b %d, %Y %H:%M:%S CET", time.localtime(timestamp))
 
 # Run the bot
 bot.run(TOKEN)
