@@ -126,7 +126,7 @@ async def on_presence_update(before, after):
             print(after, 'changed status from', before.status, 'to', after.status)
             c.execute("UPDATE members SET timestamp = ? WHERE userid = ?", (int(0), str(after.id)))
             c.execute("UPDATE members SET username = ? WHERE userid = ?", (str(after), str(after.id))) # Write back username to accommodate for name changes.
-            c.execute("UPDATE members SET joindate = ? WHERE userid = ?", (int(after.joined_at.timestamp()), str(after.id)))  # Update the joindate field in the database on every presence update
+            c.execute("UPDATE members SET joindate = ? WHERE userid = ? AND joindate IS NULL", (int(after.joined_at.timestamp()), str(after.id)))  # Update the joindate field in the database on every presence update
             conn.commit()
         else:
             #User does not yet exist in db
