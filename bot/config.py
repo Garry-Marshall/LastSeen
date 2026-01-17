@@ -81,11 +81,6 @@ DB_FILE=lastseen_bot.db
 # Logging and Debug Settings
 DEBUG_LEVEL=info  # options: info, debug, warning, error
 
-# Default bot admin role name
-BOT_ADMIN_ROLE_NAME=Bot Admin
-
-# Default Settings
-DEFAULT_INACTIVE_DAYS=10
 """
                 self.env_path.write_text(default_content)
                 logger.info("Created default .env file")
