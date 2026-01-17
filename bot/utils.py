@@ -148,6 +148,37 @@ def has_bot_admin_role(member: discord.Member, role_name: str) -> bool:
     return discord.utils.get(member.roles, name=role_name) is not None
 
 
+def can_use_bot_commands(member: discord.Member, guild_config: dict) -> bool:
+    """
+    Check if a member can use bot user commands based on guild configuration.
+
+    Args:
+        member: Discord member
+        guild_config: Guild configuration from database
+
+    Returns:
+        True if member can use bot commands
+    """
+    # Guild administrators always have access
+    if member.guild_permissions.administrator:
+        return True
+
+    # Check if member has bot admin role (from guild config)
+    bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin')
+    if discord.utils.get(member.roles, name=bot_admin_role_name):
+        return True
+
+    # Check if user role is required
+    user_role_required = guild_config.get('user_role_required', 0)
+    if not user_role_required:
+        # User role not required, everyone can use commands
+        return True
+
+    # User role is required, check if member has it
+    user_role_name = guild_config.get('user_role_name', 'LastSeen User')
+    return discord.utils.get(member.roles, name=user_role_name) is not None
+
+
 def chunk_list(items: list, chunk_size: int) -> list[list]:
     """
     Split a list into chunks of specified size.

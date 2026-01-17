@@ -35,11 +35,22 @@ class ConfigView(discord.ui.View):
         self.guild_id = guild_id
         self.config = config
 
-    @discord.ui.button(label="Set Notification Channel", style=discord.ButtonStyle.primary, emoji="📢")
+        # Get guild config to set toggle button color
+        guild_config = self.db.get_guild_config(guild_id)
+        if guild_config:
+            user_role_required = guild_config.get('user_role_required', 0)
+            # Set button style based on state: green if enabled, red if disabled
+            self.toggle_user_role_required.style = discord.ButtonStyle.success if user_role_required else discord.ButtonStyle.danger
+
+    @discord.ui.button(label="Set Notification Channel", style=discord.ButtonStyle.primary, emoji="📢", row=0)
     async def set_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to set the notification channel."""
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(self.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
         # Check permissions
-        if not has_bot_admin_role(interaction.user, self.config.bot_admin_role_name):
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
                 embed=create_error_embed("You don't have permission to use this command."),
                 ephemeral=True
@@ -50,11 +61,15 @@ class ConfigView(discord.ui.View):
         modal = ChannelModal(self.db, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Set Inactive Days", style=discord.ButtonStyle.primary, emoji="📅")
+    @discord.ui.button(label="Set Inactive Days", style=discord.ButtonStyle.primary, emoji="📅", row=0)
     async def set_inactive_days(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to set the inactive days threshold."""
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(self.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
         # Check permissions
-        if not has_bot_admin_role(interaction.user, self.config.bot_admin_role_name):
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
                 embed=create_error_embed("You don't have permission to use this command."),
                 ephemeral=True
@@ -65,11 +80,15 @@ class ConfigView(discord.ui.View):
         modal = InactiveDaysModal(self.db, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Update All Members", style=discord.ButtonStyle.success, emoji="🔄")
+    @discord.ui.button(label="Update All Members", style=discord.ButtonStyle.success, emoji="🔄", row=0)
     async def update_members(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to enumerate and update all members."""
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(self.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
         # Check permissions
-        if not has_bot_admin_role(interaction.user, self.config.bot_admin_role_name):
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
                 embed=create_error_embed("You don't have permission to use this command."),
                 ephemeral=True
@@ -127,7 +146,91 @@ class ConfigView(discord.ui.View):
                 ephemeral=True
             )
 
-    @discord.ui.button(label="View Config", style=discord.ButtonStyle.secondary, emoji="⚙️")
+    @discord.ui.button(label="Set Bot Admin Role", style=discord.ButtonStyle.primary, emoji="👑", row=1)
+    async def set_bot_admin_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to set the bot admin role name."""
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(self.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
+        # Check permissions
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
+            await interaction.response.send_message(
+                embed=create_error_embed("You don't have permission to use this command."),
+                ephemeral=True
+            )
+            return
+
+        # Create modal for bot admin role input
+        modal = BotAdminRoleModal(self.db, self.guild_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Set User Role", style=discord.ButtonStyle.primary, emoji="👤", row=1)
+    async def set_user_role(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to set the user role name."""
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(self.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
+        # Check permissions
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
+            await interaction.response.send_message(
+                embed=create_error_embed("You don't have permission to use this command."),
+                ephemeral=True
+            )
+            return
+
+        # Create modal for user role input
+        modal = UserRoleModal(self.db, self.guild_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Toggle User Role Required", emoji="🔐", row=1)
+    async def toggle_user_role_required(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to toggle user role requirement."""
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(self.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
+        # Check permissions
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
+            await interaction.response.send_message(
+                embed=create_error_embed("You don't have permission to use this command."),
+                ephemeral=True
+            )
+            return
+
+        # Get current config
+        guild_config = self.db.get_guild_config(self.guild_id)
+        if not guild_config:
+            await interaction.response.send_message(
+                embed=create_error_embed("Guild configuration not found."),
+                ephemeral=True
+            )
+            return
+
+        # Toggle the setting
+        current_value = guild_config.get('user_role_required', 0)
+        new_value = not current_value
+
+        # Update database
+        if self.db.set_user_role_required(self.guild_id, new_value, interaction.guild.name):
+            status = "**enabled**" if new_value else "**disabled**"
+            message = (
+                f"User role requirement has been {status}.\n\n"
+                f"{'Only users with the configured user role can now use bot commands.' if new_value else 'All users can now use bot commands.'}"
+            )
+            await interaction.response.send_message(
+                embed=create_success_embed(message),
+                ephemeral=True
+            )
+            logger.info(f"User role requirement toggled to {new_value} in guild {interaction.guild.name}")
+        else:
+            await interaction.response.send_message(
+                embed=create_error_embed("Failed to update user role requirement."),
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="View Config", style=discord.ButtonStyle.secondary, emoji="⚙️", row=2)
     async def view_config(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to view current configuration."""
         guild_config = self.db.get_guild_config(self.guild_id)
@@ -156,6 +259,19 @@ class ConfigView(discord.ui.View):
             value=f"{guild_config['inactive_days']} days",
             inline=False
         )
+
+        # Bot admin role
+        bot_admin_role = guild_config.get('bot_admin_role_name', 'Bot Admin')
+        embed.add_field(name="Bot Admin Role", value=bot_admin_role, inline=False)
+
+        # User role required
+        user_role_required = guild_config.get('user_role_required', 0)
+        user_role_required_str = "Yes" if user_role_required else "No"
+        embed.add_field(name="User Role Required", value=user_role_required_str, inline=False)
+
+        # User role name
+        user_role_name = guild_config.get('user_role_name', 'Bot User')
+        embed.add_field(name="User Role Name", value=user_role_name, inline=False)
 
         # Member count
         member_count = len(self.db.get_all_guild_members(self.guild_id))
@@ -305,6 +421,146 @@ class InactiveDaysModal(discord.ui.Modal, title="Set Inactive Days Threshold"):
             )
 
 
+class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
+    """Modal for setting the bot admin role name."""
+
+    role_input = discord.ui.TextInput(
+        label="Bot Admin Role Name",
+        placeholder="e.g., LastSeen Admin, Moderator, Admin",
+        required=True,
+        max_length=100
+    )
+
+    def __init__(self, db: DatabaseManager, guild_id: int):
+        """
+        Initialize modal.
+
+        Args:
+            db: Database manager
+            guild_id: Discord guild ID
+        """
+        super().__init__()
+        self.db = db
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        """Handle modal submission."""
+        role_name = self.role_input.value.strip()
+
+        # Validate role name
+        if not role_name:
+            await interaction.response.send_message(
+                embed=create_error_embed("Role name cannot be empty."),
+                ephemeral=True
+            )
+            return
+
+        if len(role_name) > 100:
+            await interaction.response.send_message(
+                embed=create_error_embed("Role name is too long (maximum 100 characters)."),
+                ephemeral=True
+            )
+            return
+
+        # Check if role exists in guild (warning, not error)
+        role = discord.utils.get(interaction.guild.roles, name=role_name)
+        if not role:
+            await interaction.response.send_message(
+                embed=create_error_embed(
+                    f"⚠️ Warning: Role '{role_name}' does not exist in this server.\n\n"
+                    f"The setting has been saved, but you should create this role for it to work properly."
+                ),
+                ephemeral=True
+            )
+            # Still update the database
+            self.db.set_bot_admin_role(self.guild_id, role_name, interaction.guild.name)
+            logger.info(f"Bot admin role set to '{role_name}' in guild {interaction.guild.name} (role doesn't exist yet)")
+            return
+
+        # Update database
+        if self.db.set_bot_admin_role(self.guild_id, role_name, interaction.guild.name):
+            await interaction.response.send_message(
+                embed=create_success_embed(f"Bot admin role set to **{role_name}**"),
+                ephemeral=True
+            )
+            logger.info(f"Bot admin role set to '{role_name}' in guild {interaction.guild.name}")
+        else:
+            await interaction.response.send_message(
+                embed=create_error_embed("Failed to update bot admin role."),
+                ephemeral=True
+            )
+
+
+class UserRoleModal(discord.ui.Modal, title="Set User Role"):
+    """Modal for setting the user role name."""
+
+    role_input = discord.ui.TextInput(
+        label="User Role Name",
+        placeholder="e.g., LastSeen User, Member, Verified",
+        required=True,
+        max_length=100
+    )
+
+    def __init__(self, db: DatabaseManager, guild_id: int):
+        """
+        Initialize modal.
+
+        Args:
+            db: Database manager
+            guild_id: Discord guild ID
+        """
+        super().__init__()
+        self.db = db
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        """Handle modal submission."""
+        role_name = self.role_input.value.strip()
+
+        # Validate role name
+        if not role_name:
+            await interaction.response.send_message(
+                embed=create_error_embed("Role name cannot be empty."),
+                ephemeral=True
+            )
+            return
+
+        if len(role_name) > 100:
+            await interaction.response.send_message(
+                embed=create_error_embed("Role name is too long (maximum 100 characters)."),
+                ephemeral=True
+            )
+            return
+
+        # Check if role exists in guild (warning, not error)
+        role = discord.utils.get(interaction.guild.roles, name=role_name)
+        if not role:
+            await interaction.response.send_message(
+                embed=create_error_embed(
+                    f"⚠️ Warning: Role '{role_name}' does not exist in this server.\n\n"
+                    f"The setting has been saved, but you should create this role for it to work properly."
+                ),
+                ephemeral=True
+            )
+            # Still update the database
+            self.db.set_user_role_name(self.guild_id, role_name, interaction.guild.name)
+            logger.info(f"User role set to '{role_name}' in guild {interaction.guild.name} (role doesn't exist yet)")
+            return
+
+        # Update database
+        if self.db.set_user_role_name(self.guild_id, role_name, interaction.guild.name):
+            await interaction.response.send_message(
+                embed=create_success_embed(f"User role set to **{role_name}**"),
+                ephemeral=True
+            )
+            logger.info(f"User role set to '{role_name}' in guild {interaction.guild.name}")
+        else:
+            await interaction.response.send_message(
+                embed=create_error_embed("Failed to update user role."),
+                ephemeral=True
+            )
+
+
 class AdminCog(commands.Cog):
     """Cog for admin commands."""
 
@@ -329,11 +585,15 @@ class AdminCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
         # Check permissions
-        if not has_bot_admin_role(interaction.user, self.config.bot_admin_role_name):
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
                 embed=create_error_embed(
-                    f"You need the '{self.config.bot_admin_role_name}' role or Administrator permission to use this command."
+                    f"You need the '{bot_admin_role_name}' role or Administrator permission to use this command."
                 ),
                 ephemeral=True
             )
@@ -345,6 +605,9 @@ class AdminCog(commands.Cog):
             "Use the buttons below to configure the bot settings for this server.\n\n"
             "**📢 Set Notification Channel:** Choose where member leave notifications are posted\n"
             "**📅 Set Inactive Days:** Set the threshold for /inactive command\n"
+            "**👑 Set Bot Admin Role:** Set which role can manage bot settings\n"
+            "**🔐 Toggle User Role Required:** Enable/disable role requirement for using bot commands\n"
+            "**👤 Set User Role:** Set which role can use bot commands (when required)\n"
             "**🔄 Update All Members:** Scan and update all current members in the database\n"
             "**⚙️ View Config:** View current configuration settings"
         )
@@ -363,11 +626,15 @@ class AdminCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
         # Check permissions
-        if not has_bot_admin_role(interaction.user, self.config.bot_admin_role_name):
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
                 embed=create_error_embed(
-                    f"You need the '{self.config.bot_admin_role_name}' role or Administrator permission to use this command."
+                    f"You need the '{bot_admin_role_name}' role or Administrator permission to use this command."
                 ),
                 ephemeral=True
             )
@@ -451,11 +718,15 @@ class AdminCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
+        # Get guild config for bot admin role name
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+
         # Check permissions
-        if not has_bot_admin_role(interaction.user, self.config.bot_admin_role_name):
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
                 embed=create_error_embed(
-                    f"You need the '{self.config.bot_admin_role_name}' role or Administrator permission to use this command."
+                    f"You need the '{bot_admin_role_name}' role or Administrator permission to use this command."
                 ),
                 ephemeral=True
             )
@@ -488,15 +759,26 @@ class AdminCog(commands.Cog):
             name="⚙️ Admin Commands",
             value=(
                 "**`/config`**\n"
-                "Open an interactive configuration panel with buttons to:\n"
-                "• Set the notification channel for member leave messages\n"
-                "• Configure the inactive days threshold\n"
-                "• Update all members in the database\n"
-                "• View current configuration\n\n"
+                "Interactive panel to configure:\n"
+                "• Notification channel • Inactive days threshold\n"
+                "• Bot admin role • User role permissions\n"
+                "• Member database updates\n\n"
                 "**`/health`**\n"
-                "Check the bot's health status including uptime, latency, database health, and guild-specific statistics.\n\n"
+                "Bot status: uptime, latency, database health, guild stats\n\n"
                 "**`/help`**\n"
-                "Display this help message with information about all available commands."
+                "Display this help message"
+            ),
+            inline=False
+        )
+
+        # Permissions
+        embed.add_field(
+            name="🔐 Permissions",
+            value=(
+                "**Admin Commands:** Bot Admin role or Administrator\n"
+                "**User Commands:** Configurable per guild via `/config`\n"
+                "• Can allow all users (default)\n"
+                "• Or require a specific User Role"
             ),
             inline=False
         )
@@ -505,16 +787,17 @@ class AdminCog(commands.Cog):
         embed.add_field(
             name="✨ Key Features",
             value=(
-                "• **Presence Tracking** - Records when users go offline and come back online\n"
-                "• **Member History** - Tracks all members who have ever been in the server\n"
-                "• **Rejoining Members** - Automatically updates records when users rejoin\n"
-                "• **Privacy Focused** - All data stored locally, no external services"
+                "• **Presence Tracking** - Records online/offline status\n"
+                "• **Member History** - Tracks all server members\n"
+                "• **Role-Based Access** - Configurable command permissions\n"
+                "• **Multi-Guild Support** - Isolated data per server\n"
+                "• **Privacy Focused** - Local storage only"
             ),
             inline=False
         )
 
         # Footer with helpful info
-        embed.set_footer(text=f"Bot Admin Role: {self.config.bot_admin_role_name} | Commands shown are admin-restricted")
+        embed.set_footer(text=f"Bot Admin Role: {bot_admin_role_name} | Commands shown are admin-restricted")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"User {interaction.user} viewed help in guild {interaction.guild.name}")

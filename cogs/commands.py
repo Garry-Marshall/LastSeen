@@ -12,7 +12,8 @@ from bot.utils import (
     create_embed,
     create_error_embed,
     format_timestamp,
-    chunk_list
+    chunk_list,
+    can_use_bot_commands
 )
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,18 @@ class CommandsCog(commands.Cog):
             interaction: Discord interaction
             user: Username, nickname, or user mention
         """
+        # Check permissions
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        if guild_config and not can_use_bot_commands(interaction.user, guild_config):
+            user_role_name = guild_config.get('user_role_name', 'LastSeen User')
+            await interaction.response.send_message(
+                embed=create_error_embed(
+                    f"You need the '{user_role_name}' role or Administrator permission to use this command."
+                ),
+                ephemeral=True
+            )
+            return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         guild_id = interaction.guild_id
@@ -183,6 +196,18 @@ class CommandsCog(commands.Cog):
             user: Username, nickname, or user mention
             command_name: Name of command that called this (for logging)
         """
+        # Check permissions
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        if guild_config and not can_use_bot_commands(interaction.user, guild_config):
+            user_role_name = guild_config.get('user_role_name', 'LastSeen User')
+            await interaction.response.send_message(
+                embed=create_error_embed(
+                    f"You need the '{user_role_name}' role or Administrator permission to use this command."
+                ),
+                ephemeral=True
+            )
+            return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         guild_id = interaction.guild_id
@@ -275,18 +300,28 @@ class CommandsCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
+        # Get guild config
         guild_id = interaction.guild_id
-
-        # Get guild config for inactive days threshold
         guild_config = self.db.get_guild_config(guild_id)
         if not guild_config:
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 embed=create_error_embed("Guild configuration not found. Please contact an administrator."),
                 ephemeral=True
             )
             return
+
+        # Check permissions
+        if not can_use_bot_commands(interaction.user, guild_config):
+            user_role_name = guild_config.get('user_role_name', 'Bot User')
+            await interaction.response.send_message(
+                embed=create_error_embed(
+                    f"You need the '{user_role_name}' role or Administrator permission to use this command."
+                ),
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
         inactive_days = guild_config['inactive_days']
 

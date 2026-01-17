@@ -22,13 +22,17 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
 - `/seen <user>` - Alias for `/lastseen`
 - `/inactive` - List all members inactive for more than configured days
 
-### Admin Commands (Requires "Bot Admin" role or Administrator permission)
+### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
 
 - `/config` - Open interactive configuration panel
   - Set notification channel for leave messages
   - Set inactive days threshold
+  - Set bot admin role name
+  - Configure user command permissions (toggle role requirement, set user role)
   - Update all members in database
   - View current configuration
+- `/health` - Check bot health status (uptime, latency, database, guild stats)
+- `/help` - Show bot information and available commands
 
 ## Installation
 
@@ -105,8 +109,8 @@ DB_FILE=lastseen_bot.db
 # Logging level: debug, info, warning, error (default: info)
 DEBUG_LEVEL=info
 
-# Bot admin role name (default: Bot Admin)
-BOT_ADMIN_ROLE_NAME=Bot Admin
+# Bot admin role name (default: LastSeen Admin)
+BOT_ADMIN_ROLE_NAME=LastSeen Admin
 
 # Default inactive days threshold (default: 10)
 DEFAULT_INACTIVE_DAYS=10

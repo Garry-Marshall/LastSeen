@@ -56,6 +56,9 @@ class DatabaseManager:
                     guild_name TEXT NOT NULL,
                     notification_channel_id INTEGER,
                     inactive_days INTEGER DEFAULT 10,
+                    bot_admin_role_name TEXT DEFAULT 'LastSeen Admin',
+                    user_role_required INTEGER DEFAULT 0,
+                    user_role_name TEXT DEFAULT 'LastSeen User',
                     added_at INTEGER NOT NULL
                 )
             """)
@@ -91,6 +94,22 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_members_active
                 ON members(guild_id, is_active, last_seen)
             """)
+
+            # Migration: Add new role permission columns if they don't exist
+            cursor.execute("PRAGMA table_info(guilds)")
+            columns = [row[1] for row in cursor.fetchall()]
+
+            if 'bot_admin_role_name' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN bot_admin_role_name TEXT DEFAULT 'LastSeen Admin'")
+                logger.info("Added bot_admin_role_name column to guilds table")
+
+            if 'user_role_required' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN user_role_required INTEGER DEFAULT 0")
+                logger.info("Added user_role_required column to guilds table")
+
+            if 'user_role_name' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN user_role_name TEXT DEFAULT 'LastSeen User'")
+                logger.info("Added user_role_name column to guilds table")
 
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
@@ -178,6 +197,75 @@ class DatabaseManager:
                 return True
         except Exception as e:
             logger.error(f"Failed to set inactive days for guild {guild_id}: {e}")
+            return False
+
+    def set_bot_admin_role(self, guild_id: int, role_name: str, guild_name: str = 'Unknown') -> bool:
+        """Set the bot admin role name for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Update the bot admin role name
+                cursor.execute("""
+                    UPDATE guilds
+                    SET bot_admin_role_name = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (role_name, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set bot admin role for guild {guild_id}: {e}")
+            return False
+
+    def set_user_role_required(self, guild_id: int, required: bool, guild_name: str = 'Unknown') -> bool:
+        """Set whether user role is required for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Update the user role required setting
+                cursor.execute("""
+                    UPDATE guilds
+                    SET user_role_required = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (1 if required else 0, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set user role required for guild {guild_id}: {e}")
+            return False
+
+    def set_user_role_name(self, guild_id: int, role_name: str, guild_name: str = 'Unknown') -> bool:
+        """Set the user role name for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Update the user role name
+                cursor.execute("""
+                    UPDATE guilds
+                    SET user_role_name = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (role_name, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set user role name for guild {guild_id}: {e}")
             return False
 
     def get_guild_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
