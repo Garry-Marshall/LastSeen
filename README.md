@@ -111,12 +111,6 @@ DB_FILE=lastseen_bot.db
 
 # Logging level: debug, info, warning, error (default: info)
 DEBUG_LEVEL=info
-
-# Bot admin role name (default: LastSeen Admin)
-BOT_ADMIN_ROLE_NAME=LastSeen Admin
-
-# Default inactive days threshold (default: 10)
-DEFAULT_INACTIVE_DAYS=10
 ```
 
 ### Per-Guild Configuration
