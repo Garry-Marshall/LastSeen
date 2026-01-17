@@ -49,6 +49,10 @@ def create_bot(config) -> commands.Bot:
         logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
         logger.info(f"Connected to {len(bot.guilds)} guilds")
 
+        # Enumerate all guilds
+        for guild in bot.guilds:
+            logger.info(f"  - {guild.name} (ID: {guild.id}, Members: {guild.member_count})")
+
         # Sync commands with Discord (must be done after bot is ready)
         try:
             synced = await bot.tree.sync()
