@@ -1,0 +1,8 @@
+# LastSeen Discord Bot Dependencies
+
+# Discord.py - Discord API wrapper
+Discord.py>=2.3.0
+
+# Python-dotenv - Environment variable loader
+python-dotenv>=1.0.0
+
