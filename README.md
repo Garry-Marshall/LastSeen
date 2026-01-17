@@ -41,7 +41,10 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
 ### Setup
 
 1. **Clone or download this repository**
-
+   ```bash
+   git clone https://github.com/Garry-Marshall/LastSeen
+   ```
+   
 2. **Create Virtual Environment** (recommended)
    ```bash
    python -m venv venv
@@ -62,7 +65,7 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
    - On first run, a `.env` file will be created automatically
    - Edit `.env` and add your Discord bot token:
      ```env
-     DISCORD_BOT_TOKEN=your-actual-bot-token-here
+     DISCORD_BOT_TOKEN=your-bot-token-here
      ```
 
 5. **Create Discord Bot Application**
@@ -144,25 +147,12 @@ lastseen_bot/
     └── ...
 ```
 
-## Database Schema
-
-### Guilds Table
-- `guild_id` (PRIMARY KEY) - Discord guild ID
-- `guild_name` - Guild name
-- `notification_channel_id` - Channel for leave notifications
-- `inactive_days` - Threshold for inactive command
-- `added_at` - When bot joined guild
-
-### Members Table
-- `guild_id, user_id` (COMPOSITE PRIMARY KEY) - Guild and user IDs
-- `username` - Discord username
-- `nickname` - Server nickname
-- `join_date` - When user joined guild
-- `last_seen` - Last offline timestamp (0 = currently online)
-- `is_active` - 1 = active, 0 = left server
-- `roles` - JSON array of role names
-
 ## Usage Examples
+
+### Open help dialog
+```
+/help
+```
 
 ### Check when a user was last seen
 ```
