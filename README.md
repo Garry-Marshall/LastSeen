@@ -186,7 +186,6 @@ User E: No roles → ❌ Not tracked
 lastseen_bot/
 ├── main.py                 # Entry point
 ├── .env                    # Configuration (created on first run)
-├── .env.template           # Configuration template
 ├── requirements.txt        # Python dependencies
 ├── bot/
 │   ├── __init__.py
