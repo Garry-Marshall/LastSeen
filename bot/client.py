@@ -24,7 +24,7 @@ def create_bot(config) -> commands.Bot:
     intents = discord.Intents.default()
     intents.members = True  # Required for member events
     intents.presences = True  # Required for presence tracking
-    # Note: message_content NOT needed for slash commands
+    intents.message_content = True  # Required for reading message content
 
     # Create bot instance
     bot = commands.Bot(

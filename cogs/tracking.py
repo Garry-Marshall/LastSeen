@@ -267,6 +267,35 @@ class TrackingCog(commands.Cog):
             self.db.update_member_roles(guild_id, user_id, roles)
 
     @commands.Cog.listener()
+    async def on_user_update(self, before: discord.User, after: discord.User):
+        """
+        Called when a user's global profile is updated.
+        Tracks global username changes across all guilds.
+
+        Args:
+            before: User state before update
+            after: User state after update
+        """
+        if after.bot:
+            return
+
+        # Check for username change
+        if str(before) != str(after):
+            logger.info(f"Global username changed: {before} -> {after}")
+
+            # Update username in all guilds where this user is a member
+            for guild in self.bot.guilds:
+                member = guild.get_member(after.id)
+                if member:
+                    guild_id = guild.id
+                    user_id = after.id
+
+                    # Update username in database
+                    if self.db.member_exists(guild_id, user_id):
+                        self.db.update_member_username(guild_id, user_id, str(after))
+                        logger.debug(f"Updated username for {after} in guild {guild.name}")
+
+    @commands.Cog.listener()
     async def on_presence_update(self, before: discord.Member, after: discord.Member):
         """
         Called when a member's presence changes.
