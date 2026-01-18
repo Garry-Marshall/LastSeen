@@ -2,6 +2,10 @@
 
 A modular Discord bot for monitoring and tracking user activity across guilds. Tracks user joins, leaves, nickname changes, role updates, and presence status.
 
+
+ - Invite LastSeen into your Discord Server: [Invite Bot](https://discord.com/oauth2/authorize?client_id=1068871708322320445) 
+ - Get support in our Community Discord Server: [Get Support](https://discord.gg/d3N5sd58fh)
+
 ## Features
 
 - **Multi-Guild Support**: Works across multiple Discord servers simultaneously
