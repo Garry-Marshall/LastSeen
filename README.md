@@ -117,6 +117,10 @@ DB_FILE=lastseen_bot.db
 
 # Logging level: debug, info, warning, error (default: info)
 DEBUG_LEVEL=info
+
+# Log retention: Number of days to keep log files (default: 5)
+# Older logs are automatically deleted on bot startup
+DEBUG_LOGS_DAYS_TO_KEEP=5
 ```
 
 ### Per-Guild Configuration
@@ -285,6 +289,7 @@ Logs are stored in the `logs/` directory with daily rotation:
 - Filename format: `YYYY-MM-DD.log`
 - Log levels: debug, info, warning, error
 - Configure via `DEBUG_LEVEL` in `.env`
+- Automatic cleanup: Logs older than `DEBUG_LOGS_DAYS_TO_KEEP` days are automatically deleted on bot startup (default: 5 days)
 
 ## Troubleshooting
 

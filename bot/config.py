@@ -54,10 +54,18 @@ class Config:
             self.default_inactive_days = 10
             logger.warning("Invalid DEFAULT_INACTIVE_DAYS, using 10")
 
+        # Load log retention settings
+        try:
+            self.logs_days_to_keep = int(os.getenv('DEBUG_LOGS_DAYS_TO_KEEP', '5'))
+        except ValueError:
+            self.logs_days_to_keep = 5
+            logger.warning("Invalid DEBUG_LOGS_DAYS_TO_KEEP, using 5")
+
         logger.info("Configuration loaded successfully")
         logger.info(f"Database file: {self.db_file}")
         logger.info(f"Log level: {logging.getLevelName(self.log_level)}")
         logger.info(f"Bot admin role: {self.bot_admin_role_name}")
+        logger.info(f"Log retention: {self.logs_days_to_keep} days")
 
     def _create_default_env(self):
         """Create a default .env file from template if it doesn't exist."""
@@ -80,6 +88,7 @@ DB_FILE=lastseen_bot.db
 
 # Logging and Debug Settings
 DEBUG_LEVEL=info  # options: info, debug, warning, error
+DEBUG_LOGS_DAYS_TO_KEEP=5  # number of days to keep log files (older logs are deleted)
 
 """
                 self.env_path.write_text(default_content)
@@ -93,10 +102,46 @@ DEBUG_LEVEL=info  # options: info, debug, warning, error
         """Get the logs folder path."""
         return Path('logs')
 
+    def cleanup_old_logs(self):
+        """Delete log files older than the configured retention period."""
+        from datetime import datetime, timedelta
+
+        if not self.log_folder.exists():
+            return
+
+        try:
+            cutoff_date = datetime.now() - timedelta(days=self.logs_days_to_keep)
+            deleted_count = 0
+
+            for log_file in self.log_folder.glob('*.log'):
+                try:
+                    # Parse date from filename (YYYY-MM-DD.log)
+                    file_date_str = log_file.stem  # Gets filename without extension
+                    file_date = datetime.strptime(file_date_str, '%Y-%m-%d')
+
+                    # Delete if older than retention period
+                    if file_date < cutoff_date:
+                        log_file.unlink()
+                        deleted_count += 1
+                        logger.info(f"Deleted old log file: {log_file.name}")
+                except ValueError:
+                    # Skip files that don't match date format
+                    logger.debug(f"Skipping non-date log file: {log_file.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete log file {log_file.name}: {e}")
+
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} old log file(s)")
+        except Exception as e:
+            logger.error(f"Error during log cleanup: {e}")
+
     def setup_logging(self):
         """Configure logging for the bot."""
         # Create logs directory if it doesn't exist
         self.log_folder.mkdir(exist_ok=True)
+
+        # Cleanup old log files
+        self.cleanup_old_logs()
 
         # Get current date for log file name
         from datetime import datetime
