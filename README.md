@@ -25,6 +25,7 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
 - `/seen <user>` - Alias for `/lastseen`
 - `/inactive` - List all members inactive for more than configured days
 - `/server-stats` - View detailed server activity statistics with visual charts
+- `/about` - Show bot information
 
 ### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
 
@@ -39,7 +40,6 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
   - View current configuration
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
 - `/help` - Show available commands
-- `/about` - Show bot information
 
 ## Installation
 
