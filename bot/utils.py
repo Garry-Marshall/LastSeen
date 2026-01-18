@@ -179,6 +179,35 @@ def can_use_bot_commands(member: discord.Member, guild_config: dict) -> bool:
     return discord.utils.get(member.roles, name=user_role_name) is not None
 
 
+def is_channel_allowed(channel_id: int, guild_config: dict) -> bool:
+    """
+    Check if a channel is allowed for bot commands based on guild configuration.
+
+    Args:
+        channel_id: Discord channel ID
+        guild_config: Guild configuration from database
+
+    Returns:
+        True if channel is allowed for commands
+    """
+    import json
+
+    # Check if allowed_channels is configured
+    allowed_channels_json = guild_config.get('allowed_channels')
+    if not allowed_channels_json:
+        return True  # If no channel filter, allow all channels
+
+    try:
+        allowed_channels = json.loads(allowed_channels_json)
+        if not allowed_channels:
+            return True  # Empty list means all channels allowed
+
+        # Check if current channel is in allowed list
+        return channel_id in allowed_channels
+    except:
+        return True  # If error parsing, default to allowing
+
+
 def chunk_list(items: list, chunk_size: int) -> list[list]:
     """
     Split a list into chunks of specified size.

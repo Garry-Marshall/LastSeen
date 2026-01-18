@@ -28,6 +28,43 @@ class TrackingCog(commands.Cog):
         self.db = db
         self.config = config
 
+    def _should_track_member(self, member: discord.Member) -> bool:
+        """
+        Check if a member should be tracked based on guild configuration.
+
+        Args:
+            member: Discord member to check
+
+        Returns:
+            bool: True if member should be tracked, False otherwise
+        """
+        import json
+
+        # Get guild config
+        guild_config = self.db.get_guild_config(member.guild.id)
+        if not guild_config:
+            return True  # If no config, track all members
+
+        # Check if track_only_roles is configured
+        track_only_roles_json = guild_config.get('track_only_roles')
+        if not track_only_roles_json:
+            return True  # If no role filter, track all members
+
+        try:
+            track_only_roles = json.loads(track_only_roles_json)
+            if not track_only_roles:
+                return True  # Empty list means track all
+
+            # Check if member has any of the required roles
+            member_role_names = [role.name for role in member.roles]
+            for required_role in track_only_roles:
+                if required_role in member_role_names:
+                    return True
+
+            return False  # Member doesn't have any required roles
+        except:
+            return True  # If error parsing, default to tracking
+
     def _ensure_member_exists(self, member: discord.Member) -> bool:
         """
         Ensure a member exists in the database, adding them if not.
@@ -38,6 +75,10 @@ class TrackingCog(commands.Cog):
         Returns:
             bool: True if member was added, False if already existed
         """
+        # Check if member should be tracked based on role filter
+        if not self._should_track_member(member):
+            return False
+
         guild_id = member.guild.id
         user_id = member.id
 
@@ -317,7 +358,7 @@ class TrackingCog(commands.Cog):
         # Track status changes
         if before.status != after.status:
             # Log status change to console
-            print(f"{after} ({after.guild.name}) changed status from {before.status} to {after.status}")
+            print(f"{after} changed status from {before.status} to {after.status}")
 
             if after.status == discord.Status.offline:
                 # User went offline - record timestamp

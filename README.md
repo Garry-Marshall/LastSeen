@@ -7,6 +7,9 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
 - **Multi-Guild Support**: Works across multiple Discord servers simultaneously
 - **User Tracking**: Monitors joins, leaves, nickname changes, and role updates
 - **Presence Monitoring**: Tracks when users go offline/online
+- **Activity Statistics**: Detailed server activity metrics with visual charts
+- **Role-Based Visibility**: Optionally track only members with specific roles
+- **Channel Restrictions**: Limit bot commands to specific channels
 - **Database Storage**: SQLite database with proper connection management
 - **Slash Commands**: Modern Discord slash command interface
 - **Admin Panel**: Interactive configuration with buttons and modals
@@ -21,6 +24,7 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
 - `/lastseen <user>` - Check when a user was last seen online
 - `/seen <user>` - Alias for `/lastseen`
 - `/inactive` - List all members inactive for more than configured days
+- `/server-stats` - View detailed server activity statistics with visual charts
 
 ### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
 
@@ -29,6 +33,8 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
   - Set inactive days threshold
   - Set bot admin role name
   - Configure user command permissions (toggle role requirement, set user role)
+  - **Set track only roles** - Only track members with specific roles (optional)
+  - **Set allowed channels** - Restrict bot commands to specific channels (optional)
   - Update all members in database
   - View current configuration
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
@@ -118,6 +124,11 @@ DEBUG_LEVEL=info
 Use `/config` command in your Discord server to set:
 - **Notification Channel**: Where member leave messages are posted
 - **Inactive Days**: Threshold for `/inactive` command
+- **Bot Admin Role**: Which role can manage bot settings (default: "LastSeen Admin")
+- **User Role Required**: Toggle whether a specific role is required to use bot commands
+- **User Role Name**: The role required to use bot commands (when enabled)
+- **Track Only Roles**: Optional - Only track members with specific roles (leave empty for all)
+- **Allowed Channels**: Optional - Restrict bot commands to specific channels (leave empty for all)
 
 ## Project Structure
 
@@ -171,6 +182,16 @@ lastseen_bot/
 ```
 Shows all members inactive for more than the configured threshold.
 
+### View server activity statistics
+```
+/server-stats
+```
+Displays comprehensive server activity metrics including:
+- Current online/offline counts
+- Activity breakdown by time period (last hour, 24h, 7d, 30d, 30d+)
+- Activity percentages and engagement rates
+- Visual ASCII chart of activity distribution
+
 ### Configure the bot (Admin only)
 ```
 /config
@@ -184,8 +205,26 @@ Opens an interactive panel with buttons for configuration.
 - When a user comes **online**, `last_seen` is set to 0 (indicating current activity)
 - This allows accurate "last seen" tracking while showing online users as "Currently online"
 
+### Activity Statistics
+- View comprehensive server activity metrics with `/server-stats`
+- See online/offline distribution across different time periods
+- Visual ASCII charts showing activity breakdown
+- Track engagement rates and recent activity percentages
+
+### Role-Based Visibility
+- Optionally configure specific roles to track (via `/config`)
+- Only members with designated roles will have their activity monitored
+- Useful for tracking specific member groups (e.g., "Verified", "Member")
+- Leave empty to track all members (default behavior)
+
+### Channel Restrictions
+- Limit bot commands to specific channels for better server organization
+- Configure via `/config` with channel names or IDs
+- Helps prevent command spam in general chat
+- Leave empty to allow commands in all channels (default)
+
 ### Multi-Guild Support
-- Each guild has its own configuration (notification channel, inactive days)
+- Each guild has its own configuration (notification channel, inactive days, role/channel filters)
 - User data is tracked separately per guild
 - Same user in multiple guilds = separate records for privacy
 

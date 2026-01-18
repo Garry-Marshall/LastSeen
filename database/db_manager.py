@@ -111,6 +111,14 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE guilds ADD COLUMN user_role_name TEXT DEFAULT 'LastSeen User'")
                 logger.info("Added user_role_name column to guilds table")
 
+            if 'track_only_roles' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN track_only_roles TEXT")
+                logger.info("Added track_only_roles column to guilds table")
+
+            if 'allowed_channels' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN allowed_channels TEXT")
+                logger.info("Added allowed_channels column to guilds table")
+
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
 
@@ -266,6 +274,54 @@ class DatabaseManager:
                 return True
         except Exception as e:
             logger.error(f"Failed to set user role name for guild {guild_id}: {e}")
+            return False
+
+    def set_track_only_roles(self, guild_id: int, role_names: List[str], guild_name: str = 'Unknown') -> bool:
+        """Set which roles should be tracked (empty list = track all)."""
+        try:
+            roles_json = json.dumps(role_names) if role_names else None
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Update the track only roles
+                cursor.execute("""
+                    UPDATE guilds
+                    SET track_only_roles = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (roles_json, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set track only roles for guild {guild_id}: {e}")
+            return False
+
+    def set_allowed_channels(self, guild_id: int, channel_ids: List[int], guild_name: str = 'Unknown') -> bool:
+        """Set which channels can use bot commands (empty list = all channels)."""
+        try:
+            channels_json = json.dumps(channel_ids) if channel_ids else None
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Update the allowed channels
+                cursor.execute("""
+                    UPDATE guilds
+                    SET allowed_channels = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (channels_json, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set allowed channels for guild {guild_id}: {e}")
             return False
 
     def get_guild_config(self, guild_id: int) -> Optional[Dict[str, Any]]:
@@ -629,5 +685,103 @@ class DatabaseManager:
 
         except Exception as e:
             logger.error(f"Failed to get guild stats for {guild_id}: {e}")
+
+        return stats
+
+    def get_activity_stats(self, guild_id: int) -> Dict[str, Any]:
+        """
+        Get detailed activity statistics for server-stats command.
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            Dict with activity statistics including online counts, offline periods, etc.
+        """
+        stats = {
+            'currently_online': 0,
+            'currently_offline': 0,
+            'never_seen_offline': 0,
+            'offline_1h': 0,
+            'offline_24h': 0,
+            'offline_7d': 0,
+            'offline_30d': 0,
+            'offline_30d_plus': 0
+        }
+
+        try:
+            current_time = int(datetime.now(timezone.utc).timestamp())
+            hour_ago = current_time - 3600
+            day_ago = current_time - 86400
+            week_ago = current_time - (7 * 86400)
+            month_ago = current_time - (30 * 86400)
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Currently online (last_seen = 0)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1 AND last_seen = 0
+                """, (guild_id,))
+                result = cursor.fetchone()
+                stats['currently_online'] = result[0] if result else 0
+
+                # Never seen offline (last_seen = 0, but could be online now)
+                # This is same as currently_online
+                stats['never_seen_offline'] = stats['currently_online']
+
+                # Offline within last hour
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                    AND last_seen > 0 AND last_seen >= ?
+                """, (guild_id, hour_ago))
+                result = cursor.fetchone()
+                stats['offline_1h'] = result[0] if result else 0
+
+                # Offline within last 24 hours
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                    AND last_seen > 0 AND last_seen >= ?
+                """, (guild_id, day_ago))
+                result = cursor.fetchone()
+                stats['offline_24h'] = result[0] if result else 0
+
+                # Offline within last 7 days
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                    AND last_seen > 0 AND last_seen >= ?
+                """, (guild_id, week_ago))
+                result = cursor.fetchone()
+                stats['offline_7d'] = result[0] if result else 0
+
+                # Offline within last 30 days
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                    AND last_seen > 0 AND last_seen >= ?
+                """, (guild_id, month_ago))
+                result = cursor.fetchone()
+                stats['offline_30d'] = result[0] if result else 0
+
+                # Offline more than 30 days
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                    AND last_seen > 0 AND last_seen < ?
+                """, (guild_id, month_ago))
+                result = cursor.fetchone()
+                stats['offline_30d_plus'] = result[0] if result else 0
+
+                # Total currently offline
+                stats['currently_offline'] = (stats['offline_1h'] + stats['offline_24h'] +
+                                             stats['offline_7d'] + stats['offline_30d'] +
+                                             stats['offline_30d_plus'])
+
+        except Exception as e:
+            logger.error(f"Failed to get activity stats for {guild_id}: {e}")
 
         return stats

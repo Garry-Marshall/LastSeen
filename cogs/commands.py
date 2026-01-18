@@ -13,7 +13,8 @@ from bot.utils import (
     create_error_embed,
     format_timestamp,
     chunk_list,
-    can_use_bot_commands
+    can_use_bot_commands,
+    is_channel_allowed
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,35 @@ class CommandsCog(commands.Cog):
         self.db = db
         self.config = config
 
+    async def _check_permissions(self, interaction: discord.Interaction) -> tuple[bool, discord.Embed | None]:
+        """
+        Check if user has permission to use commands in this channel.
+
+        Args:
+            interaction: Discord interaction
+
+        Returns:
+            Tuple of (can_proceed, error_embed)
+        """
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+
+        # Check role permissions
+        if guild_config and not can_use_bot_commands(interaction.user, guild_config):
+            user_role_name = guild_config.get('user_role_name', 'LastSeen User')
+            error = create_error_embed(
+                f"You need the '{user_role_name}' role or Administrator permission to use this command."
+            )
+            return False, error
+
+        # Check channel permissions
+        if guild_config and not is_channel_allowed(interaction.channel_id, guild_config):
+            error = create_error_embed(
+                "Bot commands are not allowed in this channel. Please use an allowed channel."
+            )
+            return False, error
+
+        return True, None
+
     @app_commands.command(name="whois", description="Get information about a user")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
@@ -108,15 +138,9 @@ class CommandsCog(commands.Cog):
             user: Username, nickname, or user mention
         """
         # Check permissions
-        guild_config = self.db.get_guild_config(interaction.guild_id)
-        if guild_config and not can_use_bot_commands(interaction.user, guild_config):
-            user_role_name = guild_config.get('user_role_name', 'LastSeen User')
-            await interaction.response.send_message(
-                embed=create_error_embed(
-                    f"You need the '{user_role_name}' role or Administrator permission to use this command."
-                ),
-                ephemeral=True
-            )
+        can_proceed, error_embed = await self._check_permissions(interaction)
+        if not can_proceed:
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -197,15 +221,9 @@ class CommandsCog(commands.Cog):
             command_name: Name of command that called this (for logging)
         """
         # Check permissions
-        guild_config = self.db.get_guild_config(interaction.guild_id)
-        if guild_config and not can_use_bot_commands(interaction.user, guild_config):
-            user_role_name = guild_config.get('user_role_name', 'LastSeen User')
-            await interaction.response.send_message(
-                embed=create_error_embed(
-                    f"You need the '{user_role_name}' role or Administrator permission to use this command."
-                ),
-                ephemeral=True
-            )
+        can_proceed, error_embed = await self._check_permissions(interaction)
+        if not can_proceed:
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -300,23 +318,18 @@ class CommandsCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
+        # Check permissions
+        can_proceed, error_embed = await self._check_permissions(interaction)
+        if not can_proceed:
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
         # Get guild config
         guild_id = interaction.guild_id
         guild_config = self.db.get_guild_config(guild_id)
         if not guild_config:
             await interaction.response.send_message(
                 embed=create_error_embed("Guild configuration not found. Please contact an administrator."),
-                ephemeral=True
-            )
-            return
-
-        # Check permissions
-        if not can_use_bot_commands(interaction.user, guild_config):
-            user_role_name = guild_config.get('user_role_name', 'Bot User')
-            await interaction.response.send_message(
-                embed=create_error_embed(
-                    f"You need the '{user_role_name}' role or Administrator permission to use this command."
-                ),
                 ephemeral=True
             )
             return
