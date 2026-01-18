@@ -317,7 +317,7 @@ class TrackingCog(commands.Cog):
         # Track status changes
         if before.status != after.status:
             # Log status change to console
-            print(f"{after} changed status from {before.status} to {after.status}")
+            print(f"{after} ({after.guild.name}) changed status from {before.status} to {after.status}")
 
             if after.status == discord.Status.offline:
                 # User went offline - record timestamp
