@@ -399,8 +399,8 @@ class CommandsCog(commands.Cog):
         )
 
         embed.add_field(
-            name="🔗 Source Code",
-            value="[View on GitHub](https://github.com/Garry-Marshall/LastSeen)",
+            name="🔗 Need Help / Have Suggestions?",
+            value="[Join Our Community Server](https://discord.gg/d3N5sd58fh)",
             inline=False
         )
 
