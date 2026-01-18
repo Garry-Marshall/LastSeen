@@ -375,6 +375,38 @@ class CommandsCog(commands.Cog):
         logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name}")
         logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")
 
+    @app_commands.command(name="about", description="About this bot")
+    async def about(self, interaction: discord.Interaction):
+        embed = create_embed("📊 LastSeen", discord.Color.green())
+
+        embed.description = (
+            "**LastSeen** is a modular Discord bot for monitoring and tracking user activity "
+            "across guilds.\n\n"
+            "It tracks:\n"
+            "• User joins and leaves\n"
+            "• Nickname changes\n"
+            "• Role updates\n"
+            "• Presence and activity status\n\n"
+            "Designed for server moderators who want clear insight into member activity "
+            "without unnecessary noise."
+        )
+
+        embed.add_field(
+            name="🔐 Privacy",
+            value="This bot does **not** store or read message content. "
+                "Only metadata required for activity tracking is recorded.",
+            inline=False
+        )
+
+        embed.add_field(
+            name="🔗 Source Code",
+            value="[View on GitHub](https://github.com/Garry-Marshall/LastSeen)",
+            inline=False
+        )
+
+        embed.set_footer(text="Use /help to see available commands")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 async def setup(bot: commands.Bot):
     """
