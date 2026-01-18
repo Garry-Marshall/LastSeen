@@ -38,7 +38,8 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
   - Update all members in database
   - View current configuration
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
-- `/help` - Show bot information and available commands
+- `/help` - Show available commands
+- `/about` - Show bot information
 
 ## Installation
 
