@@ -214,20 +214,6 @@ lastseen_bot/
     └── ...
 ```
 
-### Admin Cog Structure
-
-The admin functionality is organized into feature-based modules for better maintainability:
-
-- **`admin_cog.py`** (331 lines) - Main cog with `/config`, `/health`, `/server-stats`, `/help` commands
-- **`config_view.py`** (227 lines) - Interactive button-based configuration interface
-- **`permissions.py`** (63 lines) - Centralized permission checking to eliminate code duplication
-- **`channel_config.py`** (150 lines) - Modals for notification channel and inactive days settings
-- **`role_config.py`** (227 lines) - Modals for bot admin role, user role, and track-only roles
-- **`channel_filter.py`** (110 lines) - Modal for restricting commands to specific channels
-- **`member_mgmt.py`** (78 lines) - Database synchronization logic for member updates
-
-This modular structure reduces the admin cog from a single 1,170-line file to 8 focused modules, making the code easier to navigate, test, and maintain.
-
 ## Usage Examples
 
 ### Open help dialog
