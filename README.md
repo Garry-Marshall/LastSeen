@@ -197,7 +197,15 @@ lastseen_bot/
 │   ├── __init__.py
 │   ├── tracking.py        # Event listeners (join/leave/update)
 │   ├── commands.py        # User commands (whois/lastseen/inactive)
-│   └── admin.py           # Admin commands (/config)
+│   └── admin/             # Admin cog (modular structure)
+│       ├── __init__.py            # Package setup & exports
+│       ├── admin_cog.py           # Admin slash commands
+│       ├── config_view.py         # Interactive config UI
+│       ├── permissions.py         # Permission checking utilities
+│       ├── channel_config.py      # Channel & timing modals
+│       ├── role_config.py         # Role-based access modals
+│       ├── channel_filter.py      # Channel restriction modal
+│       └── member_mgmt.py         # Member sync logic
 ├── database/
 │   ├── __init__.py
 │   └── db_manager.py      # Database connection & schema
@@ -205,6 +213,20 @@ lastseen_bot/
     ├── 2024-01-17.log
     └── ...
 ```
+
+### Admin Cog Structure
+
+The admin functionality is organized into feature-based modules for better maintainability:
+
+- **`admin_cog.py`** (331 lines) - Main cog with `/config`, `/health`, `/server-stats`, `/help` commands
+- **`config_view.py`** (227 lines) - Interactive button-based configuration interface
+- **`permissions.py`** (63 lines) - Centralized permission checking to eliminate code duplication
+- **`channel_config.py`** (150 lines) - Modals for notification channel and inactive days settings
+- **`role_config.py`** (227 lines) - Modals for bot admin role, user role, and track-only roles
+- **`channel_filter.py`** (110 lines) - Modal for restricting commands to specific channels
+- **`member_mgmt.py`** (78 lines) - Database synchronization logic for member updates
+
+This modular structure reduces the admin cog from a single 1,170-line file to 8 focused modules, making the code easier to navigate, test, and maintain.
 
 ## Usage Examples
 
