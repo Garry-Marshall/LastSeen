@@ -121,14 +121,60 @@ DEBUG_LEVEL=info
 
 ### Per-Guild Configuration
 
-Use `/config` command in your Discord server to set:
+Use `/config` command in your Discord server to configure:
+
+#### Basic Settings
 - **Notification Channel**: Where member leave messages are posted
-- **Inactive Days**: Threshold for `/inactive` command
+- **Inactive Days**: Threshold for `/inactive` command (default: 10 days)
 - **Bot Admin Role**: Which role can manage bot settings (default: "LastSeen Admin")
+
+#### Command Access Control
 - **User Role Required**: Toggle whether a specific role is required to use bot commands
 - **User Role Name**: The role required to use bot commands (when enabled)
-- **Track Only Roles**: Optional - Only track members with specific roles (leave empty for all)
-- **Allowed Channels**: Optional - Restrict bot commands to specific channels (leave empty for all)
+- **Allowed Channels**: Restrict bot commands to specific channels (optional)
+
+#### Tracking Filter (Advanced)
+- **Track Only Roles**: Only track members with specific roles (optional)
+
+##### How Track Only Roles Works
+
+**Overview:**
+When you configure specific roles to track, the bot will **only monitor and store activity data** for members who have at least one of those designated roles. Members without any of the specified roles will be completely ignored by the tracking system.
+
+**Configuration:**
+- Via `/config` command → Click "🎯 Set Track Only Roles"
+- Enter comma-separated role names: `Member, Verified, VIP`
+- Leave empty to track all members (default behavior)
+
+**What Gets Tracked:**
+- **When roles ARE configured:**
+  - ✅ Members WITH the specified roles → Fully tracked
+  - ❌ Members WITHOUT any specified roles → Not tracked
+- **When NO roles configured (empty):**
+  - ✅ All members → Fully tracked (default)
+
+**Example:**
+```
+Config: Track only "Member" and "Verified" roles
+
+User A: Has "Member" role → ✅ Tracked
+User B: Has "Verified" role → ✅ Tracked
+User C: Has both roles → ✅ Tracked
+User D: Has "Guest" only → ❌ Not tracked
+User E: No roles → ❌ Not tracked
+```
+
+**Use Cases:**
+- Large servers: Only track verified/active members, ignore guests
+- Private communities: Only track "Member" role, ignore bots and visitors
+- Gaming clans: Only track "Clan Member" role, ignore casual visitors
+- Resource optimization: Reduce database size by ignoring inactive/unverified users
+
+**Important Notes:**
+- Role names are **case-sensitive** and must match exactly as they appear in Discord
+- If a member gains a required role, tracking starts automatically
+- If a member loses all required roles, tracking stops
+- Existing database records remain but stop receiving updates
 
 ## Project Structure
 
