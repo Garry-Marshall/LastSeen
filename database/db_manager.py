@@ -785,3 +785,31 @@ class DatabaseManager:
             logger.error(f"Failed to get activity stats for {guild_id}: {e}")
 
         return stats
+
+    def remove_guild_data(self, guild_id: int) -> bool:
+        """
+        Completely remove a guild and all its associated members from the database.
+        
+        Args:
+            guild_id: Discord guild ID to remove
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Delete all members associated with this guild
+                cursor.execute("DELETE FROM members WHERE guild_id = ?", (guild_id,))
+                members_deleted = cursor.rowcount
+                
+                # Delete the guild configuration/entry
+                cursor.execute("DELETE FROM guilds WHERE guild_id = ?", (guild_id,))
+                guild_deleted = cursor.rowcount
+                
+                logger.info(f"Removed guild {guild_id} from database. Deleted {members_deleted} member records.")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to remove guild data for {guild_id}: {e}")
+            return False

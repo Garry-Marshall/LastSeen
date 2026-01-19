@@ -157,14 +157,20 @@ class TrackingCog(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
         """
-        Called when the bot leaves a guild.
-
+        Called when the bot leaves a guild or the guild is deleted.
+        Removes all guild-related data from the database.
+        
         Args:
-            guild: The guild that was left
+            guild: The guild that was removed
         """
-        logger.info(f"Left guild: {guild.name} (ID: {guild.id})")
-        # Note: We don't delete guild data - keep historical records
-        # Guild admins can request data deletion if needed
+        logger.info(f"Bot left guild: {guild.name} ({guild.id}). Cleaning up database...")
+        
+        success = self.db.remove_guild_data(guild.id)
+        
+        if success:
+            logger.info(f"Successfully wiped data for guild {guild.id}")
+        else:
+            logger.error(f"Failed to wipe data for guild {guild.id} during on_guild_remove")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):

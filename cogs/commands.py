@@ -313,20 +313,31 @@ class CommandsCog(commands.Cog):
         await self._lastseen_impl(interaction, user, "seen")
 
     @app_commands.command(name="inactive", description="List members who have been inactive")
+    @app_commands.describe(days="Optional: Override the configured inactive days threshold (1-365)")
     @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
-    async def inactive(self, interaction: discord.Interaction):
+    async def inactive(self, interaction: discord.Interaction, days: int = None):
         """
         List all members who have been inactive for longer than the configured threshold.
 
         Args:
             interaction: Discord interaction
+            days: Optional override for inactive days threshold
         """
         # Check permissions
         can_proceed, error_embed = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
+
+        # Validate days input if provided
+        if days is not None:
+            if not (1 <= days <= 365):
+                await interaction.response.send_message(
+                    embed=create_error_embed("Please provide a value between 1 and 365 days."),
+                    ephemeral=True
+                )
+                return
 
         # Get guild config
         guild_id = interaction.guild_id
@@ -340,7 +351,8 @@ class CommandsCog(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-        inactive_days = guild_config['inactive_days']
+        # Use provided days or fall back to config
+        inactive_days = days if days is not None else guild_config['inactive_days']
 
         # Get inactive members
         inactive_members = self.db.get_inactive_members(guild_id, inactive_days)
@@ -376,7 +388,7 @@ class CommandsCog(commands.Cog):
         view = PaginationView(embeds)
         await interaction.followup.send(embed=embeds[0], view=view, ephemeral=True)
 
-        logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name}")
+        logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name} with threshold {inactive_days}")
         logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")
 
     @app_commands.command(name="about", description="About this bot")
@@ -384,7 +396,7 @@ class CommandsCog(commands.Cog):
         embed = create_embed("📊 LastSeen", discord.Color.green())
 
         embed.description = (
-            "**LastSeen** is a modular Discord bot for monitoring and tracking user activity "
+            "**LastSeen** is a Discord bot for monitoring and tracking user activity "
             "across guilds.\n\n"
             "It tracks:\n"
             "• User joins and leaves\n"
