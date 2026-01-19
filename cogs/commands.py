@@ -129,6 +129,7 @@ class CommandsCog(commands.Cog):
     @app_commands.command(name="whois", description="Get information about a user")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
     async def whois(self, interaction: discord.Interaction, user: str):
         """
         Display information about a user.
@@ -286,6 +287,7 @@ class CommandsCog(commands.Cog):
     @app_commands.command(name="lastseen", description="Check when a user was last seen online")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
     async def lastseen(self, interaction: discord.Interaction, user: str):
         """
         Display when a user was last seen online.
@@ -299,6 +301,7 @@ class CommandsCog(commands.Cog):
     @app_commands.command(name="seen", description="Alias for /lastseen - Check when a user was last seen")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
     async def seen(self, interaction: discord.Interaction, user: str):
         """
         Alias for lastseen command.
@@ -311,6 +314,7 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="inactive", description="List members who have been inactive")
     @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
     async def inactive(self, interaction: discord.Interaction):
         """
         List all members who have been inactive for longer than the configured threshold.

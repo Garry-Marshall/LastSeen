@@ -31,6 +31,7 @@ class AdminCog(commands.Cog):
         self.config = config
 
     @app_commands.command(name="config", description="Configure bot settings (Admin only)")
+    @app_commands.guild_only()
     async def config(self, interaction: discord.Interaction):
         """
         Display bot configuration interface.
@@ -63,6 +64,7 @@ class AdminCog(commands.Cog):
         logger.info(f"User {interaction.user} opened config panel in guild {interaction.guild.name}")
 
     @app_commands.command(name="health", description="Check bot health status (Admin only)")
+    @app_commands.guild_only()
     async def health(self, interaction: discord.Interaction):
         """
         Display bot health and status information.
@@ -70,6 +72,7 @@ class AdminCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
+
         if not await check_admin_permission(interaction, self.db):
             return
 
@@ -144,6 +147,7 @@ class AdminCog(commands.Cog):
         logger.info(f"User {interaction.user} checked health status in guild {interaction.guild.name}")
 
     @app_commands.command(name="server-stats", description="View server activity statistics")
+    @app_commands.guild_only()
     async def server_stats(self, interaction: discord.Interaction):
         """
         Display server activity statistics and metrics.
@@ -152,6 +156,13 @@ class AdminCog(commands.Cog):
             interaction: Discord interaction
         """
         await interaction.response.defer(ephemeral=True, thinking=True)
+
+        if interaction.guild is None:
+            await interaction.followup.send(
+                "❌ This command can only be used inside a server.",
+                ephemeral=True
+            )
+            return
 
         try:
             # Get activity statistics
@@ -262,6 +273,7 @@ class AdminCog(commands.Cog):
             )
 
     @app_commands.command(name="help", description="Show bot information and available commands (Admin only)")
+    @app_commands.guild_only()
     async def help(self, interaction: discord.Interaction):
         """
         Display bot information and list of all available commands.
