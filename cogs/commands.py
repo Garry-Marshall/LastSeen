@@ -97,7 +97,7 @@ class CommandsCog(commands.Cog):
         self.db = db
         self.config = config
 
-    async def _check_permissions(self, interaction: discord.Interaction) -> tuple[bool, discord.Embed | None]:
+    async def _check_permissions(self, interaction: discord.Interaction) -> tuple[bool, discord.Embed | None, bool]:
         """
         Check if user has permission to use commands in this channel.
 
@@ -105,9 +105,11 @@ class CommandsCog(commands.Cog):
             interaction: Discord interaction
 
         Returns:
-            Tuple of (can_proceed, error_embed)
+            Tuple of (can_proceed, error_embed, channels_restricted)
+            channels_restricted: True if allowed_channels is configured (means output should not be ephemeral)
         """
         guild_config = self.db.get_guild_config(interaction.guild_id)
+        channels_restricted = False
 
         # Check role permissions
         if guild_config and not can_use_bot_commands(interaction.user, guild_config):
@@ -115,16 +117,19 @@ class CommandsCog(commands.Cog):
             error = create_error_embed(
                 f"You need the '{user_role_name}' role or Administrator permission to use this command."
             )
-            return False, error
+            return False, error, channels_restricted
 
-        # Check channel permissions
-        if guild_config and not is_channel_allowed(interaction.channel_id, guild_config):
-            error = create_error_embed(
-                "Bot commands are not allowed in this channel. Please use an allowed channel."
-            )
-            return False, error
+        # Check channel permissions and determine if channels are restricted
+        if guild_config:
+            allowed_channels_json = guild_config.get('allowed_channels')
+            channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
+            if not is_channel_allowed(interaction.channel_id, guild_config):
+                error = create_error_embed(
+                    "Bot commands are not allowed in this channel. Please use an allowed channel."
+                )
+                return False, error, channels_restricted
 
-        return True, None
+        return True, None, channels_restricted
 
     @app_commands.command(name="whois", description="Get information about a user")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
@@ -139,12 +144,12 @@ class CommandsCog(commands.Cog):
             user: Username, nickname, or user mention
         """
         # Check permissions
-        can_proceed, error_embed = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
 
         guild_id = interaction.guild_id
         search_term = parse_user_mention(user)
@@ -155,7 +160,7 @@ class CommandsCog(commands.Cog):
         if not member_data:
             await interaction.followup.send(
                 embed=create_error_embed("User not found in the database."),
-                ephemeral=True
+                ephemeral=not channels_restricted
             )
             return
 
@@ -209,7 +214,7 @@ class CommandsCog(commands.Cog):
         status_value = "Left server" if member_data['is_active'] == 0 else "Active"
         embed.add_field(name="Status", value=status_value, inline=False)
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
 
     async def _lastseen_impl(self, interaction: discord.Interaction, user: str, command_name: str):
@@ -222,12 +227,12 @@ class CommandsCog(commands.Cog):
             command_name: Name of command that called this (for logging)
         """
         # Check permissions
-        can_proceed, error_embed = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
 
         guild_id = interaction.guild_id
         search_term = parse_user_mention(user)
@@ -238,7 +243,7 @@ class CommandsCog(commands.Cog):
         if not member_data:
             await interaction.followup.send(
                 embed=create_error_embed("User not found in the database."),
-                ephemeral=True
+                ephemeral=not channels_restricted
             )
             return
 
@@ -281,7 +286,7 @@ class CommandsCog(commands.Cog):
         if member_data['is_active'] == 0:
             embed.add_field(name="Note", value="User has left the server", inline=False)
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /{command_name} for '{user}' in guild {interaction.guild.name}")
 
     @app_commands.command(name="lastseen", description="Check when a user was last seen online")
@@ -325,7 +330,7 @@ class CommandsCog(commands.Cog):
             days: Optional override for inactive days threshold
         """
         # Check permissions
-        can_proceed, error_embed = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
@@ -349,7 +354,7 @@ class CommandsCog(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
 
         # Use provided days or fall back to config
         inactive_days = days if days is not None else guild_config['inactive_days']
@@ -360,7 +365,7 @@ class CommandsCog(commands.Cog):
         if not inactive_members:
             embed = create_embed("Inactive Members", discord.Color.blue())
             embed.description = f"No members have been inactive for more than {inactive_days} days."
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             return
 
         # Create paginated embeds (8 members per page)
@@ -386,7 +391,7 @@ class CommandsCog(commands.Cog):
 
         # Send with pagination view
         view = PaginationView(embeds)
-        await interaction.followup.send(embed=embeds[0], view=view, ephemeral=True)
+        await interaction.followup.send(embed=embeds[0], view=view, ephemeral=not channels_restricted)
 
         logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name} with threshold {inactive_days}")
         logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")

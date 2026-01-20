@@ -104,6 +104,18 @@ class TrackingCog(commands.Cog):
         logger.info(f"Bot logged in as {self.bot.user}")
         logger.info(f"Connected to {len(self.bot.guilds)} guilds")
 
+        # Ensure all guilds exist in database (handles restart edge case)
+        # This is necessary if the database was cleared or the bot restarted
+        missing_guilds = 0
+        for guild in self.bot.guilds:
+            if not self.db.get_guild_config(guild.id):
+                self.db.add_guild(guild.id, guild.name)
+                missing_guilds += 1
+                logger.info(f"Guild '{guild.name}' (ID: {guild.id}) was added to database (on_ready sync)")
+        
+        if missing_guilds > 0:
+            logger.warning(f"Added {missing_guilds} missing guild(s) to database during on_ready sync")
+
         # Set bot presence - "Playing Watching you"
         await self.bot.change_presence(
             activity=discord.Game(name='Watching you')
@@ -364,7 +376,8 @@ class TrackingCog(commands.Cog):
         # Track status changes
         if before.status != after.status:
             # Log status change to console
-            print(f"{after} changed status from {before.status} to {after.status}")
+            #print(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
+            logger.info(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
 
             if after.status == discord.Status.offline:
                 # User went offline - record timestamp
