@@ -887,10 +887,16 @@ class DatabaseManager:
                 result = cursor.fetchone()
                 stats['offline_30d_plus'] = result[0] if result else 0
 
-                # Total currently offline
-                stats['currently_offline'] = (stats['offline_1h'] + stats['offline_24h'] +
-                                             stats['offline_7d'] + stats['offline_30d'] +
-                                             stats['offline_30d_plus'])
+                # Total currently offline (total active - currently online)
+                # Note: offline buckets above are overlapping (e.g., 2h offline counts in all buckets),
+                # so we calculate it as: total active members - online members
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                """, (guild_id,))
+                result = cursor.fetchone()
+                total_active = result[0] if result else 0
+                stats['currently_offline'] = total_active - stats['currently_online']
 
         except Exception as e:
             logger.error(f"Failed to get activity stats for {guild_id}: {e}")
