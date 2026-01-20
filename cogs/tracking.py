@@ -3,6 +3,7 @@
 import discord
 from discord.ext import commands
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -27,6 +28,61 @@ class TrackingCog(commands.Cog):
         self.bot = bot
         self.db = db
         self.config = config
+
+    async def _initialize_member_positions(self, guild: discord.Guild) -> bool:
+        """
+        Initialize member positions based on join order.
+        Fetches all members sorted by join date and assigns position numbers.
+        
+        Args:
+            guild: The guild to initialize positions for
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        guild_id = guild.id
+        
+        try:
+            # Check if already initialized
+            if self.db.guild_positions_initialized(guild_id):
+                logger.info(f"Member positions already initialized for guild {guild.name}")
+                return True
+            
+            logger.info(f"Starting member position initialization for guild {guild.name}...")
+            
+            # Fetch all members sorted by join date
+            logger.info(f"Fetching members for {guild.name}...")
+            all_members = [m async for m in guild.fetch_members(limit=None)]
+            # Filter out bots - only track human members
+            members = [m for m in all_members if not m.bot]
+            logger.info(f"Fetched {len(all_members)} total members ({len(members)} human members), sorting by join date...")
+            members_sorted = sorted(members, key=lambda m: m.joined_at or datetime.now(timezone.utc))
+            
+            logger.info(f"Fetched {len(members_sorted)} human members, assigning positions...")
+            
+            # Batch update in chunks (1000 at a time)
+            chunk_size = 1000
+            updated_count = 0
+            for i in range(0, len(members_sorted), chunk_size):
+                chunk = members_sorted[i:i+chunk_size]
+                for idx, member in enumerate(chunk, start=i+1):
+                    if self.db.set_member_join_position(guild_id, member.id, idx):
+                        updated_count += 1
+                
+                logger.info(f"Processed {min(i+chunk_size, len(members_sorted))}/{len(members_sorted)} members ({updated_count} updated)")
+                await asyncio.sleep(0.1)  # Small delay between chunks to avoid overwhelming the bot
+            
+            # Mark as initialized
+            self.db.mark_positions_initialized(guild_id)
+            logger.info(f"Successfully initialized positions for {updated_count}/{len(members_sorted)} members in {guild.name}")
+            return True
+            
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout while fetching members for guild {guild.name} - positions not initialized")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to initialize member positions for guild {guild.name}: {e}", exc_info=True)
+            return False
 
     def _should_track_member(self, member: discord.Member) -> bool:
         """
@@ -116,6 +172,14 @@ class TrackingCog(commands.Cog):
         if missing_guilds > 0:
             logger.warning(f"Added {missing_guilds} missing guild(s) to database during on_ready sync")
 
+        # Initialize member positions for guilds that haven't been initialized yet
+        # This handles the case where the bot restarts or joins existing guilds
+        logger.info("Checking for guilds needing member position initialization...")
+        for guild in self.bot.guilds:
+            if not self.db.guild_positions_initialized(guild.id):
+                logger.info(f"Guild {guild.name} needs position initialization, scheduling background task...")
+                asyncio.create_task(self._initialize_member_positions(guild))
+
         # Set bot presence - "Playing Watching you"
         await self.bot.change_presence(
             activity=discord.Game(name='Watching you')
@@ -165,6 +229,10 @@ class TrackingCog(commands.Cog):
                 logger.error(f"Failed to add member {member.id} in guild {guild.id}: {e}")
 
         logger.info(f"Added {member_count} members from guild {guild.name}")
+
+        # Initialize member positions (for join order tracking)
+        # Run as background task to avoid blocking the bot
+        asyncio.create_task(self._initialize_member_positions(guild))
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
@@ -222,6 +290,13 @@ class TrackingCog(commands.Cog):
                 join_date=join_date,
                 roles=roles
             )
+            
+            # If positions are already initialized, assign position to this new member
+            if self.db.guild_positions_initialized(guild_id):
+                # Get total member count (approximate position for new member)
+                total_members = len(self.db.get_all_guild_members(guild_id))
+                self.db.set_member_join_position(guild_id, user_id, total_members)
+                logger.debug(f"Assigned join position {total_members} to new member {member}")
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -312,6 +387,9 @@ class TrackingCog(commands.Cog):
 
         if before_display != after_display:
             logger.info(f"Display name changed: {before_display} -> {after_display} for {after}")
+            # Track nickname in history BEFORE updating the database
+            self.db.update_nickname_history(guild_id, user_id, before_display, after_display)
+            # Update the nickname in database
             self.db.update_member_nickname(guild_id, user_id, after_display)
 
         # Check for username change (display name)
@@ -376,8 +454,8 @@ class TrackingCog(commands.Cog):
         # Track status changes
         if before.status != after.status:
             # Log status change to console
-            #print(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
-            logger.info(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
+            print(f"{after} ({after.guild}) changed status from {before.status} to {after.status}") # not included in log files
+            #logger.info(f"{after} ({after.guild}) changed status from {before.status} to {after.status}") # included in log files
 
             if after.status == discord.Status.offline:
                 # User went offline - record timestamp

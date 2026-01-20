@@ -119,6 +119,22 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE guilds ADD COLUMN allowed_channels TEXT")
                 logger.info("Added allowed_channels column to guilds table")
 
+            if 'positions_initialized' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN positions_initialized INTEGER DEFAULT 0")
+                logger.info("Added positions_initialized column to guilds table")
+
+            # Check members table for new columns
+            cursor.execute("PRAGMA table_info(members)")
+            member_columns = [row[1] for row in cursor.fetchall()]
+
+            if 'join_position' not in member_columns:
+                cursor.execute("ALTER TABLE members ADD COLUMN join_position INTEGER")
+                logger.info("Added join_position column to members table")
+
+            if 'nickname_history' not in member_columns:
+                cursor.execute("ALTER TABLE members ADD COLUMN nickname_history TEXT")
+                logger.info("Added nickname_history column to members table")
+
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
 
@@ -351,6 +367,46 @@ class DatabaseManager:
             logger.error(f"Failed to remove guild {guild_id}: {e}")
             return False
 
+    def guild_positions_initialized(self, guild_id: int) -> bool:
+        """Check if member positions have been initialized for this guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT positions_initialized FROM guilds WHERE guild_id = ?
+                """, (guild_id,))
+                row = cursor.fetchone()
+                return bool(row[0]) if row else False
+        except Exception as e:
+            logger.error(f"Failed to check positions initialized for guild {guild_id}: {e}")
+            return False
+
+    def mark_positions_initialized(self, guild_id: int) -> bool:
+        """Mark that member positions have been initialized for this guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE guilds SET positions_initialized = 1 WHERE guild_id = ?
+                """, (guild_id,))
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to mark positions initialized for guild {guild_id}: {e}")
+            return False
+
+    def set_member_join_position(self, guild_id: int, user_id: int, position: int) -> bool:
+        """Set the join position for a member."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE members SET join_position = ? WHERE guild_id = ? AND user_id = ?
+                """, (position, guild_id, user_id))
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to set join position for user {user_id} in guild {guild_id}: {e}")
+            return False
+
     # ==================== Member Operations ====================
 
     def add_member(self, guild_id: int, user_id: int, username: str,
@@ -371,13 +427,16 @@ class DatabaseManager:
         """
         try:
             roles_json = json.dumps(roles)
+            # Initialize nickname history with the current nickname if it exists
+            nickname_history = json.dumps([nickname]) if nickname else None
+            
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT OR REPLACE INTO members
-                    (guild_id, user_id, username, nickname, join_date, last_seen, is_active, roles)
-                    VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-                """, (guild_id, user_id, username, nickname, join_date, 0, roles_json))
+                    (guild_id, user_id, username, nickname, join_date, last_seen, is_active, roles, nickname_history)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """, (guild_id, user_id, username, nickname, join_date, 0, roles_json, nickname_history))
                 return True
         except Exception as e:
             logger.error(f"Failed to add member {user_id} to guild {guild_id}: {e}")
@@ -421,6 +480,58 @@ class DatabaseManager:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Failed to update roles for {user_id} in guild {guild_id}: {e}")
+            return False
+
+    def update_nickname_history(self, guild_id: int, user_id: int, old_nickname: Optional[str], new_nickname: Optional[str]) -> bool:
+        """Update nickname history for a member (keeps last 5, unique only).
+        
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            old_nickname: Previous nickname before change
+            new_nickname: New nickname after change
+            
+        Returns:
+            bool: True if successful
+        """
+        try:
+            # Only track if nickname actually changed and new nickname exists
+            if new_nickname and old_nickname != new_nickname:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    
+                    # Get current history
+                    cursor.execute("""
+                        SELECT nickname_history FROM members WHERE guild_id = ? AND user_id = ?
+                    """, (guild_id, user_id))
+                    row = cursor.fetchone()
+                    
+                    if not row:
+                        return False
+                    
+                    try:
+                        history = json.loads(row[0]) if row[0] else []
+                    except:
+                        history = []
+                    
+                    # Add old nickname if it's not already in history (check entire list for uniqueness)
+                    if old_nickname and old_nickname not in history:
+                        history.append(old_nickname)
+                    
+                    # Add new nickname if it's not already in history
+                    if new_nickname not in history:
+                        history.append(new_nickname)
+                    
+                    # Keep only last 5
+                    history = history[-5:]
+                    
+                    cursor.execute("""
+                        UPDATE members SET nickname_history = ? WHERE guild_id = ? AND user_id = ?
+                    """, (json.dumps(history), guild_id, user_id))
+                    return True
+            return True  # No update needed
+        except Exception as e:
+            logger.error(f"Failed to update nickname history for {user_id} in guild {guild_id}: {e}")
             return False
 
     def update_last_seen(self, guild_id: int, user_id: int, timestamp: int) -> bool:

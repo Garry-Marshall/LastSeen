@@ -4,6 +4,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
+import json
 from datetime import datetime
 
 from database import DatabaseManager
@@ -14,7 +15,8 @@ from bot.utils import (
     format_timestamp,
     chunk_list,
     can_use_bot_commands,
-    is_channel_allowed
+    is_channel_allowed,
+    has_bot_admin_role
 )
 
 logger = logging.getLogger(__name__)
@@ -164,55 +166,98 @@ class CommandsCog(commands.Cog):
             )
             return
 
-        # Create embed with user information
-        embed = create_embed("User Information", discord.Color.blue())
+        # Get Discord member object for additional info (online status, boosting, etc.)
+        member = interaction.guild.get_member(member_data['user_id'])
+        
+        # Check if caller is admin - get bot admin role name from guild config
+        guild_config = self.db.get_guild_config(guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        is_admin = has_bot_admin_role(interaction.user, bot_admin_role_name)
+        
+        # Create embed with new formatting
+        username = member_data['username'] if member_data['username'] else "Unknown"
+        embed = create_embed(f"👤 {username}", discord.Color.blue())
+        embed.description = ""
 
-        # Add basic info
-        embed.add_field(name="User ID", value=str(member_data['user_id']), inline=False)
-        embed.add_field(
-            name="Username",
-            value=member_data['username'] if member_data['username'] else "Not set",
-            inline=False
-        )
-        embed.add_field(
-            name="Nickname",
-            value=member_data['nickname'] if member_data['nickname'] else "Not set",
-            inline=False
-        )
+        # ===== USER IDENTITY SECTION =====
+        embed.description += f"🆔 User ID: `{member_data['user_id']}`\n"
+        
+        # Account creation date - admin only
+        if is_admin and member:
+            account_created = format_timestamp(int(member.created_at.timestamp()), 'F')
+            embed.description += f"📅 Account Created: {account_created}\n"
+        
+        # Join info with position
+        if member_data['join_date']:
+            join_str = format_timestamp(member_data['join_date'], 'F')
+            join_position = member_data.get('join_position')
+            if join_position:
+                embed.description += f"📥 Joined Server: {join_str} (Member #{join_position})\n"
+            else:
+                embed.description += f"📥 Joined Server: {join_str}\n"
+        
+        embed.description += "\n"
 
-        # Add roles
+        # ===== NICKNAME & ROLES SECTION =====
+        nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
+        embed.description += f"🏷️ Nickname: {nickname}\n"
+        
+        # Nickname history - admin only (exclude current nickname)
+        if is_admin and member_data.get('nickname_history'):
+            try:
+                history = json.loads(member_data['nickname_history'])
+                if history:
+                    # Filter out the current nickname to show only previous ones
+                    previous_nicknames = [n for n in history if n != nickname]
+                    if previous_nicknames:
+                        history_str = ", ".join(previous_nicknames)
+                        embed.description += f"     Previously known as: {history_str}\n"
+            except:
+                pass
+        
+        # Roles
         if member_data['roles']:
             roles_str = ", ".join(member_data['roles'])
-            embed.add_field(name="Roles", value=roles_str, inline=False)
+            embed.description += f"🎭 Roles: {roles_str}\n"
         else:
-            embed.add_field(name="Roles", value="None", inline=False)
+            embed.description += f"🎭 Roles: None\n"
+        
+        # Highest role
+        if member and member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
+            highest_role = member.top_role
+            if highest_role.name != "@everyone":
+                embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
+        
+        embed.description += "\n"
 
-        # Add join date
-        if member_data['join_date']:
-            embed.add_field(
-                name="Member Since",
-                value=format_timestamp(member_data['join_date'], 'F'),
-                inline=False
-            )
-
-        # Add last seen
-        if member_data['last_seen'] and member_data['last_seen'] != 0:
-            embed.add_field(
-                name="Last Seen",
-                value=format_timestamp(member_data['last_seen'], 'R'),
-                inline=False
-            )
-        else:
-            # Check if user is currently online
-            member = interaction.guild.get_member(member_data['user_id'])
-            if member and member.status != discord.Status.offline:
-                embed.add_field(name="Last Seen", value="Currently online", inline=False)
+        # ===== STATUS SECTION =====
+        if member:
+            # Online status
+            status_emoji = {
+                discord.Status.online: "🟢",
+                discord.Status.idle: "🟡",
+                discord.Status.dnd: "🔴",
+                discord.Status.offline: "⚫"
+            }.get(member.status, "⚫")
+            
+            embed.description += f"{status_emoji} Status: {str(member.status).capitalize()}\n"
+            
+            # Last seen
+            if member.status != discord.Status.offline:
+                embed.description += f"⏱️ Last Seen: Currently online\n"
+            elif member_data['last_seen'] and member_data['last_seen'] != 0:
+                embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R')}\n"
             else:
-                embed.add_field(name="Last Seen", value="Not available", inline=False)
-
-        # Add status
-        status_value = "Left server" if member_data['is_active'] == 0 else "Active"
-        embed.add_field(name="Status", value=status_value, inline=False)
+                embed.description += f"⏱️ Last Seen: Not available\n"
+        else:
+            embed.description += f"⚫ Status: Left server\n"
+        
+        # Boosting status
+        if member and member.premium_since:
+            boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F')
+            embed.description += f"🚀 Boosting: Yes (since {boost_date})\n"
+        else:
+            embed.description += f"🚀 Boosting: No\n"
 
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
