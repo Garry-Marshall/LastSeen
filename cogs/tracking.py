@@ -338,24 +338,52 @@ class TrackingCog(commands.Cog):
 
         try:
             embed = create_embed("Member Left", discord.Color.red())
-            embed.add_field(name="Username", value=member_data['username'], inline=False)
-            embed.add_field(
-                name="Nickname",
-                value=member_data['nickname'] if member_data['nickname'] else "Not set",
-                inline=False
-            )
-
+            embed.description = ""
+            
+            # User Identity
+            embed.description += f"🆔 User ID: `{member_data['user_id']}`\n"
+            embed.description += f"👤 Username: **{member_data['username']}**\n"
+            
+            # Nickname
+            nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
+            embed.description += f"🏷️ Nickname: {nickname}\n"
+            embed.description += "\n"
+            
+            # Roles and Highest Role
             if member_data['roles']:
-                roles_str = ", ".join(member_data['roles']) if member_data['roles'] else "None"
-                embed.add_field(name="Roles", value=roles_str, inline=False)
-
+                roles_str = ", ".join(member_data['roles'])
+                embed.description += f"🎭 Roles: {roles_str}\n"
+                
+                # Highest role (using top_role from member object if available)
+                if member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
+                    highest_role = member.top_role
+                    if highest_role.name != "@everyone":
+                        embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
+            else:
+                embed.description += f"🎭 Roles: None\n"
+            
+            embed.description += "\n"
+            
+            # Membership duration
             if member_data['join_date']:
                 join_dt = datetime.fromtimestamp(member_data['join_date'])
-                embed.add_field(
-                    name="Joined",
-                    value=discord.utils.format_dt(join_dt, 'F'),
-                    inline=False
-                )
+                join_str = discord.utils.format_dt(join_dt, 'F')
+                embed.description += f"📥 Joined: {join_str}\n"
+                
+                # Calculate duration
+                now = datetime.now(join_dt.tzinfo)
+                duration = now - join_dt
+                days = duration.days
+                if days > 0:
+                    embed.description += f"⏱️ Duration: {days} days\n"
+            
+            # Last seen
+            if member_data['last_seen'] and member_data['last_seen'] > 0:
+                last_seen_dt = datetime.fromtimestamp(member_data['last_seen'])
+                last_seen_str = discord.utils.format_dt(last_seen_dt, 'R')
+                embed.description += f"👁️ Last Seen: {last_seen_str}\n"
+            else:
+                embed.description += f"👁️ Last Seen: Never recorded\n"
 
             await channel.send(embed=embed)
         except Exception as e:
