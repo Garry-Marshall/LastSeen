@@ -1,11 +1,12 @@
 """Event tracking cog for monitoring user activity."""
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import logging
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Dict, Tuple
+from collections import defaultdict
 
 from database import DatabaseManager
 from bot.utils import get_member_roles, create_embed
@@ -28,6 +29,15 @@ class TrackingCog(commands.Cog):
         self.bot = bot
         self.db = db
         self.config = config
+        
+        # Batch processing buffers for message activity
+        # Key: (guild_id, user_id, date), Value: count
+        self.daily_activity_buffer: Dict[Tuple[int, int, int], int] = defaultdict(int)
+        # Key: (guild_id, user_id, timestamp, hour), Value: count
+        self.hourly_activity_buffer: Dict[Tuple[int, int, int, int], int] = defaultdict(int)
+        
+        # Start background task
+        self.flush_activity_buffer.start()
 
     async def _initialize_member_positions(self, guild: discord.Guild) -> bool:
         """
@@ -520,11 +530,15 @@ class TrackingCog(commands.Cog):
             now = datetime.now(timezone.utc)
             today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
             
-            # Increment message activity for today
-            if self.db.increment_message_activity(guild_id, user_id, today_start):
-                logger.debug(f"Recorded message from {message.author} in {message.guild.name}")
-            else:
-                logger.warning(f"Failed to record message activity for {message.author} in {message.guild.name}")
+            # Add to daily activity buffer instead of writing immediately
+            self.daily_activity_buffer[(guild_id, user_id, today_start)] += 1
+            
+            # Also buffer hourly activity for heatmap
+            hour = now.hour
+            hour_start = int(datetime(now.year, now.month, now.day, now.hour, tzinfo=timezone.utc).timestamp())
+            self.hourly_activity_buffer[(guild_id, user_id, hour_start, hour)] += 1
+            
+            logger.debug(f"Buffered message from {message.author} in {message.guild.name}")
         
         except Exception as e:
             logger.error(f"Error tracking message activity: {e}", exc_info=True)
@@ -563,6 +577,78 @@ class TrackingCog(commands.Cog):
                 # User came online - set last_seen to 0 (currently active)
                 self.db.update_last_seen(guild_id, user_id, 0)
                 logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
+
+    @tasks.loop(seconds=30)
+    async def flush_activity_buffer(self):
+        """
+        Background task that flushes activity buffers to database every 30 seconds.
+        This reduces I/O overhead by batching multiple message events into single writes.
+        """
+        try:
+            # Get buffer sizes
+            daily_count = len(self.daily_activity_buffer)
+            hourly_count = len(self.hourly_activity_buffer)
+            
+            if daily_count == 0 and hourly_count == 0:
+                return  # Nothing to flush
+            
+            logger.info(f"Flushing activity buffers: {daily_count} daily entries, {hourly_count} hourly entries")
+            
+            # Copy and clear buffers (atomic swap to avoid missing messages during flush)
+            daily_to_flush = dict(self.daily_activity_buffer)
+            hourly_to_flush = dict(self.hourly_activity_buffer)
+            self.daily_activity_buffer.clear()
+            self.hourly_activity_buffer.clear()
+            
+            # Flush daily activity
+            success_count = 0
+            for (guild_id, user_id, date), count in daily_to_flush.items():
+                # Increment by the buffered count
+                for _ in range(count):
+                    if self.db.increment_message_activity(guild_id, user_id, date):
+                        success_count += 1
+            
+            logger.debug(f"Flushed {success_count}/{daily_count} daily activity entries")
+            
+            # Flush hourly activity
+            success_count = 0
+            for (guild_id, user_id, timestamp, hour), count in hourly_to_flush.items():
+                # Increment by the buffered count
+                for _ in range(count):
+                    if self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour):
+                        success_count += 1
+            
+            logger.debug(f"Flushed {success_count}/{hourly_count} hourly activity entries")
+            
+        except Exception as e:
+            logger.error(f"Error flushing activity buffers: {e}", exc_info=True)
+
+    @flush_activity_buffer.before_loop
+    async def before_flush_activity_buffer(self):
+        """Wait for bot to be ready before starting the flush loop."""
+        await self.bot.wait_until_ready()
+
+    def cog_unload(self):
+        """
+        Called when the cog is unloaded.
+        Ensures buffered data is flushed before shutdown.
+        """
+        logger.info("TrackingCog unloading, flushing remaining buffers...")
+        self.flush_activity_buffer.cancel()
+        
+        # Synchronous flush of remaining data
+        try:
+            for (guild_id, user_id, date), count in self.daily_activity_buffer.items():
+                for _ in range(count):
+                    self.db.increment_message_activity(guild_id, user_id, date)
+            
+            for (guild_id, user_id, timestamp, hour), count in self.hourly_activity_buffer.items():
+                for _ in range(count):
+                    self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour)
+            
+            logger.info("Successfully flushed all buffers on unload")
+        except Exception as e:
+            logger.error(f"Error flushing buffers on unload: {e}", exc_info=True)
 
 
 async def setup(bot: commands.Bot):

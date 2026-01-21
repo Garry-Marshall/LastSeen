@@ -136,7 +136,7 @@ class CommandsCog(commands.Cog):
 
         return True, None, channels_restricted
 
-    @app_commands.command(name="whois", description="Get information about a user")
+    @app_commands.command(name="whois", description="👤 Get information about a user")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -358,7 +358,7 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /{command_name} for '{user}' in guild {interaction.guild.name}")
 
-    @app_commands.command(name="lastseen", description="Check when a user was last seen online")
+    @app_commands.command(name="lastseen", description="👁️ Check when a user was last seen online")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -372,7 +372,7 @@ class CommandsCog(commands.Cog):
         """
         await self._lastseen_impl(interaction, user, "lastseen")
 
-    @app_commands.command(name="seen", description="Alias for /lastseen - Check when a user was last seen")
+    @app_commands.command(name="seen", description="👁️ Alias for /lastseen - Check when a user was last seen")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -386,7 +386,7 @@ class CommandsCog(commands.Cog):
         """
         await self._lastseen_impl(interaction, user, "seen")
 
-    @app_commands.command(name="role-history", description="View role change history for a member (Admin only)")
+    @app_commands.command(name="role-history", description="📜 View role change history for a member (Admin only)")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -467,7 +467,7 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /role-history for '{user}' in guild {interaction.guild.name}")
 
-    @app_commands.command(name="inactive", description="List members who have been inactive")
+    @app_commands.command(name="inactive", description="💤 List members who have been inactive")
     @app_commands.describe(days="Optional: Override the configured inactive days threshold (1-365)")
     @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -546,7 +546,7 @@ class CommandsCog(commands.Cog):
         logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name} with threshold {inactive_days}")
         logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")
 
-    @app_commands.command(name="chat-history", description="View extended message activity history (365 days)")
+    @app_commands.command(name="chat-history", description="📈 View extended message activity history (365 days)")
     @app_commands.describe(user="Username, nickname, or @mention (leave empty for server-wide stats)")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -686,7 +686,7 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /chat-history for '{user}' in guild {interaction.guild.name}")
 
-    @app_commands.command(name="about", description="About this bot")
+    @app_commands.command(name="about", description="ℹ️ About this bot")
     async def about(self, interaction: discord.Interaction):
         embed = create_embed("📊 LastSeen", discord.Color.green())
 
@@ -758,9 +758,21 @@ class CommandsCog(commands.Cog):
             )
             return
 
+        # Check channel restrictions
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        allowed_channels_json = guild_config.get('allowed_channels') if guild_config else None
+        channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
+        
+        # Check if command is allowed in current channel
+        if not is_channel_allowed(interaction.channel_id, guild_config):
+            await interaction.response.send_message(
+                "❌ Bot commands are not allowed in this channel. Please use an allowed channel.",
+                ephemeral=True
+            )
+            return
+
         # Defer response since this might take a while
-        # Use ephemeral so exports are private
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=not channels_restricted)
 
         guild = interaction.guild
         if not guild:
@@ -819,7 +831,7 @@ class CommandsCog(commands.Cog):
         if len(filtered) == 0:
             await interaction.followup.send(
                 "No members found matching your filters. Try adjusting your criteria.",
-                ephemeral=True
+                ephemeral=not channels_restricted
             )
             return
 
@@ -829,7 +841,7 @@ class CommandsCog(commands.Cog):
             await interaction.followup.send(
                 f"⚠️ Found {len(filtered)} members. Showing first {MAX_RESULTS}. "
                 f"Consider adding more filters to narrow results.",
-                ephemeral=True
+                ephemeral=not channels_restricted
             )
             filtered = filtered[:MAX_RESULTS]
 
@@ -838,9 +850,117 @@ class CommandsCog(commands.Cog):
 
         # Handle export or display
         if export.lower() in ["csv", "txt"]:
-            await self._export_search_results(interaction, filtered, export.lower(), filters)
+            await self._export_search_results(interaction, filtered, export.lower(), filters, channels_restricted)
         else:
-            await self._display_search_results(interaction, filtered, filters)
+            await self._display_search_results(interaction, filtered, filters, channels_restricted)
+
+    @app_commands.command(name="user-stats", description="📊 View server statistics and analytics")
+    @app_commands.guild_only()
+    async def user_stats(self, interaction: discord.Interaction):
+        """
+        Display comprehensive server statistics with interactive dashboard.
+        Shows overview with buttons to access detailed reports.
+        
+        Args:
+            interaction: Discord interaction
+        """
+        # Check admin permission
+        if not has_bot_admin_role(interaction.user, interaction.guild):
+            await interaction.response.send_message(
+                "❌ This command requires admin permissions.",
+                ephemeral=True
+            )
+            return
+        
+        # Check channel restrictions
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        allowed_channels_json = guild_config.get('allowed_channels') if guild_config else None
+        channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
+        
+        # Check if command is allowed in current channel
+        if not is_channel_allowed(interaction.channel_id, guild_config):
+            await interaction.response.send_message(
+                "❌ Bot commands are not allowed in this channel. Please use an allowed channel.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer(ephemeral=not channels_restricted)
+        
+        try:
+            # Get overview statistics
+            stats = self.db.get_server_snapshot_stats(interaction.guild_id)
+            
+            if not stats:
+                await interaction.followup.send(
+                    "❌ Failed to retrieve server statistics. Please try again.",
+                    ephemeral=not channels_restricted
+                )
+                return
+            
+            # Get previous month stats for comparison
+            prev_stats = self.db.get_member_growth_stats(interaction.guild_id, days=60)
+            growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+            
+            # Create overview embed
+            embed = self._create_stats_overview_embed(stats, growth_rate)
+            
+            # Create interactive view
+            view = UserStatsView(interaction.guild_id, self.db)
+            
+            await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
+            logger.info(f"User {interaction.user} viewed user-stats in guild {interaction.guild.name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to display user stats: {e}", exc_info=True)
+            await interaction.followup.send(
+                f"❌ An error occurred while retrieving statistics: {e}",
+                ephemeral=not channels_restricted
+            )
+
+    def _create_stats_overview_embed(self, stats: dict, growth_rate: float) -> discord.Embed:
+        """Create the main overview embed for user stats."""
+        embed = create_embed("📊 User Statistics Overview", discord.Color.blue())
+        
+        # Format growth indicator
+        growth_indicator = "📈" if growth_rate > 0 else "📉" if growth_rate < 0 else "➡️"
+        growth_text = f"{growth_indicator} {abs(growth_rate):.1f}% vs last month" if growth_rate != 0 else "No change"
+        
+        # Member counts section
+        active_pct = (stats['active_30d'] / stats['total_members'] * 100) if stats['total_members'] > 0 else 0
+        inactive_pct = (stats['inactive_30d'] / stats['total_members'] * 100) if stats['total_members'] > 0 else 0
+        
+        embed.description = (
+            f"**👥 Total Members:** {stats['total_members']:,} ({growth_text})\n"
+            f"**✅ Active (30d):** {stats['active_30d']:,} ({active_pct:.1f}%)\n"
+            f"**💤 Inactive (30d):** {stats['inactive_30d']:,} ({inactive_pct:.1f}%)\n"
+        )
+        
+        # This month section
+        net_indicator = "🔼" if stats['net_growth'] > 0 else "🔽" if stats['net_growth'] < 0 else "➡️"
+        embed.add_field(
+            name="📅 This Month",
+            value=(
+                f"• New joins: **{stats['joins_this_month']:,}**\n"
+                f"• Members left: **{stats['leaves_this_month']:,}**\n"
+                f"• Net growth: **{net_indicator} {stats['net_growth']:,}**"
+            ),
+            inline=False
+        )
+        
+        # Activity section
+        embed.add_field(
+            name="💬 Activity (30 days)",
+            value=(
+                f"• Total messages: **{stats['total_messages_30d']:,}**\n"
+                f"• Avg per member: **{stats['avg_messages_per_member']:.1f}**\n"
+                f"• Most active: **{stats['most_active_user']}** ({stats['most_active_count']:,} msgs)"
+            ),
+            inline=False
+        )
+        
+        embed.set_footer(text="Click buttons below to view detailed reports")
+        return embed
 
     def _parse_search_filters(self, roles, status, inactive, activity, joined, username, guild) -> dict:
         """Parse and validate all filter parameters."""
@@ -1139,14 +1259,14 @@ class CommandsCog(commands.Cog):
         else:
             return "Just now"
 
-    async def _display_search_results(self, interaction: discord.Interaction, results: list, filters: dict):
+    async def _display_search_results(self, interaction: discord.Interaction, results: list, filters: dict, channels_restricted: bool = False):
         """Display search results with pagination."""
         # Create SearchResultsView
         view = SearchResultsView(results, filters, per_page=15)
         embed = view.create_embed()
-        await interaction.followup.send(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
 
-    async def _export_search_results(self, interaction: discord.Interaction, results: list, format: str, filters: dict):
+    async def _export_search_results(self, interaction: discord.Interaction, results: list, format: str, filters: dict, channels_restricted: bool = False):
         """Export search results to file."""
         try:
             if format == "csv":
@@ -1157,11 +1277,11 @@ class CommandsCog(commands.Cog):
             await interaction.followup.send(
                 f"✅ Exported {len(results)} members to {format.upper()}",
                 file=file,
-                ephemeral=True
+                ephemeral=not channels_restricted
             )
         except Exception as e:
             logger.error(f"Failed to generate export: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Failed to generate export: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ Failed to generate export: {e}", ephemeral=not channels_restricted)
 
     def _generate_csv(self, results: list) -> discord.File:
         """Generate CSV export with all member data."""
@@ -1481,6 +1601,421 @@ class SearchResultsView(discord.ui.View):
             )
         except Exception as e:
             await interaction.followup.send(f"❌ Export failed: {e}", ephemeral=True)
+
+
+class UserStatsView(discord.ui.View):
+    """Interactive view for user statistics dashboard."""
+
+    def __init__(self, guild_id: int, db: DatabaseManager):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.guild_id = guild_id
+        self.db = db
+        self.current_view = 'overview'
+
+    @discord.ui.button(label="📊 Retention Report", style=discord.ButtonStyle.primary, row=0)
+    async def retention_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show retention cohort analysis."""
+        await interaction.response.defer()
+        
+        try:
+            cohorts = self.db.get_retention_cohorts(self.guild_id)
+            embed = self._create_retention_embed(cohorts)
+            
+            # Create view with back button
+            view = discord.ui.View(timeout=300)
+            back_button = discord.ui.Button(label="◀️ Back to Overview", style=discord.ButtonStyle.secondary)
+            
+            async def back_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+                
+                # Get the parent cog to access _create_stats_overview_embed
+                cog = interaction.client.get_cog('CommandsCog')
+                overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
+                overview_view = UserStatsView(self.guild_id, self.db)
+                
+                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+            
+            back_button.callback = back_callback
+            view.add_item(back_button)
+            
+            await interaction.edit_original_response(embed=embed, view=view)
+            
+        except Exception as e:
+            logger.error(f"Failed to show retention report: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    @discord.ui.button(label="📈 Server Growth", style=discord.ButtonStyle.primary, row=0)
+    async def growth_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show server growth trends."""
+        await interaction.response.defer()
+        
+        try:
+            # Get growth data for multiple periods
+            growth_30d = self.db.get_member_growth_stats(self.guild_id, days=30)
+            growth_90d = self.db.get_member_growth_stats(self.guild_id, days=90)
+            growth_365d = self.db.get_member_growth_stats(self.guild_id, days=365)
+            
+            embed = self._create_growth_embed(growth_30d, growth_90d, growth_365d)
+            
+            # Create view with back button
+            view = discord.ui.View(timeout=300)
+            back_button = discord.ui.Button(label="◀️ Back to Overview", style=discord.ButtonStyle.secondary)
+            
+            async def back_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+                
+                cog = interaction.client.get_cog('CommandsCog')
+                overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
+                overview_view = UserStatsView(self.guild_id, self.db)
+                
+                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+            
+            back_button.callback = back_callback
+            view.add_item(back_button)
+            
+            await interaction.edit_original_response(embed=embed, view=view)
+            
+        except Exception as e:
+            logger.error(f"Failed to show growth report: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    @discord.ui.button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, row=0)
+    async def leaderboard_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show activity leaderboard."""
+        await interaction.response.defer()
+        
+        try:
+            # Show leaderboard view with period selector
+            view = LeaderboardView(self.guild_id, self.db)
+            embed = await view.create_leaderboard_embed(days=30)
+            
+            await interaction.edit_original_response(embed=embed, view=view)
+            
+        except Exception as e:
+            logger.error(f"Failed to show leaderboard: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    @discord.ui.button(label="🔥 Activity Heatmap", style=discord.ButtonStyle.primary, row=1)
+    async def heatmap_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show activity heatmap."""
+        await interaction.response.defer()
+        
+        try:
+            day_activity = self.db.get_activity_by_day(self.guild_id, days=30)
+            hour_activity = self.db.get_activity_by_hour(self.guild_id, days=30)
+            embed = self._create_heatmap_embed(day_activity, hour_activity)
+            
+            # Create view with back button
+            view = discord.ui.View(timeout=300)
+            back_button = discord.ui.Button(label="◀️ Back to Overview", style=discord.ButtonStyle.secondary)
+            
+            async def back_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+                
+                cog = interaction.client.get_cog('CommandsCog')
+                overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
+                overview_view = UserStatsView(self.guild_id, self.db)
+                
+                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+            
+            back_button.callback = back_callback
+            view.add_item(back_button)
+            
+            await interaction.edit_original_response(embed=embed, view=view)
+            
+        except Exception as e:
+            logger.error(f"Failed to show activity heatmap: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    @discord.ui.button(label="📋 Export CSV", style=discord.ButtonStyle.green, row=1)
+    async def export_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Export comprehensive stats to CSV."""
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            stats = self.db.get_server_snapshot_stats(self.guild_id)
+            growth_30d = self.db.get_member_growth_stats(self.guild_id, days=30)
+            growth_90d = self.db.get_member_growth_stats(self.guild_id, days=90)
+            leaderboard = self.db.get_activity_leaderboard(self.guild_id, days=30, limit=25)
+            
+            # Generate CSV
+            output = StringIO()
+            writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+            
+            # Header
+            writer.writerow(['Server Statistics Report'])
+            writer.writerow(['Generated', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')])
+            writer.writerow([])
+            
+            # Overview
+            writer.writerow(['OVERVIEW'])
+            writer.writerow(['Total Members', stats['total_members']])
+            writer.writerow(['Active (30d)', stats['active_30d']])
+            writer.writerow(['Inactive (30d)', stats['inactive_30d']])
+            writer.writerow([])
+            
+            # Growth
+            writer.writerow(['GROWTH (30 DAYS)'])
+            writer.writerow(['Joins', growth_30d.get('joins', 0)])
+            writer.writerow(['Leaves', growth_30d.get('leaves', 0)])
+            writer.writerow(['Net Growth', growth_30d.get('net_growth', 0)])
+            writer.writerow(['Growth Rate %', f"{growth_30d.get('growth_rate', 0):.2f}"])
+            writer.writerow([])
+            
+            # Activity
+            writer.writerow(['ACTIVITY (30 DAYS)'])
+            writer.writerow(['Total Messages', stats['total_messages_30d']])
+            writer.writerow(['Avg per Member', f"{stats['avg_messages_per_member']:.1f}"])
+            writer.writerow([])
+            
+            # Leaderboard
+            writer.writerow(['TOP 25 MOST ACTIVE MEMBERS'])
+            writer.writerow(['Rank', 'Username', 'Display Name', 'Messages (30d)'])
+            for i, member in enumerate(leaderboard, 1):
+                writer.writerow([
+                    i,
+                    member['username'],
+                    member['display_name'],
+                    member['total_messages']
+                ])
+            
+            output.seek(0)
+            filename = f"server_stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            file = discord.File(fp=StringIO(output.getvalue()), filename=filename)
+            
+            await interaction.followup.send(
+                f"✅ Exported server statistics to CSV",
+                file=file,
+                ephemeral=True
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to export stats: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ Export failed: {e}", ephemeral=True)
+
+    def _create_retention_embed(self, cohorts: dict) -> discord.Embed:
+        """Create retention report embed."""
+        embed = create_embed("📊 Member Retention Report", discord.Color.purple())
+        
+        embed.description = "Shows retention rates for members who joined in different time periods."
+        
+        for period, data in cohorts.items():
+            if data['total_joined'] > 0:
+                period_name = {
+                    '30d': 'Last 30 Days',
+                    '60d': '31-60 Days Ago',
+                    '90d': '61-90 Days Ago'
+                }.get(period, period)
+                
+                embed.add_field(
+                    name=f"📅 {period_name}",
+                    value=(
+                        f"• Joined: **{data['total_joined']:,}** members\n"
+                        f"• Still in server: **{data['still_active']:,}**\n"
+                        f"• Active recently: **{data['active_recently']:,}**\n"
+                        f"• Retention rate: **{data['retention_rate']:.1f}%**"
+                    ),
+                    inline=False
+                )
+        
+        if not cohorts or all(c['total_joined'] == 0 for c in cohorts.values()):
+            embed.description = "Not enough data to calculate retention rates."
+        
+        return embed
+
+    def _create_growth_embed(self, growth_30d: dict, growth_90d: dict, growth_365d: dict) -> discord.Embed:
+        """Create server growth embed."""
+        embed = create_embed("📈 Server Growth Trends", discord.Color.green())
+        
+        periods = [
+            ("Last 30 Days", growth_30d),
+            ("Last 90 Days", growth_90d),
+            ("Last 365 Days", growth_365d)
+        ]
+        
+        for period_name, data in periods:
+            if data:
+                growth_indicator = "📈" if data['growth_rate'] > 0 else "📉" if data['growth_rate'] < 0 else "➡️"
+                
+                embed.add_field(
+                    name=f"📅 {period_name}",
+                    value=(
+                        f"• Joins: **{data['joins']:,}**\n"
+                        f"• Leaves: **{data['leaves']:,}**\n"
+                        f"• Net: **{data['net_growth']:+,}**\n"
+                        f"• Growth rate: **{growth_indicator} {abs(data['growth_rate']):.2f}%**"
+                    ),
+                    inline=True
+                )
+        
+        return embed
+
+    def _create_heatmap_embed(self, day_activity: dict, hour_activity: dict) -> discord.Embed:
+        """Create activity heatmap embed."""
+        embed = create_embed("🔥 Activity Heatmap (Last 30 Days)", discord.Color.orange())
+        
+        if not day_activity or sum(day_activity.values()) == 0:
+            embed.description = "Not enough activity data to generate heatmap."
+            return embed
+        
+        # Day of week breakdown
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        max_day_count = max(day_activity.values()) if day_activity.values() else 1
+        
+        chart_lines = []
+        for day in days_order:
+            count = day_activity.get(day, 0)
+            bar_length = int((count / max_day_count) * 20) if max_day_count > 0 else 0
+            bar = "█" * bar_length + "░" * (20 - bar_length)
+            # Fixed width for day name (9 chars) and right-aligned count
+            chart_lines.append(f"{day:<9} {bar} {count:>6,}")
+        
+        # Wrap in code block for monospaced alignment
+        embed.add_field(
+            name="📊 Activity by Day of Week",
+            value="```\n" + "\n".join(chart_lines) + "\n```",
+            inline=False
+        )
+        
+        # Peak day
+        if day_activity:
+            peak_day = max(day_activity, key=day_activity.get)
+            peak_count = day_activity[peak_day]
+            embed.add_field(
+                name="🎯 Peak Day",
+                value=f"**{peak_day}** with **{peak_count:,}** messages",
+                inline=True
+            )
+        
+        # Hour of day breakdown
+        if hour_activity and sum(hour_activity.values()) > 0:
+            max_hour_count = max(hour_activity.values())
+            hour_lines = []
+            
+            # Group hours into 6-hour blocks for better readability
+            time_blocks = [
+                ("Night    ", range(0, 6)),
+                ("Morning  ", range(6, 12)),
+                ("Afternoon", range(12, 18)),
+                ("Evening  ", range(18, 24))
+            ]
+            
+            for block_name, hour_range in time_blocks:
+                block_total = sum(hour_activity.get(h, 0) for h in hour_range)
+                bar_length = int((block_total / (max_hour_count * 6)) * 15) if max_hour_count > 0 else 0
+                bar = "█" * bar_length + "░" * (15 - bar_length)
+                # Format with fixed width for count column
+                hour_lines.append(f"{block_name} {bar} {block_total:>5,}")
+            
+            # Wrap in code block for monospaced alignment
+            embed.add_field(
+                name="⏰ Activity by Time of Day",
+                value="```\n" + "\n".join(hour_lines) + "\n```",
+                inline=False
+            )
+            
+            # Peak hour
+            peak_hour = max(hour_activity, key=hour_activity.get)
+            peak_hour_count = hour_activity[peak_hour]
+            time_label = f"{peak_hour:02d}:00-{(peak_hour+1)%24:02d}:00"
+            embed.add_field(
+                name="⏰ Peak Hour",
+                value=f"**{time_label}** with **{peak_hour_count:,}** messages",
+                inline=True
+            )
+        
+        return embed
+
+
+class LeaderboardView(discord.ui.View):
+    """Interactive leaderboard view with period selection."""
+
+    def __init__(self, guild_id: int, db: DatabaseManager):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.db = db
+        self.current_period = 30
+
+    async def create_leaderboard_embed(self, days: int) -> discord.Embed:
+        """Create leaderboard embed for specified period."""
+        self.current_period = days
+        
+        period_name = {
+            7: "Last 7 Days",
+            30: "Last 30 Days",
+            90: "Last 90 Days",
+            0: "All Time"
+        }.get(days, f"Last {days} Days")
+        
+        embed = create_embed(f"🏆 Activity Leaderboard - {period_name}", discord.Color.gold())
+        
+        leaderboard = self.db.get_activity_leaderboard(self.guild_id, days=days, limit=10)
+        
+        if not leaderboard:
+            embed.description = "No activity data available for this period."
+            return embed
+        
+        lines = []
+        medals = ["🥇", "🥈", "🥉"]
+        for i, member in enumerate(leaderboard, 1):
+            medal = medals[i-1] if i <= 3 else f"**{i}.**"
+            lines.append(
+                f"{medal} **{member['display_name']}** - {member['total_messages']:,} messages"
+            )
+        
+        embed.description = "\n".join(lines)
+        embed.set_footer(text="Select a time period below to view different rankings")
+        
+        return embed
+
+    @discord.ui.select(
+        placeholder="Select time period",
+        options=[
+            discord.SelectOption(label="Last 7 Days", value="7", emoji="📅"),
+            discord.SelectOption(label="Last 30 Days", value="30", emoji="📅", default=True),
+            discord.SelectOption(label="Last 90 Days", value="90", emoji="📅"),
+            discord.SelectOption(label="All Time", value="0", emoji="🌟")
+        ],
+        row=0
+    )
+    async def period_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        """Handle period selection."""
+        await interaction.response.defer()
+        
+        days = int(select.values[0])
+        embed = await self.create_leaderboard_embed(days)
+        
+        await interaction.edit_original_response(embed=embed, view=self)
+
+    @discord.ui.button(label="◀️ Back to Overview", style=discord.ButtonStyle.secondary, row=1)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Return to main overview."""
+        await interaction.response.defer()
+        
+        try:
+            stats = self.db.get_server_snapshot_stats(self.guild_id)
+            prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+            growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+            
+            cog = interaction.client.get_cog('CommandsCog')
+            overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
+            overview_view = UserStatsView(self.guild_id, self.db)
+            
+            await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+            
+        except Exception as e:
+            logger.error(f"Failed to return to overview: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     """

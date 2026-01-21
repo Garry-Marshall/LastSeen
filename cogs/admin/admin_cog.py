@@ -30,7 +30,7 @@ class AdminCog(commands.Cog):
         self.db = db
         self.config = config
 
-    @app_commands.command(name="config", description="Configure bot settings (Admin only)")
+    @app_commands.command(name="config", description="⚙️ Configure bot settings (Admin only)")
     @app_commands.guild_only()
     async def config(self, interaction: discord.Interaction):
         """
@@ -63,7 +63,7 @@ class AdminCog(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         logger.info(f"User {interaction.user} opened config panel in guild {interaction.guild.name}")
 
-    @app_commands.command(name="health", description="Check bot health status (Admin only)")
+    @app_commands.command(name="health", description="💚 Check bot health status (Admin only)")
     @app_commands.guild_only()
     async def health(self, interaction: discord.Interaction):
         """
@@ -146,7 +146,7 @@ class AdminCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"User {interaction.user} checked health status in guild {interaction.guild.name}")
 
-    @app_commands.command(name="server-stats", description="View server activity statistics")
+    @app_commands.command(name="server-stats", description="📈 View server activity statistics")
     @app_commands.guild_only()
     async def server_stats(self, interaction: discord.Interaction):
         """
@@ -272,7 +272,7 @@ class AdminCog(commands.Cog):
                 ephemeral=True
             )
 
-    @app_commands.command(name="help", description="Show bot information and available commands")
+    @app_commands.command(name="help", description="❓ Show bot information and available commands")
     @app_commands.guild_only()
     async def help(self, interaction: discord.Interaction):
         """
@@ -347,6 +347,20 @@ class AdminCog(commands.Cog):
                     "  • `/search joined:>2025-01-01 export:csv`\n"
                     "  Filters: roles, status, inactive, activity, joined, username\n"
                     "  Export: csv or txt format"
+                ),
+                inline=False
+            )
+
+            embed.add_field(
+                name="📊 Statistics & Analytics",
+                value=(
+                    "`/user-stats` - User statistics dashboard\n"
+                    "  Interactive buttons for:\n"
+                    "  • Retention Report - Member retention analysis\n"
+                    "  • Server Growth - Growth trends over time\n"
+                    "  • Leaderboard - Top active members\n"
+                    "  • Activity Heatmap - Peak activity times\n"
+                    "  • Export CSV - Comprehensive stats export"
                 ),
                 inline=False
             )

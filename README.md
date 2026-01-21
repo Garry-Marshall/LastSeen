@@ -48,6 +48,10 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
   - Search with multiple filters: roles, status, inactive days, activity, join date, username
   - Export results to CSV or TXT format
   - Paginated results with interactive navigation
+- `/user-stats` - User statistics and analytics dashboard
+  - Interactive buttons for detailed reports
+  - Retention analysis, growth trends, activity leaderboard
+  - Activity heatmap and comprehensive CSV export
 - `/role-history <user>` - Show the last 20 role changes for a member
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
 - `/help` - Show available commands
@@ -315,6 +319,53 @@ Combine multiple filters for precise results:
 - Export buttons in pagination view for CSV or TXT
 - Results are ephemeral (only visible to you)
 - Supports up to 1000 results with warning
+
+### View server statistics and analytics (Admin only)
+```
+/user-stats
+```
+Interactive statistics dashboard with comprehensive server analytics.
+
+**Overview Display:**
+- Total members with growth percentage
+- Active vs inactive member breakdown
+- This month's joins, leaves, and net growth
+- Activity metrics (total messages, average per member)
+- Most active member identification
+
+**Interactive Buttons:**
+
+📊 **Retention Report**
+- Cohort analysis for members who joined in last 30/60/90 days
+- Retention rates and active member percentages
+- Helps identify drop-off patterns
+
+📈 **Server Growth**
+- Growth trends for 30/90/365 day periods
+- Join vs leave comparison
+- Growth rate percentages
+- Net growth tracking
+
+🏆 **Leaderboard**
+- Top 10 most active members by message count
+- Period selection: 7 days, 30 days, 90 days, or all-time
+- Medal rankings for top 3 members
+
+🔥 **Activity Heatmap**
+- Day-of-week activity distribution
+- Visual bar charts showing peak days
+- Message count breakdown by day
+
+📋 **Export CSV**
+- Comprehensive stats report
+- Includes overview, growth metrics, and top 25 members
+- Ephemeral delivery for privacy
+
+**Example Usage:**
+```
+/user-stats
+```
+Opens the interactive dashboard. Click any button to view detailed reports, then use "Back to Overview" to return.
 
 ## Features Explained
 

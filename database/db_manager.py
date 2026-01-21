@@ -175,6 +175,32 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE members ADD COLUMN nickname_history TEXT")
                 logger.info("Added nickname_history column to members table")
 
+            # Create message_activity_hourly table for hour-of-day tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS message_activity_hourly (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    hour INTEGER NOT NULL,
+                    message_count INTEGER DEFAULT 1,
+                    UNIQUE(guild_id, user_id, timestamp),
+                    FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE,
+                    FOREIGN KEY (guild_id, user_id) REFERENCES members(guild_id, user_id) ON DELETE CASCADE
+                )
+            """)
+
+            # Index for hourly activity queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_message_activity_hourly_guild_time
+                ON message_activity_hourly(guild_id, timestamp DESC)
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_message_activity_hourly_user
+                ON message_activity_hourly(guild_id, user_id, timestamp DESC)
+            """)
+
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
 
@@ -1166,6 +1192,39 @@ class DatabaseManager:
             logger.error(f"Failed to increment message activity for user {user_id}: {e}")
             return False
 
+    def increment_message_activity_hourly(self, guild_id: int, user_id: int, timestamp: int, hour: int) -> bool:
+        """
+        Increment hourly message count for a user at a specific hour.
+        
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            timestamp: Unix timestamp rounded to the hour
+            hour: Hour of day (0-23)
+        
+        Returns:
+            bool: True if successful
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Ensure member exists
+                if not self.member_exists(guild_id, user_id):
+                    return False
+                
+                cursor.execute("""
+                    INSERT INTO message_activity_hourly (guild_id, user_id, timestamp, hour, message_count)
+                    VALUES (?, ?, ?, ?, 1)
+                    ON CONFLICT(guild_id, user_id, timestamp) DO UPDATE SET
+                    message_count = message_count + 1
+                """, (guild_id, user_id, timestamp, hour))
+                
+                return True
+        except Exception as e:
+            logger.error(f"Failed to increment hourly message activity for user {user_id}: {e}")
+            return False
+
     def get_message_activity_period(self, guild_id: int, user_id: int, days: int = 30) -> Dict[str, int]:
         """
         Get message count statistics for a specific period.
@@ -1473,4 +1532,368 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to cleanup old message activity globally: {e}")
             return False
+
+    # ===== User Statistics Methods =====
+
+    def get_server_snapshot_stats(self, guild_id: int) -> Dict[str, Any]:
+        """
+        Get comprehensive server statistics snapshot.
+
+        Args:
+            guild_id: Guild ID
+
+        Returns:
+            Dictionary with server statistics
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                thirty_days_ago = now - (30 * 86400)
+                
+                # Total and active member counts
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_members,
+                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_members,
+                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_30d
+                    FROM members
+                    WHERE guild_id = ?
+                """, (thirty_days_ago, guild_id))
+                
+                row = cursor.fetchone()
+                total_members = row['total_members'] or 0
+                active_members = row['active_members'] or 0
+                active_30d = row['active_30d'] or 0
+                
+                # Get this month's joins and leaves
+                month_start = int(datetime(datetime.now().year, datetime.now().month, 1, tzinfo=timezone.utc).timestamp())
+                
+                cursor.execute("""
+                    SELECT COUNT(*) as joins
+                    FROM members
+                    WHERE guild_id = ? AND join_date >= ?
+                """, (guild_id, month_start))
+                joins_this_month = cursor.fetchone()['joins'] or 0
+                
+                # Count members who left this month (is_active = 0 and last_seen >= month_start)
+                cursor.execute("""
+                    SELECT COUNT(*) as leaves
+                    FROM members
+                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ?
+                """, (guild_id, month_start))
+                leaves_this_month = cursor.fetchone()['leaves'] or 0
+                
+                # Get total message count for last 30 days
+                cursor.execute("""
+                    SELECT SUM(message_count) as total_messages
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                """, (guild_id, thirty_days_ago))
+                total_messages = cursor.fetchone()['total_messages'] or 0
+                
+                # Get most active member in last 30 days
+                cursor.execute("""
+                    SELECT m.username, SUM(ma.message_count) as msg_count
+                    FROM message_activity ma
+                    JOIN members m ON ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                    WHERE ma.guild_id = ? AND ma.date >= ?
+                    GROUP BY ma.user_id
+                    ORDER BY msg_count DESC
+                    LIMIT 1
+                """, (guild_id, thirty_days_ago))
+                most_active = cursor.fetchone()
+                most_active_user = most_active['username'] if most_active else 'N/A'
+                most_active_count = most_active['msg_count'] if most_active else 0
+                
+                return {
+                    'total_members': total_members,
+                    'active_members': active_members,
+                    'active_30d': active_30d,
+                    'inactive_30d': active_members - active_30d,
+                    'joins_this_month': joins_this_month,
+                    'leaves_this_month': leaves_this_month,
+                    'net_growth': joins_this_month - leaves_this_month,
+                    'total_messages_30d': total_messages,
+                    'avg_messages_per_member': total_messages / active_members if active_members > 0 else 0,
+                    'most_active_user': most_active_user,
+                    'most_active_count': most_active_count
+                }
+        except Exception as e:
+            logger.error(f"Failed to get server snapshot stats for guild {guild_id}: {e}")
+            return {}
+
+    def get_member_growth_stats(self, guild_id: int, days: int = 30) -> Dict[str, Any]:
+        """
+        Get member growth statistics over specified period.
+
+        Args:
+            guild_id: Guild ID
+            days: Number of days to look back
+
+        Returns:
+            Dictionary with growth statistics
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                period_start = now - (days * 86400)
+                
+                # Members who joined in this period
+                cursor.execute("""
+                    SELECT COUNT(*) as joins
+                    FROM members
+                    WHERE guild_id = ? AND join_date >= ?
+                """, (guild_id, period_start))
+                joins = cursor.fetchone()['joins'] or 0
+                
+                # Members who left in this period (is_active = 0 and last_seen >= period_start)
+                cursor.execute("""
+                    SELECT COUNT(*) as leaves
+                    FROM members
+                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ?
+                """, (guild_id, period_start))
+                leaves = cursor.fetchone()['leaves'] or 0
+                
+                # Current total members
+                cursor.execute("""
+                    SELECT COUNT(*) as total
+                    FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                """, (guild_id,))
+                current_total = cursor.fetchone()['total'] or 0
+                
+                # Calculate previous total
+                previous_total = current_total - joins + leaves
+                growth_rate = ((current_total - previous_total) / previous_total * 100) if previous_total > 0 else 0
+                
+                return {
+                    'joins': joins,
+                    'leaves': leaves,
+                    'net_growth': joins - leaves,
+                    'current_total': current_total,
+                    'previous_total': previous_total,
+                    'growth_rate': growth_rate,
+                    'period_days': days
+                }
+        except Exception as e:
+            logger.error(f"Failed to get member growth stats for guild {guild_id}: {e}")
+            return {}
+
+    def get_retention_cohorts(self, guild_id: int) -> Dict[str, Any]:
+        """
+        Get retention cohort analysis for members.
+
+        Args:
+            guild_id: Guild ID
+
+        Returns:
+            Dictionary with retention statistics
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                thirty_days_ago = now - (30 * 86400)
+                sixty_days_ago = now - (60 * 86400)
+                ninety_days_ago = now - (90 * 86400)
+                
+                cohorts = {}
+                
+                # 30-day cohort
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_joined,
+                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
+                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                    FROM members
+                    WHERE guild_id = ? AND join_date >= ?
+                """, (thirty_days_ago, guild_id, thirty_days_ago))
+                row = cursor.fetchone()
+                cohorts['30d'] = {
+                    'total_joined': row['total_joined'] or 0,
+                    'still_active': row['still_active'] or 0,
+                    'active_recently': row['active_recently'] or 0,
+                    'retention_rate': (row['still_active'] / row['total_joined'] * 100) if row['total_joined'] > 0 else 0
+                }
+                
+                # 60-day cohort
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_joined,
+                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
+                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                    FROM members
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ?
+                """, (thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago))
+                row = cursor.fetchone()
+                cohorts['60d'] = {
+                    'total_joined': row['total_joined'] or 0,
+                    'still_active': row['still_active'] or 0,
+                    'active_recently': row['active_recently'] or 0,
+                    'retention_rate': (row['still_active'] / row['total_joined'] * 100) if row['total_joined'] > 0 else 0
+                }
+                
+                # 90-day cohort
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_joined,
+                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
+                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                    FROM members
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ?
+                """, (thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago))
+                row = cursor.fetchone()
+                cohorts['90d'] = {
+                    'total_joined': row['total_joined'] or 0,
+                    'still_active': row['still_active'] or 0,
+                    'active_recently': row['active_recently'] or 0,
+                    'retention_rate': (row['still_active'] / row['total_joined'] * 100) if row['total_joined'] > 0 else 0
+                }
+                
+                return cohorts
+        except Exception as e:
+            logger.error(f"Failed to get retention cohorts for guild {guild_id}: {e}")
+            return {}
+
+    def get_activity_leaderboard(self, guild_id: int, days: int = 30, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get activity leaderboard for top members.
+
+        Args:
+            guild_id: Guild ID
+            days: Number of days to look back (0 for all-time)
+            limit: Maximum number of members to return
+
+        Returns:
+            List of member dictionaries with activity stats
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if days > 0:
+                    now = int(datetime.now(timezone.utc).timestamp())
+                    period_start = now - (days * 86400)
+                    
+                    cursor.execute("""
+                        SELECT 
+                            m.user_id,
+                            m.username,
+                            m.nickname,
+                            SUM(ma.message_count) as total_messages
+                        FROM message_activity ma
+                        JOIN members m ON ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                        WHERE ma.guild_id = ? AND ma.date >= ? AND m.is_active = 1
+                        GROUP BY ma.user_id
+                        ORDER BY total_messages DESC
+                        LIMIT ?
+                    """, (guild_id, period_start, limit))
+                else:
+                    # All-time
+                    cursor.execute("""
+                        SELECT 
+                            m.user_id,
+                            m.username,
+                            m.nickname,
+                            SUM(ma.message_count) as total_messages
+                        FROM message_activity ma
+                        JOIN members m ON ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                        WHERE ma.guild_id = ? AND m.is_active = 1
+                        GROUP BY ma.user_id
+                        ORDER BY total_messages DESC
+                        LIMIT ?
+                    """, (guild_id, limit))
+                
+                results = []
+                for row in cursor.fetchall():
+                    results.append({
+                        'user_id': row['user_id'],
+                        'username': row['username'],
+                        'nickname': row['nickname'],
+                        'display_name': row['nickname'] if row['nickname'] else row['username'],
+                        'total_messages': row['total_messages'] or 0
+                    })
+                
+                return results
+        except Exception as e:
+            logger.error(f"Failed to get activity leaderboard for guild {guild_id}: {e}")
+            return []
+
+    def get_activity_by_hour(self, guild_id: int, days: int = 30) -> Dict[int, int]:
+        """
+        Get message activity distribution by hour of day.
+
+        Args:
+            guild_id: Guild ID
+            days: Number of days to look back
+
+        Returns:
+            Dictionary mapping hour (0-23) to message count
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                period_start = now - (days * 86400)
+                
+                cursor.execute("""
+                    SELECT hour, SUM(message_count) as total
+                    FROM message_activity_hourly
+                    WHERE guild_id = ? AND timestamp >= ?
+                    GROUP BY hour
+                    ORDER BY hour
+                """, (guild_id, period_start))
+                
+                rows = cursor.fetchall()
+                
+                # Initialize all hours with 0
+                activity = {hour: 0 for hour in range(24)}
+                
+                # Fill in actual data
+                for row in rows:
+                    activity[row['hour']] = row['total']
+                
+                return activity
+        except Exception as e:
+            logger.error(f"Failed to get hourly activity for guild {guild_id}: {e}", exc_info=True)
+            return {hour: 0 for hour in range(24)}
+
+    def get_activity_by_day(self, guild_id: int, days: int = 30) -> Dict[str, int]:
+        """
+        Get message activity distribution by day of week.
+
+        Args:
+            guild_id: Guild ID
+            days: Number of days to look back
+
+        Returns:
+            Dictionary mapping day name to message count
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                period_start = now - (days * 86400)
+                
+                cursor.execute("""
+                    SELECT date, SUM(message_count) as count
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                    GROUP BY date
+                """, (guild_id, period_start))
+                
+                day_counts = {'Monday': 0, 'Tuesday': 0, 'Wednesday': 0, 'Thursday': 0, 
+                             'Friday': 0, 'Saturday': 0, 'Sunday': 0}
+                
+                for row in cursor.fetchall():
+                    date_dt = datetime.fromtimestamp(row['date'], tz=timezone.utc)
+                    day_name = date_dt.strftime('%A')
+                    day_counts[day_name] += row['count'] or 0
+                
+                return day_counts
+        except Exception as e:
+            logger.error(f"Failed to get activity by day for guild {guild_id}: {e}")
+            return {}
 
