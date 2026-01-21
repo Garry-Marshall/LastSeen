@@ -22,13 +22,15 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
 
 ## Commands
 
-### User Commands
+### User Commands (Requires "LastSeen User" if "User Role Required" = ON)
 
 - `/whois <user>` - Display detailed information about a user
 - `/lastseen <user>` - Check when a user was last seen online
 - `/seen <user>` - Alias for `/lastseen`
 - `/inactive` - List all members inactive for more than configured days
+- `/chat-history <user>` - Show message posting stats for the last year
 - `/server-stats` - View detailed server activity statistics with visual charts
+- `/help` - Show available commands
 - `/about` - Show bot information
 
 ### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
@@ -38,10 +40,11 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
   - Set inactive days threshold
   - Set bot admin role name
   - Configure user command permissions (toggle role requirement, set user role)
-  - **Set track only roles** - Only track members with specific roles (optional)
-  - **Set allowed channels** - Restrict bot commands to specific channels (optional)
+  - Set track only roles - Only track members with specific roles (optional)
+  - Set allowed channels - Restrict bot commands to specific channels (optional)
   - Update all members in database
   - View current configuration
+- `/role-history <user>` - Show the last 20 role changes for a member
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
 - `/help` - Show available commands
 
@@ -326,7 +329,7 @@ Logs are stored in the `logs/` directory with daily rotation:
 
 This bot stores:
 - User IDs, usernames, nicknames
-- Join dates and last seen timestamps
+- Join dates, last seen timestamps, message counts
 - Role names
 - Guild information
 
@@ -338,6 +341,7 @@ For issues or questions:
 - Check the logs in `logs/` directory
 - Review the error messages in console
 - Ensure all configuration is correct
+- Get in touch through GitHub or Discord.
 
 This is a personal project to keep track of Guild Members in Discord servers.
 Feel free to use and modify to your liking.
