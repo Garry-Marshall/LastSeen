@@ -5,6 +5,9 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 from datetime import datetime, timezone
+import psutil
+import sys
+import os
 
 from database import DatabaseManager
 from bot.utils import create_embed, create_error_embed, has_bot_admin_role
@@ -63,98 +66,30 @@ class AdminCog(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         logger.info(f"User {interaction.user} opened config panel in guild {interaction.guild.name}")
 
-    @app_commands.command(name="health", description="💚 Check bot health status (Admin only)")
-    @app_commands.guild_only()
-    async def health(self, interaction: discord.Interaction):
-        """
-        Display bot health and status information.
-
-        Args:
-            interaction: Discord interaction
-        """
-
-        if not await check_admin_permission(interaction, self.db):
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        # Create health status embed
-        embed = create_embed("Bot Health Status", discord.Color.green())
-
-        # Bot uptime
-        if self.bot.start_time:
-            uptime_delta = datetime.now(timezone.utc) - self.bot.start_time
-            days = uptime_delta.days
-            hours, remainder = divmod(uptime_delta.seconds, 3600)
-            minutes, _ = divmod(remainder, 60)
-
-            if days > 0:
-                uptime_str = f"{days}d {hours}h {minutes}m"
-            elif hours > 0:
-                uptime_str = f"{hours}h {minutes}m"
-            else:
-                uptime_str = f"{minutes}m"
-        else:
-            uptime_str = "Unknown"
-
-        # Bot latency
-        latency_ms = round(self.bot.latency * 1000)
-
-        embed.add_field(
-            name="🤖 Bot Status",
-            value=f"**Status:** ✅ Online\n**Uptime:** {uptime_str}\n**Latency:** {latency_ms}ms",
-            inline=False
-        )
-
-        # Database health
-        db_health = self.db.get_database_health()
-        if db_health['status'] == 'healthy':
-            status_icon = "✅"
-            status_text = "Healthy"
-        else:
-            status_icon = "❌"
-            status_text = "Unhealthy"
-
-        embed.add_field(
-            name="💾 Database",
-            value=f"**Status:** {status_icon} {status_text}\n**Size:** {db_health['file_size_mb']} MB",
-            inline=False
-        )
-
-        # Guild-specific stats
-        guild_stats = self.db.get_guild_stats(interaction.guild_id)
-        guild_config = self.db.get_guild_config(interaction.guild_id)
-
-        # Check configuration completeness
-        config_complete = False
-        if guild_config and guild_config['notification_channel_id']:
-            config_complete = True
-
-        config_status = "✅ Complete" if config_complete else "⚠️ Incomplete"
-
-        embed.add_field(
-            name="🏰 This Guild",
-            value=(
-                f"**Tracked Members:** {guild_stats['total_members']}\n"
-                f"**Active:** {guild_stats['active_members']} | "
-                f"**Left:** {guild_stats['inactive_members']}\n"
-                f"**Configuration:** {config_status}"
-            ),
-            inline=False
-        )
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
-        logger.info(f"User {interaction.user} checked health status in guild {interaction.guild.name}")
-
-    @app_commands.command(name="server-stats", description="📈 View server activity statistics")
+    @app_commands.command(name="server-stats", description="📈 View server activity and system status")
     @app_commands.guild_only()
     async def server_stats(self, interaction: discord.Interaction):
         """
-        Display server activity statistics and metrics.
+        Display comprehensive server statistics including activity metrics and system resources.
 
         Args:
             interaction: Discord interaction
         """
+        # Check if user has permission (admin or user role)
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        
+        if guild_config and not has_bot_admin_role(interaction.user, guild_config.get('bot_admin_role_name', 'LastSeen Admin')):
+            # Not admin, check for user role
+            user_role_required = guild_config.get('user_role_required', 0)
+            if user_role_required:
+                user_role_name = guild_config.get('user_role_name', 'LastSeen User')
+                if not discord.utils.get(interaction.user.roles, name=user_role_name):
+                    await interaction.response.send_message(
+                        f"❌ You need the '{user_role_name}' role or admin permissions to use this command.",
+                        ephemeral=True
+                    )
+                    return
+
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         if interaction.guild is None:
@@ -168,70 +103,99 @@ class AdminCog(commands.Cog):
             # Get activity statistics
             activity_stats = self.db.get_activity_stats(interaction.guild_id)
             guild_stats = self.db.get_guild_stats(interaction.guild_id)
+            db_health = self.db.get_database_health()
 
             # Create embed
-            embed = create_embed(f"📊 {interaction.guild.name} - Activity Statistics", discord.Color.blue())
+            embed = create_embed(f"📊 {interaction.guild.name} - Server Status", discord.Color.blue())
 
-            # Current Status Section
+            # === SYSTEM RESOURCES ===
+            process = psutil.Process(os.getpid())
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            cpu_percent = process.cpu_percent(interval=0.1)
+            thread_count = process.num_threads()
+            
+            # Bot uptime
+            if self.bot.start_time:
+                uptime_delta = datetime.now(timezone.utc) - self.bot.start_time
+                days = uptime_delta.days
+                hours, remainder = divmod(uptime_delta.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                
+                if days > 0:
+                    uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+                elif hours > 0:
+                    uptime_str = f"{hours}h {minutes}m {seconds}s"
+                else:
+                    uptime_str = f"{minutes}m {seconds}s"
+            else:
+                uptime_str = "Unknown"
+            
+            # Latency
+            latency_ms = round(self.bot.latency * 1000)
+            
+            # Database status
+            db_status = "✅ Healthy" if db_health['status'] == 'healthy' else "❌ Unhealthy"
+            
+            # Python version
+            python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            
+            system_info = (
+                f"```\n"
+                f"Memory:    {memory_mb:.1f} MB\n"
+                f"CPU:       {cpu_percent:.1f}%\n"
+                f"Threads:   {thread_count}\n"
+                f"Uptime:    {uptime_str}\n"
+                f"Latency:   {latency_ms} ms\n"
+                f"Python:    {python_version}\n"
+                f"Database:  {db_status}\n"
+                f"DB Size:   {db_health['file_size_mb']:.2f} MB\n"
+                f"```"
+            )
+            
+            embed.add_field(
+                name="⚙️ System Resources",
+                value=system_info,
+                inline=False
+            )
+
+            # === PRESENCE STATUS ===
             total_tracked = guild_stats['active_members']
             online_count = activity_stats['currently_online']
             offline_count = activity_stats['currently_offline']
-
-            embed.add_field(
-                name="📡 Current Status",
-                value=(
-                    f"**Total Tracked:** {total_tracked} members\n"
-                    f"**🟢 Online:** {online_count}\n"
-                    f"**⚫ Offline:** {offline_count}"
-                ),
-                inline=False
-            )
-
-            # Activity Breakdown Section
-            embed.add_field(
-                name="⏰ Offline Duration Breakdown",
-                value=(
-                    f"**Last hour:** {activity_stats['offline_1h']} members\n"
-                    f"**Last 24 hours:** {activity_stats['offline_24h']} members\n"
-                    f"**Last 7 days:** {activity_stats['offline_7d']} members\n"
-                    f"**Last 30 days:** {activity_stats['offline_30d']} members\n"
-                    f"**30+ days ago:** {activity_stats['offline_30d_plus']} members"
-                ),
-                inline=False
-            )
-
-            # Activity Percentages (if we have members)
+            
             if total_tracked > 0:
-                online_pct = round((online_count / total_tracked) * 100, 1)
-                recent_pct = round((activity_stats['offline_24h'] / total_tracked) * 100, 1)
+                online_pct = (online_count / total_tracked) * 100
+            else:
+                online_pct = 0
 
-                embed.add_field(
-                    name="📈 Activity Metrics",
-                    value=(
-                        f"**Online Rate:** {online_pct}% currently active\n"
-                        f"**Recent Activity:** {recent_pct}% seen in last 24h"
-                    ),
-                    inline=False
-                )
+            embed.add_field(
+                name="📡 Current Presence",
+                value=(
+                    f"**Total Tracked:** {total_tracked:,} members\n"
+                    f"**🟢 Online:** {online_count:,} ({online_pct:.1f}%)\n"
+                    f"**⚫ Offline:** {offline_count:,}"
+                ),
+                inline=True
+            )
 
-            # Member Tracking Info
+            # === MEMBER TRACKING ===
             left_members = guild_stats['inactive_members']
             embed.add_field(
-                name="👥 Member Tracking",
+                name="👥 Member Status",
                 value=(
-                    f"**Active Members:** {guild_stats['active_members']}\n"
-                    f"**Left Server:** {left_members}\n"
-                    f"**Total Tracked:** {guild_stats['total_members']}"
+                    f"**Active:** {guild_stats['active_members']:,}\n"
+                    f"**Left Server:** {left_members:,}\n"
+                    f"**Total Tracked:** {guild_stats['total_members']:,}"
                 ),
-                inline=False
+                inline=True
             )
 
-            # Create simple text-based bar chart for visualization
+            # === ACTIVITY BREAKDOWN (Chart) ===
             def create_bar(count: int, max_count: int, length: int = 20) -> str:
                 if max_count == 0:
-                    return "▱" * length
+                    return "░" * length
                 filled = int((count / max_count) * length)
-                return "▰" * filled + "▱" * (length - filled)
+                return "█" * filled + "░" * (length - filled)
 
             max_offline = max(
                 activity_stats['offline_1h'],
@@ -239,34 +203,32 @@ class AdminCog(commands.Cog):
                 activity_stats['offline_7d'],
                 activity_stats['offline_30d'],
                 activity_stats['offline_30d_plus'],
-                1  # Avoid division by zero
+                1
             )
 
             chart = (
                 f"```\n"
-                f"Activity Distribution\n"
-                f"{'─' * 30}\n"
-                f"<1h   {create_bar(activity_stats['offline_1h'], max_offline)} {activity_stats['offline_1h']}\n"
-                f"<24h  {create_bar(activity_stats['offline_24h'], max_offline)} {activity_stats['offline_24h']}\n"
-                f"<7d   {create_bar(activity_stats['offline_7d'], max_offline)} {activity_stats['offline_7d']}\n"
-                f"<30d  {create_bar(activity_stats['offline_30d'], max_offline)} {activity_stats['offline_30d']}\n"
-                f"30d+  {create_bar(activity_stats['offline_30d_plus'], max_offline)} {activity_stats['offline_30d_plus']}\n"
+                f"<1 hour  {create_bar(activity_stats['offline_1h'], max_offline)} {activity_stats['offline_1h']:>5,}\n"
+                f"<24 hrs  {create_bar(activity_stats['offline_24h'], max_offline)} {activity_stats['offline_24h']:>5,}\n"
+                f"<7 days  {create_bar(activity_stats['offline_7d'], max_offline)} {activity_stats['offline_7d']:>5,}\n"
+                f"<30 days {create_bar(activity_stats['offline_30d'], max_offline)} {activity_stats['offline_30d']:>5,}\n"
+                f"30+ days {create_bar(activity_stats['offline_30d_plus'], max_offline)} {activity_stats['offline_30d_plus']:>5,}\n"
                 f"```"
             )
 
             embed.add_field(
-                name="📊 Visual Breakdown",
+                name="⏰ Last Seen Distribution",
                 value=chart,
                 inline=False
             )
 
-            embed.set_footer(text=f"Stats generated at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            embed.set_footer(text=f"📅 Generated at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"User {interaction.user} viewed server stats in guild {interaction.guild.name}")
 
         except Exception as e:
-            logger.error(f"Failed to generate server stats: {e}")
+            logger.error(f"Failed to generate server stats: {e}", exc_info=True)
             await interaction.followup.send(
                 embed=create_error_embed(f"Failed to generate server statistics: {str(e)}"),
                 ephemeral=True
@@ -314,7 +276,8 @@ class AdminCog(commands.Cog):
                 "`/inactive` - List members offline beyond threshold\n"
                 "`/inactive <days>` - List members offline for <days> days\n"
                 "`/chat-history <user>` - Show message posting stats for the last year\n"
-                "`/server-stats` - Server activity metrics and charts\n"
+                "`/server-stats` - System status and activity metrics\n"
+                "`/user-stats` - Interactive statistics dashboard with analytics\n"
             ),
             inline=False
         )
@@ -328,11 +291,8 @@ class AdminCog(commands.Cog):
                     "  • Notification channel & inactive days\n"
                     "  • Admin/user role permissions\n"
                     "  • Track only specific roles (optional)\n"
-                    "  • Restrict commands to channels (optional)\n"
-                    "  • Update member database\n"
-                    "`/role-history <user>` - Show the last 20 role changes for a member\n"
-                    "`/health` - Bot status & database health\n"
-                    "`/help` - Show this help message"
+                    "  • Allowed channels (restrict commands)\n"
+                    "`/role-history <user>` - View role change history for a member\n"
                 ),
                 inline=False
             )
@@ -347,20 +307,6 @@ class AdminCog(commands.Cog):
                     "  • `/search joined:>2025-01-01 export:csv`\n"
                     "  Filters: roles, status, inactive, activity, joined, username\n"
                     "  Export: csv or txt format"
-                ),
-                inline=False
-            )
-
-            embed.add_field(
-                name="📊 Statistics & Analytics",
-                value=(
-                    "`/user-stats` - User statistics dashboard\n"
-                    "  Interactive buttons for:\n"
-                    "  • Retention Report - Member retention analysis\n"
-                    "  • Server Growth - Growth trends over time\n"
-                    "  • Leaderboard - Top active members\n"
-                    "  • Activity Heatmap - Peak activity times\n"
-                    "  • Export CSV - Comprehensive stats export"
                 ),
                 inline=False
             )

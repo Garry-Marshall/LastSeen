@@ -6,3 +6,5 @@ Discord.py>=2.3.0
 # Python-dotenv - Environment variable loader
 python-dotenv>=1.0.0
 
+# System Monitoring
+psutil>=5.9.0

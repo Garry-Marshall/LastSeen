@@ -864,16 +864,22 @@ class CommandsCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
-        # Check admin permission
-        if not has_bot_admin_role(interaction.user, interaction.guild):
-            await interaction.response.send_message(
-                "❌ This command requires admin permissions.",
-                ephemeral=True
-            )
-            return
+        # Check if user has permission (admin or user role)
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        
+        if guild_config and not has_bot_admin_role(interaction.user, guild_config.get('bot_admin_role_name', 'LastSeen Admin')):
+            # Not admin, check for user role
+            user_role_required = guild_config.get('user_role_required', 0)
+            if user_role_required:
+                user_role_name = guild_config.get('user_role_name', 'LastSeen User')
+                if not discord.utils.get(interaction.user.roles, name=user_role_name):
+                    await interaction.response.send_message(
+                        f"❌ You need the '{user_role_name}' role or admin permissions to use this command.",
+                        ephemeral=True
+                    )
+                    return
         
         # Check channel restrictions
-        guild_config = self.db.get_guild_config(interaction.guild_id)
         allowed_channels_json = guild_config.get('allowed_channels') if guild_config else None
         channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
         
