@@ -44,6 +44,10 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
   - Set allowed channels - Restrict bot commands to specific channels (optional)
   - Update all members in database
   - View current configuration
+- `/search` - Advanced member search and filtering
+  - Search with multiple filters: roles, status, inactive days, activity, join date, username
+  - Export results to CSV or TXT format
+  - Paginated results with interactive navigation
 - `/role-history <user>` - Show the last 20 role changes for a member
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
 - `/help` - Show available commands
@@ -262,6 +266,55 @@ Displays comprehensive server activity metrics including:
 /config
 ```
 Opens an interactive panel with buttons for configuration.
+
+### Search and filter members (Admin only)
+```
+/search
+```
+Advanced member search with multiple filter options. Combine filters to find specific members.
+
+**Available Filters:**
+- `roles` - Filter by one or more roles (e.g., `@Moderator,@Admin`)
+- `status` - Filter by presence: `online`, `offline`, `idle`, `dnd`, or `all`
+- `inactive` - Days since last seen (e.g., `>30`, `<7`, `=14`)
+- `activity` - Message count in last 30 days (e.g., `>100`, `<10`)
+- `joined` - Filter by join date (e.g., `>2025-01-01`, `<2024-06-01`)
+- `username` - Search username (partial match, case-insensitive)
+- `export` - Export results as `csv` or `txt` format
+
+**Examples:**
+
+Find all Moderators who are currently online:
+```
+/search roles:@Moderator status:online
+```
+
+Find members inactive for more than 30 days with less than 10 messages:
+```
+/search inactive:>30 activity:<10
+```
+
+Find all members who joined after January 1, 2025 and export to CSV:
+```
+/search joined:>2025-01-01 export:csv
+```
+
+Find members with "admin" in their username:
+```
+/search username:admin
+```
+
+Combine multiple filters for precise results:
+```
+/search roles:@Member status:offline inactive:>7 activity:<50
+```
+
+**Features:**
+- Paginated results (15 members per page)
+- Interactive navigation with Previous/Next buttons
+- Export buttons in pagination view for CSV or TXT
+- Results are ephemeral (only visible to you)
+- Supports up to 1000 results with warning
 
 ## Features Explained
 
