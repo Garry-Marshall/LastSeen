@@ -323,6 +323,10 @@ class TrackingCog(commands.Cog):
 
         # Mark member as inactive
         self.db.set_member_inactive(guild_id, user_id)
+        
+        # Update last_seen to now (current time when they left)
+        current_time = int(datetime.now(timezone.utc).timestamp())
+        self.db.update_member_last_seen(guild_id, user_id, current_time)
 
         # Get guild config for notification channel
         guild_config = self.db.get_guild_config(guild_id)
@@ -381,9 +385,9 @@ class TrackingCog(commands.Cog):
             if member_data['last_seen'] and member_data['last_seen'] > 0:
                 last_seen_dt = datetime.fromtimestamp(member_data['last_seen'])
                 last_seen_str = discord.utils.format_dt(last_seen_dt, 'R')
-                embed.description += f"👁️ Last Seen: {last_seen_str}\n"
+                embed.description += f"� Left the Guild: {last_seen_str}\n"
             else:
-                embed.description += f"👁️ Last Seen: Never recorded\n"
+                embed.description += f"🚪 Left the Guild: Unknown time\n"
 
             await channel.send(embed=embed)
         except Exception as e:
