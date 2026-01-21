@@ -1240,6 +1240,126 @@ class DatabaseManager:
             logger.error(f"Failed to get message activity trend for user {user_id}: {e}")
             return []
 
+    def get_guild_message_activity_stats(self, guild_id: int, days: int = 365) -> Dict[str, Any]:
+        """
+        Get guild-wide message activity statistics.
+
+        Args:
+            guild_id: Discord guild ID
+            days: Number of days to look back (default 365)
+
+        Returns:
+            Dict with guild-wide statistics
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get today's date (start of day UTC)
+                now = datetime.now(timezone.utc)
+                today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+                
+                # Calculate cutoff dates
+                cutoff_date = today_start - (days * 86400)
+                week_cutoff = today_start - (7 * 86400)
+                month_cutoff = today_start - (30 * 86400)
+                quarter_cutoff = today_start - (90 * 86400)
+                
+                # Get total messages for all periods
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                """, (guild_id, cutoff_date))
+                total_365d = cursor.fetchone()[0]
+                
+                # Get 90-day total
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                """, (guild_id, quarter_cutoff))
+                total_90d = cursor.fetchone()[0]
+                
+                # Get 30-day total
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                """, (guild_id, month_cutoff))
+                total_30d = cursor.fetchone()[0]
+                
+                # Get 7-day total
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                """, (guild_id, week_cutoff))
+                total_7d = cursor.fetchone()[0]
+                
+                # Get today's count
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND date = ?
+                """, (guild_id, today_start))
+                today_count = cursor.fetchone()[0]
+                
+                # Get busiest and quietest days (365 days)
+                cursor.execute("""
+                    SELECT date, SUM(message_count) as total
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                    GROUP BY date
+                    ORDER BY total DESC
+                    LIMIT 1
+                """, (guild_id, cutoff_date))
+                busiest_day = cursor.fetchone()
+                
+                cursor.execute("""
+                    SELECT date, SUM(message_count) as total
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                    GROUP BY date
+                    ORDER BY total ASC
+                    LIMIT 1
+                """, (guild_id, cutoff_date))
+                quietest_day = cursor.fetchone()
+                
+                # Get active member count (30 days)
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT user_id)
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                """, (guild_id, month_cutoff))
+                active_members_30d = cursor.fetchone()[0]
+                
+                # Calculate average per day (365 days)
+                avg_per_day = round(total_365d / 365, 1) if total_365d > 0 else 0
+                
+                # Calculate messages per active member (30 days)
+                avg_per_member = round(total_30d / active_members_30d, 1) if active_members_30d > 0 else 0
+                
+                return {
+                    'total_365d': total_365d,
+                    'total_90d': total_90d,
+                    'total_30d': total_30d,
+                    'total_7d': total_7d,
+                    'today': today_count,
+                    'avg_per_day': avg_per_day,
+                    'busiest_day': {'date': busiest_day[0], 'count': busiest_day[1]} if busiest_day else None,
+                    'quietest_day': {'date': quietest_day[0], 'count': quietest_day[1]} if quietest_day else None,
+                    'active_members_30d': active_members_30d,
+                    'avg_per_member': avg_per_member
+                }
+        except Exception as e:
+            logger.error(f"Failed to get guild message activity stats for guild {guild_id}: {e}")
+            return {
+                'total_365d': 0, 'total_90d': 0, 'total_30d': 0, 'total_7d': 0, 'today': 0,
+                'avg_per_day': 0, 'busiest_day': None, 'quietest_day': None,
+                'active_members_30d': 0, 'avg_per_member': 0
+            }
+
     def cleanup_old_message_activity(self, guild_id: int, user_id: int, days: int = 365) -> bool:
         """
         Remove message activity records older than specified days.

@@ -544,16 +544,17 @@ class CommandsCog(commands.Cog):
         logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")
 
     @app_commands.command(name="chat-history", description="View extended message activity history (365 days)")
-    @app_commands.describe(user="Username, nickname, or @mention of the user")
+    @app_commands.describe(user="Username, nickname, or @mention (leave empty for server-wide stats)")
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
-    async def chat_history(self, interaction: discord.Interaction, user: str):
+    async def chat_history(self, interaction: discord.Interaction, user: str = None):
         """
-        Display extended message activity history for a user (365 days).
+        Display extended message activity history.
+        Shows user stats if specified, or guild-wide stats if not.
 
         Args:
             interaction: Discord interaction
-            user: Username, nickname, or user mention
+            user: Username, nickname, or user mention (optional)
         """
         # Check permissions
         can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
@@ -564,6 +565,57 @@ class CommandsCog(commands.Cog):
         await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
 
         guild_id = interaction.guild_id
+        
+        # If no user provided, show guild-wide stats
+        if user is None:
+            stats = self.db.get_guild_message_activity_stats(guild_id, days=365)
+            
+            if stats['total_365d'] == 0:
+                embed = create_embed(f"📊 Server Chat History - {interaction.guild.name}", discord.Color.blue())
+                embed.description = "No message activity recorded in the last 365 days."
+                await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
+                return
+            
+            # Create guild-wide stats embed
+            embed = create_embed(f"📊 Server Chat History - {interaction.guild.name}", discord.Color.blue())
+            
+            embed.description = "**📈 Long-Term Statistics (365 days)**\n"
+            embed.description += f"• Total Messages: **{stats['total_365d']:,}**\n"
+            embed.description += f"• Average/Day: **{stats['avg_per_day']:,}**\n"
+            
+            if stats['busiest_day']:
+                busiest_str = format_timestamp(stats['busiest_day']['date'], 'D')
+                embed.description += f"• Busiest Day: **{stats['busiest_day']['count']:,}** on {busiest_str}\n"
+            
+            if stats['quietest_day']:
+                quietest_str = format_timestamp(stats['quietest_day']['date'], 'D')
+                embed.description += f"• Quietest Day: **{stats['quietest_day']['count']:,}** on {quietest_str}\n"
+            
+            embed.description += "\n**📊 Activity by Period**\n"
+            embed.description += f"• Last 30 days: **{stats['total_30d']:,}** messages\n"
+            embed.description += f"• Last 90 days: **{stats['total_90d']:,}** messages\n"
+            embed.description += f"• Last 365 days: **{stats['total_365d']:,}** messages\n\n"
+            
+            embed.description += "**📅 Recent Activity**\n"
+            embed.description += f"• Today: **{stats['today']:,}** messages\n"
+            embed.description += f"• This week: **{stats['total_7d']:,}** messages\n"
+            embed.description += f"• This month: **{stats['total_30d']:,}** messages\n\n"
+            
+            # Get total member count for comparison
+            total_members = len([m for m in interaction.guild.members if not m.bot])
+            
+            embed.description += "**👥 Member Stats**\n"
+            embed.description += f"• Active members (30d): **{stats['active_members_30d']:,}** / {total_members:,}\n"
+            if stats['avg_per_member'] > 0:
+                embed.description += f"• Messages per active member: **{stats['avg_per_member']:,}**\n"
+            
+            embed.set_footer(text="Activity data spans the last 365 days • Use /chat-history @user for individual stats")
+            
+            await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
+            logger.info(f"User {interaction.user} used /chat-history (guild-wide) in guild {interaction.guild.name}")
+            return
+
+        # User-specific stats (existing functionality)
         search_term = parse_user_mention(user)
 
         # Find member in database
