@@ -5,7 +5,10 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 import json
-from datetime import datetime
+import re
+import csv
+from io import StringIO
+from datetime import datetime, timezone, timedelta
 
 from database import DatabaseManager
 from bot.utils import (
@@ -715,6 +718,769 @@ class CommandsCog(commands.Cog):
         embed.set_footer(text="Use /help to see available commands")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="search", description="🔍 Search and filter server members")
+    @app_commands.guild_only()
+    @app_commands.describe(
+        roles="Filter by roles (comma-separated, e.g., @Mod,@Admin)",
+        status="Filter by presence: online, offline, idle, dnd, or all",
+        inactive="Days since last seen (e.g., >30, <7, =14)",
+        activity="Message count in last 30 days (e.g., >100, <10)",
+        joined="Filter by join date (e.g., >2024-01-01, <2023-06-01)",
+        username="Search username (partial match)",
+        export="Export results as file: csv, txt, or none"
+    )
+    async def search(
+        self,
+        interaction: discord.Interaction,
+        roles: str = None,
+        status: str = None,
+        inactive: str = None,
+        activity: str = None,
+        joined: str = None,
+        username: str = None,
+        export: str = "none"
+    ):
+        """Advanced member search with filtering and export."""
+        # Check admin permission
+        if not has_bot_admin_role(interaction.user, interaction.guild):
+            await interaction.response.send_message(
+                "❌ This command requires admin permissions.",
+                ephemeral=True
+            )
+            return
+
+        # Validate export parameter
+        if export and export.lower() not in ['none', 'csv', 'txt']:
+            await interaction.response.send_message(
+                f"❌ Invalid export format: '{export}'. Use: csv, txt, or none",
+                ephemeral=True
+            )
+            return
+
+        # Defer response since this might take a while
+        # Use ephemeral so exports are private
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        if not guild:
+            await interaction.followup.send("❌ This command can only be used in a server.", ephemeral=True)
+            return
+        
+        guild_id = guild.id
+
+        try:
+            # Parse all filter parameters
+            filters = self._parse_search_filters(
+                roles=roles,
+                status=status,
+                inactive=inactive,
+                activity=activity,
+                joined=joined,
+                username=username,
+                guild=guild
+            )
+        except ValueError as e:
+            await interaction.followup.send(f"❌ Invalid filter syntax: {e}", ephemeral=True)
+            return
+
+        # Get all members from database
+        db_members = self.db.get_guild_members(guild_id, include_left=False)
+
+        # Get Discord members from cache (pre-chunked in on_ready)
+        discord_members = {m.id: m for m in guild.members}
+
+        # Apply filters
+        filtered = []
+        cache_misses = 0
+        
+        for member_data in db_members:
+            discord_member = discord_members.get(member_data['user_id'])
+            
+            if not discord_member:
+                cache_misses += 1
+                # Member not in cache (left server or cache incomplete)
+                if filters.get('status') or filters.get('roles'):
+                    # Skip - these filters require Discord data
+                    continue
+                # Database-only filters still work
+                if self._matches_db_filters(member_data, filters):
+                    filtered.append(self._create_db_only_result(member_data))
+            else:
+                # Full Discord data available
+                if self._matches_all_filters(member_data, discord_member, filters):
+                    filtered.append(self._enrich_member_data(member_data, discord_member))
+
+        # Log cache misses
+        if cache_misses > 0:
+            logger.warning(f"Search had {cache_misses} cache misses in guild {guild_id}")
+
+        # Check if no results
+        if len(filtered) == 0:
+            await interaction.followup.send(
+                "No members found matching your filters. Try adjusting your criteria.",
+                ephemeral=True
+            )
+            return
+
+        # Apply result limit
+        MAX_RESULTS = 1000
+        if len(filtered) > MAX_RESULTS:
+            await interaction.followup.send(
+                f"⚠️ Found {len(filtered)} members. Showing first {MAX_RESULTS}. "
+                f"Consider adding more filters to narrow results.",
+                ephemeral=True
+            )
+            filtered = filtered[:MAX_RESULTS]
+
+        # Sort by last_seen (most recent first)
+        filtered.sort(key=lambda x: x.get('last_seen_ts', 0), reverse=True)
+
+        # Handle export or display
+        if export.lower() in ["csv", "txt"]:
+            await self._export_search_results(interaction, filtered, export.lower(), filters)
+        else:
+            await self._display_search_results(interaction, filtered, filters)
+
+    def _parse_search_filters(self, roles, status, inactive, activity, joined, username, guild) -> dict:
+        """Parse and validate all filter parameters."""
+        filters = {}
+
+        # Parse roles
+        if roles:
+            role_list = []
+            
+            # Detect if input contains Discord role mentions (<@&123>)
+            if '<@&' in roles:
+                # Discord mention format: split by spaces
+                role_strings = roles.split()
+            else:
+                # Plain text format: split by commas (supports multi-word role names)
+                role_strings = [r.strip() for r in roles.split(',')]
+            
+            logger.info(f"Role filter input: '{roles}' -> parsed as: {role_strings}")
+            
+            for role_str in role_strings:
+                role_str = role_str.strip()
+                if not role_str:
+                    continue
+                    
+                # Handle @mention format <@&123456>
+                if role_str.startswith('<@&') and role_str.endswith('>'):
+                    try:
+                        role_id = int(role_str[3:-1])
+                        role = guild.get_role(role_id)
+                        if role:
+                            role_list.append(role.id)
+                            logger.info(f"  Found role by mention: {role.name} (ID: {role.id})")
+                    except ValueError:
+                        # Invalid role ID format, skip
+                        logger.warning(f"  Invalid role mention format: {role_str}")
+                        continue
+                else:
+                    # Search by name (case-insensitive)
+                    role = discord.utils.find(lambda r: r.name.lower() == role_str.lower(), guild.roles)
+                    if role:
+                        role_list.append(role.id)
+                        logger.info(f"  Found role by name: '{role_str}' -> {role.name} (ID: {role.id})")
+                    else:
+                        logger.warning(f"  Role not found: '{role_str}'")
+            
+            if role_list:
+                filters['roles'] = role_list
+                logger.info(f"Final role filter: {len(role_list)} role(s) - IDs: {role_list}")
+            else:
+                # User specified role filter but no valid roles found
+                # Set to empty list to force no results (instead of None which means "no filter")
+                filters['roles'] = []
+                logger.warning("No valid roles found in filter - will return 0 results")
+
+        # Parse status
+        if status:
+            status_lower = status.lower()
+            if status_lower not in ['online', 'offline', 'idle', 'dnd', 'all']:
+                raise ValueError("Status must be: online, offline, idle, dnd, or all")
+            filters['status'] = status_lower if status_lower != 'all' else None
+
+        # Parse inactive (days)
+        if inactive:
+            filters['inactive'] = self._parse_filter_value(inactive, 'days')
+
+        # Parse activity (message count)
+        if activity:
+            filters['activity'] = self._parse_filter_value(activity, 'messages')
+
+        # Parse joined date
+        if joined:
+            filters['joined'] = self._parse_date_filter(joined)
+
+        # Parse username
+        if username:
+            filters['username'] = username.lower()
+
+        return filters
+
+    def _parse_filter_value(self, filter_str: str, unit: str) -> dict:
+        """Parse comparison filters like >30, <7, =14."""
+        match = re.match(r'^([<>=]?)(\d+)$', filter_str.strip())
+        if not match:
+            raise ValueError(f"Invalid {unit} filter format. Use: >30, <7, or =14")
+        
+        operator = match.group(1) or '='
+        try:
+            value = int(match.group(2))
+        except ValueError:
+            raise ValueError(f"Invalid numeric value in {unit} filter")
+        
+        # Bounds checking to prevent unreasonable values
+        if unit == 'days' and (value < 0 or value > 36500):  # ~100 years
+            raise ValueError(f"Days value must be between 0 and 36500 (got {value})")
+        elif unit == 'messages' and (value < 0 or value > 10000000):  # 10M messages
+            raise ValueError(f"Message count must be between 0 and 10,000,000 (got {value})")
+        
+        return {'operator': operator, 'value': value}
+
+    def _parse_date_filter(self, date_str: str) -> dict:
+        """Parse date filters like >2024-01-01."""
+        match = re.match(r'^([<>=]?)(\d{4}-\d{2}-\d{2})$', date_str.strip())
+        if not match:
+            raise ValueError("Invalid date format. Use: >2024-01-01 or <2023-12-31")
+        
+        operator = match.group(1) or '='
+        try:
+            date = datetime.strptime(match.group(2), '%Y-%m-%d')
+        except ValueError:
+            raise ValueError(f"Invalid date: {match.group(2)}")
+        
+        # Validate date is reasonable (Discord launched in 2015)
+        if date.year < 2015:
+            raise ValueError("Date must be 2015 or later (Discord launch year)")
+        if date.year > 2100:
+            raise ValueError("Date must be before year 2100")
+        
+        timestamp = int(date.replace(tzinfo=timezone.utc).timestamp())
+        
+        return {'operator': operator, 'value': timestamp}
+
+    def _compare(self, actual: float, filter_spec: dict) -> bool:
+        """Compare actual value against filter specification."""
+        operator = filter_spec['operator']
+        expected = filter_spec['value']
+        
+        if operator == '>':
+            return actual > expected
+        elif operator == '<':
+            return actual < expected
+        else:  # '='
+            return actual == expected
+
+    def _matches_db_filters(self, member_data: dict, filters: dict) -> bool:
+        """Check if member matches database-only filters (no Discord data needed)."""
+        # Username filter (searches both username and nickname/display_name)
+        if filters.get('username'):
+            username_lower = member_data['username'].lower()
+            nickname_lower = (member_data.get('nickname') or member_data.get('display_name') or '').lower()
+            search_term = filters['username']
+            
+            # Check if search term appears in either username or nickname
+            if search_term not in username_lower and search_term not in nickname_lower:
+                return False
+
+        # Inactive filter
+        if filters.get('inactive'):
+            last_seen = member_data.get('last_seen')
+            if last_seen and last_seen > 0:
+                # Member has been seen before, calculate days since
+                days_inactive = (datetime.now(timezone.utc).timestamp() - last_seen) / 86400
+                if not self._compare(days_inactive, filters['inactive']):
+                    return False
+            else:
+                # No last_seen data or last_seen = 0 (currently online/never tracked)
+                # Treat as 0 days inactive
+                if not self._compare(0, filters['inactive']):
+                    return False
+
+        # Joined filter
+        if filters.get('joined'):
+            # Database uses 'join_date' column, not 'joined_at'
+            joined_at = member_data.get('join_date') or member_data.get('joined_at')
+            if joined_at:
+                if not self._compare(joined_at, filters['joined']):
+                    return False
+            else:
+                # No join date data - exclude from filter
+                logger.debug(f"Member {member_data.get('user_id')} has no join_date, excluding from joined filter")
+                return False
+
+        return True
+
+    def _matches_all_filters(self, member_data: dict, discord_member: discord.Member, filters: dict) -> bool:
+        """Check if member matches all filters (both DB and Discord data)."""
+        # First check database filters
+        if not self._matches_db_filters(member_data, filters):
+            return False
+
+        # Role filter (Discord data)
+        if filters.get('roles') is not None:  # Check for None specifically, not just falsy
+            member_role_ids = {r.id for r in discord_member.roles}
+            # If filter is empty list, no members match
+            if not filters['roles']:
+                return False
+            # Otherwise check if member has any of the specified roles
+            if not any(role_id in member_role_ids for role_id in filters['roles']):
+                return False
+
+        # Status filter (Discord data)
+        if filters.get('status'):
+            if str(discord_member.status) != filters['status']:
+                return False
+
+        # Activity filter (requires database query)
+        if filters.get('activity'):
+            try:
+                activity_data = self.db.get_message_activity_period(
+                    member_data['guild_id'],
+                    member_data['user_id'],
+                    days=30
+                )
+                if not self._compare(activity_data.get('total', 0), filters['activity']):
+                    return False
+            except Exception as e:
+                logger.error(f"Failed to get activity data for user {member_data['user_id']}: {e}")
+                # Treat as 0 activity on error
+                if not self._compare(0, filters['activity']):
+                    return False
+
+        return True
+
+    def _create_db_only_result(self, member_data: dict) -> dict:
+        """Create result dict from database data only (no Discord data)."""
+        last_seen = member_data.get('last_seen')
+        return {
+            'username': member_data['username'],
+            'display_name': member_data.get('display_name', ''),
+            'user_id': member_data['user_id'],
+            'status': 'Unknown',
+            'last_seen': last_seen,
+            'last_seen_ts': last_seen if last_seen is not None else 0,
+            'last_seen_str': self._format_relative_time(last_seen),
+            'joined_at': member_data.get('join_date'),
+            'joined_at_str': self._format_relative_time(member_data.get('join_date')),
+            'join_position': member_data.get('join_position', 'N/A'),
+            'roles': [],
+            'is_tracked': member_data.get('is_tracked', True),
+            'activity_30d': 0,
+            'activity_7d': 0,
+            'activity_today': 0
+        }
+
+    def _enrich_member_data(self, member_data: dict, discord_member: discord.Member) -> dict:
+        """Enrich database data with Discord member information."""
+        last_seen = member_data.get('last_seen')
+        
+        # Get activity data with error handling
+        try:
+            activity_data = self.db.get_message_activity_period(
+                member_data['guild_id'],
+                member_data['user_id'],
+                days=30
+            )
+        except Exception as e:
+            logger.error(f"Failed to get activity data for user {member_data['user_id']}: {e}")
+            activity_data = {'total': 0, 'this_week': 0, 'today': 0}
+        
+        return {
+            'username': discord_member.name,
+            'display_name': discord_member.display_name,
+            'user_id': discord_member.id,
+            'status': str(discord_member.status),
+            'last_seen': last_seen,
+            'last_seen_ts': last_seen if last_seen is not None else 0,
+            'last_seen_str': self._format_relative_time(last_seen),
+            'joined_at': member_data.get('join_date'),
+            'joined_at_str': self._format_relative_time(member_data.get('join_date')),
+            'join_position': member_data.get('join_position', 'N/A'),
+            'roles': [r.name for r in discord_member.roles if r.name != '@everyone'],
+            'is_tracked': member_data.get('is_tracked', True),
+            'activity_30d': activity_data.get('total', 0),
+            'activity_7d': activity_data.get('this_week', 0),
+            'activity_today': activity_data.get('today', 0)
+        }
+
+    def _format_relative_time(self, timestamp: int) -> str:
+        """Format timestamp as relative time."""
+        if timestamp is None:
+            return 'Never'
+        
+        if timestamp == 0:
+            return 'Online now'
+        
+        # Validate timestamp is reasonable (not negative, not too far in future)
+        if timestamp < 0:
+            return 'Invalid date'
+        
+        try:
+            now = datetime.now(timezone.utc)
+            dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            return 'Invalid date'
+        delta = now - dt
+        
+        if delta.days > 365:
+            return f"{delta.days // 365}y ago"
+        elif delta.days > 30:
+            return f"{delta.days // 30}mo ago"
+        elif delta.days > 0:
+            return f"{delta.days}d ago"
+        elif delta.seconds > 3600:
+            return f"{delta.seconds // 3600}h ago"
+        elif delta.seconds > 60:
+            return f"{delta.seconds // 60}m ago"
+        else:
+            return "Just now"
+
+    async def _display_search_results(self, interaction: discord.Interaction, results: list, filters: dict):
+        """Display search results with pagination."""
+        # Create SearchResultsView
+        view = SearchResultsView(results, filters, per_page=15)
+        embed = view.create_embed()
+        await interaction.followup.send(embed=embed, view=view)
+
+    async def _export_search_results(self, interaction: discord.Interaction, results: list, format: str, filters: dict):
+        """Export search results to file."""
+        try:
+            if format == "csv":
+                file = self._generate_csv(results)
+            else:  # txt
+                file = self._generate_txt(results, filters)
+            
+            await interaction.followup.send(
+                f"✅ Exported {len(results)} members to {format.upper()}",
+                file=file,
+                ephemeral=True
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate export: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ Failed to generate export: {e}", ephemeral=True)
+
+    def _generate_csv(self, results: list) -> discord.File:
+        """Generate CSV export with all member data."""
+        output = StringIO()
+        writer = csv.DictWriter(output, fieldnames=[
+            'Username', 'Display Name', 'User ID', 'Status',
+            'Last Seen', 'Joined At', 'Join Position',
+            'Messages (30d)', 'Messages (7d)', 'Messages (Today)',
+            'Roles', 'Is Tracked'
+        ], quoting=csv.QUOTE_ALL)  # Quote all fields for safety
+        
+        writer.writeheader()
+        for member in results:
+            # Sanitize strings to prevent CSV injection
+            username = str(member['username']).replace('\n', ' ').replace('\r', '')
+            display_name = str(member.get('display_name', '')).replace('\n', ' ').replace('\r', '')
+            roles = ', '.join(str(r).replace('\n', ' ').replace('\r', '') for r in member.get('roles', []))
+            
+            writer.writerow({
+                'Username': username,
+                'Display Name': display_name,
+                'User ID': member['user_id'],
+                'Status': member.get('status', 'Unknown'),
+                'Last Seen': member['last_seen_str'],
+                'Joined At': member['joined_at_str'],
+                'Join Position': member.get('join_position', 'N/A'),
+                'Messages (30d)': member.get('activity_30d', 0),
+                'Messages (7d)': member.get('activity_7d', 0),
+                'Messages (Today)': member.get('activity_today', 0),
+                'Roles': roles,
+                'Is Tracked': 'Yes' if member['is_tracked'] else 'No'
+            })
+        
+        output.seek(0)
+        filename = f"member_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        return discord.File(fp=StringIO(output.getvalue()), filename=filename)
+
+    def _generate_txt(self, results: list, filters: dict) -> discord.File:
+        """Generate readable text export."""
+        output = StringIO()
+        output.write(f"Member Search Results - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n")
+        output.write(f"Total Members: {len(results)}\n")
+        
+        # Write filter summary
+        filter_text = self._format_filter_summary(filters)
+        if filter_text:
+            output.write(f"\nFilters Applied:\n{filter_text}\n")
+        
+        output.write("=" * 80 + "\n\n")
+        
+        for i, member in enumerate(results, 1):
+            output.write(f"{i}. {member['username']}")
+            if member['display_name'] and member['display_name'] != member['username']:
+                output.write(f" ({member['display_name']})")
+            output.write("\n")
+            output.write(f"   User ID: {member['user_id']}\n")
+            output.write(f"   Status: {member.get('status', 'Unknown')}\n")
+            output.write(f"   Last Seen: {member['last_seen_str']}\n")
+            output.write(f"   Joined: {member['joined_at_str']}\n")
+            output.write(f"   Activity: {member.get('activity_30d', 0)} msgs (30d), "
+                        f"{member.get('activity_7d', 0)} msgs (7d), "
+                        f"{member.get('activity_today', 0)} today\n")
+            if member.get('roles'):
+                output.write(f"   Roles: {', '.join(member['roles'])}\n")
+            output.write("\n")
+        
+        output.seek(0)
+        filename = f"member_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        return discord.File(fp=output, filename=filename)
+
+    def _format_filter_summary(self, filters: dict) -> str:
+        """Format filter dictionary into readable summary."""
+        lines = []
+        if filters.get('roles'):
+            lines.append(f"  • Roles: {len(filters['roles'])} role(s)")
+        if filters.get('status'):
+            lines.append(f"  • Status: {filters['status']}")
+        if filters.get('inactive'):
+            lines.append(f"  • Inactive: {filters['inactive']['operator']}{filters['inactive']['value']} days")
+        if filters.get('activity'):
+            lines.append(f"  • Activity: {filters['activity']['operator']}{filters['activity']['value']} messages")
+        if filters.get('joined'):
+            try:
+                date_str = datetime.fromtimestamp(filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
+                lines.append(f"  • Joined: {filters['joined']['operator']}{date_str}")
+            except (ValueError, OSError, OverflowError):
+                lines.append(f"  • Joined: {filters['joined']['operator']}[Invalid Date]")
+        if filters.get('username'):
+            lines.append(f"  • Username contains: '{filters['username']}'")
+        return '\n'.join(lines) if lines else None
+
+
+class SearchResultsView(discord.ui.View):
+    """Interactive pagination view for search results."""
+
+    def __init__(self, results: list, filters: dict, per_page: int = 15):
+        super().__init__(timeout=300)  # 5 minute timeout
+        self.results = results if results else []
+        self.filters = filters
+        self.per_page = max(1, per_page)  # Ensure at least 1 per page
+        self.current_page = 0
+        self.max_page = max(0, (len(self.results) - 1) // self.per_page) if self.results else 0
+        
+        # Update button states
+        self._update_buttons()
+
+    def _update_buttons(self):
+        """Update button enabled/disabled states."""
+        self.prev_button.disabled = (self.current_page == 0)
+        self.next_button.disabled = (self.current_page == self.max_page)
+        
+        # Disable all buttons if only one page
+        if self.max_page == 0:
+            self.prev_button.disabled = True
+            self.next_button.disabled = True
+
+    def create_embed(self) -> discord.Embed:
+        """Create embed for current page."""
+        # Bounds check to prevent index errors
+        if not self.results:
+            return discord.Embed(
+                title="🔍 Member Search Results",
+                description="No results to display",
+                color=discord.Color.blue()
+            )
+        
+        # Ensure current_page is within bounds
+        self.current_page = max(0, min(self.current_page, self.max_page))
+        
+        start = self.current_page * self.per_page
+        end = min(start + self.per_page, len(self.results))
+        page_results = self.results[start:end]
+        
+        embed = discord.Embed(
+            title="🔍 Member Search Results",
+            description=f"Found **{len(self.results)}** members",
+            color=discord.Color.blue()
+        )
+        
+        # Add filter summary
+        filter_text = self._format_filters()
+        if filter_text:
+            # Discord embed field value limit is 1024 characters
+            if len(filter_text) > 1024:
+                filter_text = filter_text[:1021] + "..."
+            embed.add_field(name="Filters Applied", value=filter_text, inline=False)
+        
+        # Add results
+        result_lines = []
+        for i, member in enumerate(page_results, start=start+1):
+            status_emoji = {
+                'online': '🟢',
+                'idle': '🟡',
+                'dnd': '🔴',
+                'offline': '⚫',
+                'Unknown': '⚪'
+            }.get(member.get('status', 'Unknown'), '⚪')
+            
+            # Sanitize member data to prevent display issues
+            username = str(member['username'])[:32]  # Discord max username length
+            display_name = str(member.get('display_name', ''))[:32] if member.get('display_name') else None
+            
+            line = f"**{i}.** {status_emoji} {username}"
+            if display_name and display_name != username:
+                line += f" *({display_name})*"
+            line += f"\n   Last seen: {member['last_seen_str']}"
+            if member.get('activity_30d', 0) > 0:
+                line += f" • {member['activity_30d']} msgs (30d)"
+            result_lines.append(line)
+        
+        # Join results and check field value limit (1024 characters)
+        result_text = '\n\n'.join(result_lines)
+        if len(result_text) > 1024:
+            # If too long, truncate with warning
+            result_text = result_text[:1000] + "\n\n... (truncated, use export for full list)"
+        
+        embed.add_field(name="Members", value=result_text, inline=False)
+        
+        embed.set_footer(text=f"Page {self.current_page + 1}/{self.max_page + 1} • Use buttons to navigate or export")
+        return embed
+
+    def _format_filters(self) -> str:
+        """Format filters into readable string."""
+        lines = []
+        if self.filters.get('roles'):
+            lines.append(f"• **Roles:** {len(self.filters['roles'])} role(s)")
+        if self.filters.get('status'):
+            lines.append(f"• **Status:** {self.filters['status']}")
+        if self.filters.get('inactive'):
+            lines.append(f"• **Inactive:** {self.filters['inactive']['operator']}{self.filters['inactive']['value']} days")
+        if self.filters.get('activity'):
+            lines.append(f"• **Activity:** {self.filters['activity']['operator']}{self.filters['activity']['value']} msgs")
+        if self.filters.get('joined'):
+            try:
+                date_str = datetime.fromtimestamp(self.filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
+                lines.append(f"• **Joined:** {self.filters['joined']['operator']}{date_str}")
+            except (ValueError, OSError, OverflowError):
+                lines.append(f"• **Joined:** {self.filters['joined']['operator']}[Invalid Date]")
+        if self.filters.get('username'):
+            lines.append(f"• **Username:** contains '{self.filters['username']}'")
+        return '\n'.join(lines) if lines else "No filters applied"
+
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.primary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Go to previous page."""
+        self.current_page = max(0, self.current_page - 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Go to next page."""
+        self.current_page = min(self.max_page, self.current_page + 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @discord.ui.button(label="📄 Export CSV", style=discord.ButtonStyle.green)
+    async def export_csv_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Export results as CSV."""
+        await interaction.response.defer(ephemeral=True)
+        try:
+            output = StringIO()
+            writer = csv.DictWriter(output, fieldnames=[
+                'Username', 'Display Name', 'User ID', 'Status',
+                'Last Seen', 'Joined At', 'Join Position',
+                'Messages (30d)', 'Messages (7d)', 'Messages (Today)',
+                'Roles', 'Is Tracked'
+            ], quoting=csv.QUOTE_ALL)  # Quote all fields for safety
+            
+            writer.writeheader()
+            for member in self.results:
+                # Sanitize strings to prevent CSV injection
+                username = str(member['username']).replace('\n', ' ').replace('\r', '')
+                display_name = str(member.get('display_name', '')).replace('\n', ' ').replace('\r', '')
+                roles = ', '.join(str(r).replace('\n', ' ').replace('\r', '') for r in member.get('roles', []))
+                
+                writer.writerow({
+                    'Username': username,
+                    'Display Name': display_name,
+                    'User ID': member['user_id'],
+                    'Status': member.get('status', 'Unknown'),
+                    'Last Seen': member['last_seen_str'],
+                    'Joined At': member['joined_at_str'],
+                    'Join Position': member.get('join_position', 'N/A'),
+                    'Messages (30d)': member.get('activity_30d', 0),
+                    'Messages (7d)': member.get('activity_7d', 0),
+                    'Messages (Today)': member.get('activity_today', 0),
+                    'Roles': roles,
+                    'Is Tracked': 'Yes' if member['is_tracked'] else 'No'
+                })
+            
+            output.seek(0)
+            filename = f"member_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            file = discord.File(fp=StringIO(output.getvalue()), filename=filename)
+            await interaction.followup.send(
+                f"✅ Exported {len(self.results)} members to CSV",
+                file=file,
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Export failed: {e}", ephemeral=True)
+
+    @discord.ui.button(label="📝 Export TXT", style=discord.ButtonStyle.green)
+    async def export_txt_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Export results as TXT."""
+        await interaction.response.defer(ephemeral=True)
+        try:
+            output = StringIO()
+            output.write(f"Member Search Results - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n")
+            output.write(f"Total Members: {len(self.results)}\n")
+            
+            # Write filter summary
+            filter_lines = []
+            if self.filters.get('roles'):
+                filter_lines.append(f"  • Roles: {len(self.filters['roles'])} role(s)")
+            if self.filters.get('status'):
+                filter_lines.append(f"  • Status: {self.filters['status']}")
+            if self.filters.get('inactive'):
+                filter_lines.append(f"  • Inactive: {self.filters['inactive']['operator']}{self.filters['inactive']['value']} days")
+            if self.filters.get('activity'):
+                filter_lines.append(f"  • Activity: {self.filters['activity']['operator']}{self.filters['activity']['value']} messages")
+            if self.filters.get('joined'):
+                date_str = datetime.fromtimestamp(self.filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
+                filter_lines.append(f"  • Joined: {self.filters['joined']['operator']}{date_str}")
+            if self.filters.get('username'):
+                filter_lines.append(f"  • Username contains: '{self.filters['username']}'")
+            
+            if filter_lines:
+                output.write(f"\nFilters Applied:\n")
+                output.write('\n'.join(filter_lines) + '\n')
+            
+            output.write("=" * 80 + "\n\n")
+            
+            for i, member in enumerate(self.results, 1):
+                output.write(f"{i}. {member['username']}")
+                if member['display_name'] and member['display_name'] != member['username']:
+                    output.write(f" ({member['display_name']})")
+                output.write("\n")
+                output.write(f"   User ID: {member['user_id']}\n")
+                output.write(f"   Status: {member.get('status', 'Unknown')}\n")
+                output.write(f"   Last Seen: {member['last_seen_str']}\n")
+                output.write(f"   Joined: {member['joined_at_str']}\n")
+                output.write(f"   Activity: {member.get('activity_30d', 0)} msgs (30d), "
+                            f"{member.get('activity_7d', 0)} msgs (7d), "
+                            f"{member.get('activity_today', 0)} today\n")
+                if member.get('roles'):
+                    output.write(f"   Roles: {', '.join(member['roles'])}\n")
+                output.write("\n")
+            
+            output.seek(0)
+            filename = f"member_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            file = discord.File(fp=output, filename=filename)
+            await interaction.followup.send(
+                f"✅ Exported {len(self.results)} members to TXT",
+                file=file,
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(f"❌ Export failed: {e}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     """

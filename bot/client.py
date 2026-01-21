@@ -80,9 +80,27 @@ def create_bot(config) -> commands.Bot:
         logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
         logger.info(f"Connected to {len(bot.guilds)} guilds")
 
-        # Enumerate all guilds
+        # Chunk all guilds to populate complete member cache
+        # This is required for /search command to access all members
+        logger.info("Checking guild member cache status...")
         for guild in bot.guilds:
-            logger.info(f"  - {guild.name} (ID: {guild.id}, Members: {guild.member_count})")
+            if guild.chunked:
+                # Guild was auto-chunked by Discord (small servers <75k members)
+                logger.info(f"  ✓ {guild.name}: Already chunked ({len(guild.members)}/{guild.member_count} members cached)")
+            else:
+                # Need to manually chunk (large servers)
+                logger.info(f"  ⟳ {guild.name}: Chunking {guild.member_count} members...")
+                try:
+                    await guild.chunk()
+                    logger.info(f"    ✓ Loaded {len(guild.members)} members into cache")
+                except Exception as e:
+                    logger.error(f"    ✗ Failed to chunk: {e}")
+
+        # Summary
+        logger.info("Guild cache summary:")
+        for guild in bot.guilds:
+            cache_status = "✓ Complete" if len(guild.members) == guild.member_count else f"⚠ Partial ({len(guild.members)}/{guild.member_count})"
+            logger.info(f"  - {guild.name} (ID: {guild.id}): {cache_status}")
 
         # Sync commands with Discord (must be done after bot is ready)
         try:

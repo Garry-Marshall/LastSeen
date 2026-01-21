@@ -711,6 +711,48 @@ class DatabaseManager:
             logger.error(f"Failed to get inactive members for guild {guild_id}: {e}")
             return []
 
+    def get_guild_members(self, guild_id: int, include_left: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get members in a guild with optional filtering.
+
+        Args:
+            guild_id: Discord guild ID
+            include_left: If True, includes members who have left the server
+
+        Returns:
+            List of member data dicts
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if include_left:
+                    # Get all members including those who left
+                    cursor.execute("""
+                        SELECT * FROM members WHERE guild_id = ?
+                        ORDER BY last_seen DESC
+                    """, (guild_id,))
+                else:
+                    # Only get current members (is_active = 1)
+                    cursor.execute("""
+                        SELECT * FROM members 
+                        WHERE guild_id = ? AND is_active = 1
+                        ORDER BY last_seen DESC
+                    """, (guild_id,))
+
+                members = []
+                for row in cursor.fetchall():
+                    data = dict(row)
+                    if data['roles']:
+                        data['roles'] = json.loads(data['roles'])
+                    else:
+                        data['roles'] = []
+                    members.append(data)
+                return members
+        except Exception as e:
+            logger.error(f"Failed to get guild members for guild {guild_id}: {e}")
+            return []
+
     def get_all_guild_members(self, guild_id: int) -> List[Dict[str, Any]]:
         """Get all members in a guild."""
         try:
