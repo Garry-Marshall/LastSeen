@@ -66,6 +66,9 @@ class TrackingCog(commands.Cog):
             for i in range(0, len(members_sorted), chunk_size):
                 chunk = members_sorted[i:i+chunk_size]
                 for idx, member in enumerate(chunk, start=i+1):
+                    # Ensure member exists in database first
+                    self._ensure_member_exists(member)
+                    # Then set their join position
                     if self.db.set_member_join_position(guild_id, member.id, idx):
                         updated_count += 1
                 
