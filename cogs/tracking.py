@@ -441,20 +441,20 @@ class TrackingCog(commands.Cog):
             self.db.update_member_roles(guild_id, user_id, roles)
             
             # Track individual role changes for history
-            before_role_names = {role.name for role in before.roles}
-            after_role_names = {role.name for role in after.roles}
+            before_role_names = {role.name for role in before.roles if role.name}  # Filter out None
+            after_role_names = {role.name for role in after.roles if role.name}  # Filter out None
             
             # Detect added roles
             added_roles = after_role_names - before_role_names
             for role_name in added_roles:
-                if role_name != "@everyone":  # Don't track @everyone
+                if role_name and role_name != "@everyone" and role_name.strip():  # Validate role name
                     self.db.record_role_change(guild_id, user_id, role_name, "added")
                     logger.debug(f"Recorded: Role '{role_name}' added to {after}")
             
             # Detect removed roles
             removed_roles = before_role_names - after_role_names
             for role_name in removed_roles:
-                if role_name != "@everyone":  # Don't track @everyone
+                if role_name and role_name != "@everyone" and role_name.strip():  # Validate role name
                     self.db.record_role_change(guild_id, user_id, role_name, "removed")
                     logger.debug(f"Recorded: Role '{role_name}' removed from {after}")
 

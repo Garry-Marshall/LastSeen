@@ -964,6 +964,15 @@ class DatabaseManager:
         Returns:
             bool: True if successful, False otherwise
         """
+        # Validate inputs
+        if not role_name or not isinstance(role_name, str) or not role_name.strip():
+            logger.error(f"Invalid role_name: {role_name}")
+            return False
+        
+        if action not in ("added", "removed"):
+            logger.error(f"Invalid action '{action}', must be 'added' or 'removed'")
+            return False
+        
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -972,10 +981,54 @@ class DatabaseManager:
                 cursor.execute("""
                     INSERT INTO role_changes (guild_id, user_id, role_name, action, timestamp)
                     VALUES (?, ?, ?, ?, ?)
-                """, (guild_id, user_id, role_name, action, current_time))
+                """, (guild_id, user_id, role_name.strip(), action, current_time))
+                
+                # Cleanup old role changes (keep only last 20)
+                self._cleanup_role_changes(conn, guild_id, user_id)
                 return True
         except Exception as e:
             logger.error(f"Failed to record role change for user {user_id} in guild {guild_id}: {e}")
+            return False
+
+    def _cleanup_role_changes(self, conn, guild_id: int, user_id: int, keep_count: int = 20) -> bool:
+        """
+        Remove old role changes, keeping only the most recent ones.
+
+        Args:
+            conn: Database connection
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            keep_count: Number of recent records to keep (default 20)
+
+        Returns:
+            bool: True if successful
+        """
+        try:
+            cursor = conn.cursor()
+            
+            # Get the ID of the 20th most recent record
+            cursor.execute("""
+                SELECT id FROM role_changes
+                WHERE guild_id = ? AND user_id = ?
+                ORDER BY timestamp DESC
+                LIMIT 1 OFFSET ?
+            """, (guild_id, user_id, keep_count - 1))
+            
+            result = cursor.fetchone()
+            if result:
+                # Delete all records older than the 20th most recent
+                cursor.execute("""
+                    DELETE FROM role_changes
+                    WHERE guild_id = ? AND user_id = ? AND id < ?
+                """, (guild_id, user_id, result[0]))
+                
+                deleted_count = cursor.rowcount
+                if deleted_count > 0:
+                    logger.debug(f"Cleaned up {deleted_count} old role changes for user {user_id}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to cleanup role changes for user {user_id}: {e}")
             return False
 
     def get_role_history(self, guild_id: int, user_id: int, limit: int = 20) -> List[Dict[str, Any]]:

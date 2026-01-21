@@ -430,16 +430,24 @@ class CommandsCog(commands.Cog):
         embed.description = f"**Last 20 role changes:**\n\n"
 
         for change in role_changes:
-            role_name = change['role_name']
-            action = change['action']
-            timestamp = change['timestamp']
+            role_name = change.get('role_name', 'Unknown')
+            action = change.get('action', 'unknown')
+            timestamp = change.get('timestamp', 0)
+            
+            # Validate action value
+            if action not in ("added", "removed"):
+                logger.warning(f"Invalid action '{action}' in role_changes for {member_data['user_id']}")
+                continue
+            
+            # Escape markdown in role name (avoid embed formatting issues)
+            escaped_role_name = discord.utils.escape_markdown(role_name) if role_name else "Unknown"
             
             # Format action with emoji
             action_emoji = "➕" if action == "added" else "➖"
             action_text = "Added" if action == "added" else "Removed"
             time_str = format_timestamp(timestamp, 'R')
             
-            embed.description += f"{action_emoji} {action_text}: **{role_name}** ({time_str})\n"
+            embed.description += f"{action_emoji} {action_text}: **{escaped_role_name}** ({time_str})\n"
 
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /role-history for '{user}' in guild {interaction.guild.name}")
