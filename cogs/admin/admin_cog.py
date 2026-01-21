@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 from database import DatabaseManager
-from bot.utils import create_embed, create_error_embed
+from bot.utils import create_embed, create_error_embed, has_bot_admin_role
 from .config_view import ConfigView
 from .permissions import check_admin_permission, get_bot_admin_role_name
 
@@ -272,20 +272,32 @@ class AdminCog(commands.Cog):
                 ephemeral=True
             )
 
-    @app_commands.command(name="help", description="Show bot information and available commands (Admin only)")
+    @app_commands.command(name="help", description="Show bot information and available commands")
     @app_commands.guild_only()
     async def help(self, interaction: discord.Interaction):
         """
-        Display bot information and list of all available commands.
+        Display bot information and list of available commands.
+        Shows all commands for admins, only user commands for 'LastSeen Users' role.
 
         Args:
             interaction: Discord interaction
         """
-        if not await check_admin_permission(interaction, self.db):
+        # Check if user is admin (without auto-responding)
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        is_admin = has_bot_admin_role(interaction.user, bot_admin_role_name)
+        
+        # Check if user has 'LastSeen Users' role
+        user_role_name = guild_config.get('user_role_name', 'LastSeen User') if guild_config else 'LastSeen User'
+        has_user_role = discord.utils.get(interaction.user.roles, name=user_role_name) is not None
+        
+        # If neither admin nor has user role, deny access
+        if not is_admin and not has_user_role:
+            await interaction.response.send_message(
+                embed=create_error_embed(f"You need the '{user_role_name}' role or admin permissions to use this command."),
+                ephemeral=True
+            )
             return
-
-        # Get bot admin role name for footer
-        bot_admin_role_name = get_bot_admin_role_name(self.db, interaction.guild_id)
 
         # Create help embed
         embed = create_embed("LastSeen Bot - Help", discord.Color.blue())
@@ -293,51 +305,52 @@ class AdminCog(commands.Cog):
             "Track user activity, monitor presence, and manage member data across your server."
         )
 
-        # User Commands
+        # User Commands (shown to both admin and users)
         embed.add_field(
             name="👥 User Commands",
             value=(
                 "`/whois <user>` - Show user info, roles, join date, last seen\n"
                 "`/lastseen <user>` or `/seen <user>` - When user was last online\n"
                 "`/inactive` - List members offline beyond threshold\n"
-                "`/server-stats` - Server activity metrics and charts"
+                "`/inactive <days>` - List members offline for <days> days\n"
+                "`/chat-history <user>` - Show message posting stats for the last year\n"
+                "`/server-stats` - Server activity metrics and charts\n"
             ),
             inline=False
         )
 
-        # Admin Commands
-        embed.add_field(
-            name="⚙️ Admin Commands",
-            value=(
-                "`/config` - Configure bot settings:\n"
-                "  • Notification channel & inactive days\n"
-                "  • Admin/user role permissions\n"
-                "  • Track only specific roles (optional)\n"
-                "  • Restrict commands to channels (optional)\n"
-                "  • Update member database\n"
-                "`/health` - Bot status & database health\n"
-                "`/help` - Show this help message"
-            ),
-            inline=False
-        )
+        # Admin Commands (only shown to admins)
+        if is_admin:
+            embed.add_field(
+                name="⚙️ Admin Commands",
+                value=(
+                    "`/config` - Configure bot settings:\n"
+                    "  • Notification channel & inactive days\n"
+                    "  • Admin/user role permissions\n"
+                    "  • Track only specific roles (optional)\n"
+                    "  • Restrict commands to channels (optional)\n"
+                    "  • Update member database\n"
+                    "`/role-history <user>` - Show the last 20 role changes for a member\n"
+                    "`/health` - Bot status & database health\n"
+                    "`/help` - Show this help message"
+                ),
+                inline=False
+            )
 
-        # Permissions & Features
-        embed.add_field(
-            name="🔐 Permissions & Features",
-            value=(
-                "**Access Control**\n"
-                "• Admin: Bot Admin role or Administrator\n"
-                "• Users: Configurable role & channel restrictions\n\n"
-                "**Key Features**\n"
-                "• Presence tracking • Activity statistics\n"
-                "• Role-based visibility • Channel restrictions\n"
-                "• Multi-guild support • Privacy focused"
-            ),
-            inline=False
-        )
-
-        # Footer with helpful info
-        embed.set_footer(text=f"Bot Admin Role: {bot_admin_role_name}")
+            # Permissions & Features (only shown to admins)
+            embed.add_field(
+                name="🔐 Permissions & Features",
+                value=(
+                    "**Access Control**\n"
+                    "• Admin: Bot Admin role or Administrator\n"
+                    "• Users: Configurable role & channel restrictions\n\n"
+                ),
+                inline=False
+            )
+            
+            embed.set_footer(text=f"Bot Admin Role: {bot_admin_role_name} • Showing all commands")
+        else:
+            embed.set_footer(text=f"User role: {user_role_name} • Showing user commands only")
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"User {interaction.user} viewed help in guild {interaction.guild.name}")
