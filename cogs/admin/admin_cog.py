@@ -337,13 +337,16 @@ class AdminCog(commands.Cog):
                 inline=False
             )
 
-            # Permissions & Features (only shown to admins)
             embed.add_field(
-                name="🔐 Permissions & Features",
+                name="🔍 Search & Filter",
                 value=(
-                    "**Access Control**\n"
-                    "• Admin: Bot Admin role or Administrator\n"
-                    "• Users: Configurable role & channel restrictions\n\n"
+                    "`/search` - Advanced member search with filters\n"
+                    "  Examples:\n"
+                    "  • `/search roles:@Moderator status:online`\n"
+                    "  • `/search inactive:>30 activity:<10`\n"
+                    "  • `/search joined:>2025-01-01 export:csv`\n"
+                    "  Filters: roles, status, inactive, activity, joined, username\n"
+                    "  Export: csv or txt format"
                 ),
                 inline=False
             )
