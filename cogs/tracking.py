@@ -73,9 +73,12 @@ class TrackingCog(commands.Cog):
                 await asyncio.sleep(0.1)  # Small delay between chunks to avoid overwhelming the bot
             
             # Mark as initialized
-            self.db.mark_positions_initialized(guild_id)
-            logger.info(f"Successfully initialized positions for {updated_count}/{len(members_sorted)} members in {guild.name}")
-            return True
+            if self.db.mark_positions_initialized(guild_id):
+                logger.info(f"Successfully initialized positions for {updated_count}/{len(members_sorted)} members in {guild.name}")
+                return True
+            else:
+                logger.error(f"Failed to mark guild {guild_id} as initialized after updating positions")
+                return False
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout while fetching members for guild {guild.name} - positions not initialized")
@@ -339,6 +342,11 @@ class TrackingCog(commands.Cog):
         if not channel:
             logger.warning(f"Notification channel {guild_config['notification_channel_id']} not found")
             return
+        
+        # Validate channel is in correct guild
+        if channel.guild.id != guild_id:
+            logger.warning(f"Notification channel {guild_config['notification_channel_id']} is not in guild {guild_id}")
+            return
 
         try:
             embed = create_embed("Member Left", discord.Color.red())
@@ -370,16 +378,16 @@ class TrackingCog(commands.Cog):
             
             # Membership duration
             if member_data['join_date']:
-                join_dt = datetime.fromtimestamp(member_data['join_date'])
+                join_dt = datetime.fromtimestamp(member_data['join_date'], tz=timezone.utc)
                 join_str = discord.utils.format_dt(join_dt, 'F')
                 embed.description += f"📥 Joined: {join_str}\n"
                 
                 # Calculate duration
-                now = datetime.now(join_dt.tzinfo)
+                now = datetime.now(timezone.utc)
                 duration = now - join_dt
                 days = duration.days
                 if days > 0:
-                    embed.description += f"⏱️ Duration: {days} days\n"
+                    embed.description += f"👥 Member for: {days} days\n"
             
             # Last seen
             last_seen_dt = datetime.fromtimestamp(current_time, tz=timezone.utc)
@@ -431,6 +439,24 @@ class TrackingCog(commands.Cog):
             roles = get_member_roles(after)
             logger.info(f"Roles changed for {after}: {roles}")
             self.db.update_member_roles(guild_id, user_id, roles)
+            
+            # Track individual role changes for history
+            before_role_names = {role.name for role in before.roles}
+            after_role_names = {role.name for role in after.roles}
+            
+            # Detect added roles
+            added_roles = after_role_names - before_role_names
+            for role_name in added_roles:
+                if role_name != "@everyone":  # Don't track @everyone
+                    self.db.record_role_change(guild_id, user_id, role_name, "added")
+                    logger.debug(f"Recorded: Role '{role_name}' added to {after}")
+            
+            # Detect removed roles
+            removed_roles = before_role_names - after_role_names
+            for role_name in removed_roles:
+                if role_name != "@everyone":  # Don't track @everyone
+                    self.db.record_role_change(guild_id, user_id, role_name, "removed")
+                    logger.debug(f"Recorded: Role '{role_name}' removed from {after}")
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User):

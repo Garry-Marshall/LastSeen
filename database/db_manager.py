@@ -79,6 +79,20 @@ class DatabaseManager:
                 )
             """)
 
+            # Role changes table - tracks role additions/removals
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS role_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    role_name TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE,
+                    FOREIGN KEY (guild_id, user_id) REFERENCES members(guild_id, user_id) ON DELETE CASCADE
+                )
+            """)
+
             # Create indexes for better query performance
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_members_username
@@ -93,6 +107,12 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_members_active
                 ON members(guild_id, is_active, last_seen)
+            """)
+
+            # Indexes for role_changes table
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_role_changes_guild_user
+                ON role_changes(guild_id, user_id, timestamp DESC)
             """)
 
             # Migration: Add new role permission columns if they don't exist
@@ -519,7 +539,7 @@ class DatabaseManager:
                         history.append(old_nickname)
                     
                     # Add new nickname if it's not already in history
-                    if new_nickname not in history:
+                    if new_nickname and new_nickname not in history:
                         history.append(new_nickname)
                     
                     # Keep only last 5
@@ -930,3 +950,67 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to remove guild data for {guild_id}: {e}")
             return False
+
+    def record_role_change(self, guild_id: int, user_id: int, role_name: str, action: str) -> bool:
+        """
+        Record a role change for a member.
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            role_name: Name of the role that was added/removed
+            action: 'added' or 'removed'
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                current_time = int(datetime.now(timezone.utc).timestamp())
+                
+                cursor.execute("""
+                    INSERT INTO role_changes (guild_id, user_id, role_name, action, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (guild_id, user_id, role_name, action, current_time))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to record role change for user {user_id} in guild {guild_id}: {e}")
+            return False
+
+    def get_role_history(self, guild_id: int, user_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get role change history for a member.
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            limit: Maximum number of changes to return (default 20)
+
+        Returns:
+            List of role changes, newest first
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT role_name, action, timestamp
+                    FROM role_changes
+                    WHERE guild_id = ? AND user_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (guild_id, user_id, limit))
+                
+                rows = cursor.fetchall()
+                changes = []
+                for row in rows:
+                    changes.append({
+                        'role_name': row[0],
+                        'action': row[1],
+                        'timestamp': row[2]
+                    })
+                return changes
+        except Exception as e:
+            logger.error(f"Failed to get role history for user {user_id} in guild {guild_id}: {e}")
+            return []

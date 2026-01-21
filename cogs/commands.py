@@ -183,9 +183,12 @@ class CommandsCog(commands.Cog):
         embed.description += f"🆔 User ID: `{member_data['user_id']}`\n"
         
         # Account creation date - admin only
-        if is_admin and member:
-            account_created = format_timestamp(int(member.created_at.timestamp()), 'F')
-            embed.description += f"📅 Account Created: {account_created}\n"
+        if is_admin and member and hasattr(member, 'created_at'):
+            try:
+                account_created = format_timestamp(int(member.created_at.timestamp()), 'F')
+                embed.description += f"📅 Account Created: {account_created}\n"
+            except (AttributeError, ValueError, OSError):
+                pass
         
         # Join info with position
         if member_data['join_date']:
@@ -223,10 +226,13 @@ class CommandsCog(commands.Cog):
             embed.description += f"🎭 Roles: None\n"
         
         # Highest role
-        if member and member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
-            highest_role = member.top_role
-            if highest_role.name != "@everyone":
-                embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
+        if member and hasattr(member, 'roles') and member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
+            try:
+                highest_role = member.top_role
+                if highest_role and highest_role.name != "@everyone":
+                    embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
+            except (AttributeError, IndexError):
+                pass
         
         embed.description += "\n"
 
@@ -243,7 +249,7 @@ class CommandsCog(commands.Cog):
             embed.description += f"{status_emoji} Status: {str(member.status).capitalize()}\n"
             
             # Last seen
-            if member.status != discord.Status.offline:
+            if hasattr(member, 'status') and member.status != discord.Status.offline:
                 embed.description += f"⏱️ Last Seen: Currently online\n"
             elif member_data['last_seen'] and member_data['last_seen'] != 0:
                 embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R')}\n"
@@ -253,11 +259,14 @@ class CommandsCog(commands.Cog):
             embed.description += f"⚫ Status: Left server\n"
         
         # Boosting status
-        if member and member.premium_since:
-            boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F')
-            embed.description += f"🚀 Boosting: Yes (since {boost_date})\n"
+        if member and hasattr(member, 'premium_since') and member.premium_since:
+            try:
+                boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F')
+                embed.description += f"💎 Boosting: Yes (since {boost_date})\n"
+            except (AttributeError, ValueError, OSError):
+                pass
         else:
-            embed.description += f"🚀 Boosting: No\n"
+            embed.description += f"💎 Boosting: No\n"
 
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
@@ -361,6 +370,79 @@ class CommandsCog(commands.Cog):
             user: Username, nickname, or user mention
         """
         await self._lastseen_impl(interaction, user, "seen")
+
+    @app_commands.command(name="role-history", description="View role change history for a member (Admin only)")
+    @app_commands.describe(user="Username, nickname, or @mention of the user")
+    @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
+    async def role_history(self, interaction: discord.Interaction, user: str):
+        """
+        Display role change history for a member (admin only).
+
+        Args:
+            interaction: Discord interaction
+            user: Username, nickname, or user mention
+        """
+        # Check permissions
+        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
+        if not can_proceed:
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
+        # Check if user is admin
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
+            await interaction.response.send_message(
+                embed=create_error_embed(f"You need the '{bot_admin_role_name}' role or Administrator permission to use this command."),
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
+
+        guild_id = interaction.guild_id
+        search_term = parse_user_mention(user)
+
+        # Find member in database
+        member_data = self.db.find_member_by_name(guild_id, search_term)
+
+        if not member_data:
+            await interaction.followup.send(
+                embed=create_error_embed("User not found in the database."),
+                ephemeral=not channels_restricted
+            )
+            return
+
+        # Get role history
+        role_changes = self.db.get_role_history(guild_id, member_data['user_id'], limit=20)
+
+        if not role_changes:
+            embed = create_embed(f"🎭 Role History - {member_data['username']}", discord.Color.blue())
+            embed.description = "No role changes recorded for this member."
+            await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
+            return
+
+        # Create embed with role history
+        username = member_data['username'] if member_data['username'] else "Unknown"
+        embed = create_embed(f"🎭 Role History - {username}", discord.Color.blue())
+        embed.description = f"**Last 20 role changes:**\n\n"
+
+        for change in role_changes:
+            role_name = change['role_name']
+            action = change['action']
+            timestamp = change['timestamp']
+            
+            # Format action with emoji
+            action_emoji = "➕" if action == "added" else "➖"
+            action_text = "Added" if action == "added" else "Removed"
+            time_str = format_timestamp(timestamp, 'R')
+            
+            embed.description += f"{action_emoji} {action_text}: **{role_name}** ({time_str})\n"
+
+        await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
+        logger.info(f"User {interaction.user} used /role-history for '{user}' in guild {interaction.guild.name}")
 
     @app_commands.command(name="inactive", description="List members who have been inactive")
     @app_commands.describe(days="Optional: Override the configured inactive days threshold (1-365)")
