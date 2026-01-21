@@ -93,6 +93,20 @@ class DatabaseManager:
                 )
             """)
 
+            # Message activity table - daily aggregate message counts
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS message_activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    date INTEGER NOT NULL,
+                    message_count INTEGER DEFAULT 1,
+                    UNIQUE(guild_id, user_id, date),
+                    FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE,
+                    FOREIGN KEY (guild_id, user_id) REFERENCES members(guild_id, user_id) ON DELETE CASCADE
+                )
+            """)
+
             # Create indexes for better query performance
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_members_username
@@ -113,6 +127,12 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_role_changes_guild_user
                 ON role_changes(guild_id, user_id, timestamp DESC)
+            """)
+
+            # Indexes for message_activity table
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_message_activity_user_date
+                ON message_activity(guild_id, user_id, date DESC)
             """)
 
             # Migration: Add new role permission columns if they don't exist
@@ -1067,3 +1087,228 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get role history for user {user_id} in guild {guild_id}: {e}")
             return []
+
+    # ==================== Message Activity Operations ====================
+
+    def increment_message_activity(self, guild_id: int, user_id: int, date: int) -> bool:
+        """
+        Increment message count for a user on a specific date.
+        Uses INSERT OR REPLACE for atomicity (handles race conditions).
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            date: Unix timestamp of start of day (UTC)
+
+        Returns:
+            bool: True if successful
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # First, ensure the member exists in the database
+                if not self.member_exists(guild_id, user_id):
+                    return False
+                
+                # INSERT OR REPLACE approach: if record exists, increment; if not, create with count=1
+                cursor.execute("""
+                    INSERT INTO message_activity (guild_id, user_id, date, message_count)
+                    VALUES (?, ?, ?, 1)
+                    ON CONFLICT(guild_id, user_id, date) DO UPDATE SET
+                    message_count = message_count + 1
+                """, (guild_id, user_id, date))
+                
+                return True
+        except Exception as e:
+            logger.error(f"Failed to increment message activity for user {user_id}: {e}")
+            return False
+
+    def get_message_activity_period(self, guild_id: int, user_id: int, days: int = 30) -> Dict[str, int]:
+        """
+        Get message count statistics for a specific period.
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            days: Number of days to look back (default 30)
+
+        Returns:
+            Dict with keys: 'total', 'today', 'this_week', 'avg_per_day'
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get today's date (start of day UTC)
+                now = datetime.now(timezone.utc)
+                today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+                
+                # Calculate cutoff date
+                cutoff_date = today_start - (days * 86400)  # 86400 seconds per day
+                week_cutoff = today_start - (7 * 86400)
+                
+                # Get total messages in period
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND user_id = ? AND date >= ?
+                """, (guild_id, user_id, cutoff_date))
+                
+                total = cursor.fetchone()[0]
+                
+                # Get today's count
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND user_id = ? AND date = ?
+                """, (guild_id, user_id, today_start))
+                
+                today_count = cursor.fetchone()[0]
+                
+                # Get this week's count
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND user_id = ? AND date >= ?
+                """, (guild_id, user_id, week_cutoff))
+                
+                week_count = cursor.fetchone()[0]
+                
+                # Get average per day
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT date), COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND user_id = ? AND date >= ?
+                """, (guild_id, user_id, week_cutoff))
+                
+                result = cursor.fetchone()
+                days_with_activity = result[0]
+                week_total = result[1]
+                avg_per_day = round(week_total / 7, 1) if days_with_activity > 0 else 0
+                
+                return {
+                    'total': total,
+                    'today': today_count,
+                    'this_week': week_count,
+                    'this_month': total,  # Same as total for 30-day window
+                    'avg_per_day': avg_per_day
+                }
+        except Exception as e:
+            logger.error(f"Failed to get message activity for user {user_id}: {e}")
+            return {'total': 0, 'today': 0, 'this_week': 0, 'this_month': 0, 'avg_per_day': 0}
+
+    def get_message_activity_trend(self, guild_id: int, user_id: int, days: int = 365) -> List[Dict[str, Any]]:
+        """
+        Get detailed daily message breakdown for trend analysis.
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            days: Number of days to look back (default 365)
+
+        Returns:
+            List of daily activity records, newest first
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get today's date (start of day UTC)
+                now = datetime.now(timezone.utc)
+                today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+                
+                # Calculate cutoff date
+                cutoff_date = today_start - (days * 86400)
+                
+                cursor.execute("""
+                    SELECT date, message_count
+                    FROM message_activity
+                    WHERE guild_id = ? AND user_id = ? AND date >= ?
+                    ORDER BY date DESC
+                """, (guild_id, user_id, cutoff_date))
+                
+                rows = cursor.fetchall()
+                activity = []
+                for row in rows:
+                    activity.append({
+                        'date': row[0],
+                        'message_count': row[1]
+                    })
+                return activity
+        except Exception as e:
+            logger.error(f"Failed to get message activity trend for user {user_id}: {e}")
+            return []
+
+    def cleanup_old_message_activity(self, guild_id: int, user_id: int, days: int = 365) -> bool:
+        """
+        Remove message activity records older than specified days.
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            days: Keep records from last N days (default 365)
+
+        Returns:
+            bool: True if successful
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get today's date (start of day UTC)
+                now = datetime.now(timezone.utc)
+                today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+                
+                # Calculate cutoff date
+                cutoff_date = today_start - (days * 86400)
+                
+                cursor.execute("""
+                    DELETE FROM message_activity
+                    WHERE guild_id = ? AND user_id = ? AND date < ?
+                """, (guild_id, user_id, cutoff_date))
+                
+                deleted_count = cursor.rowcount
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} old message activity records for user {user_id} in guild {guild_id}")
+                
+                return True
+        except Exception as e:
+            logger.error(f"Failed to cleanup old message activity for user {user_id}: {e}")
+            return False
+
+    def cleanup_all_old_message_activity(self, days: int = 365) -> bool:
+        """
+        Remove all message activity records older than specified days across all users.
+
+        Args:
+            days: Keep records from last N days (default 365)
+
+        Returns:
+            bool: True if successful
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get today's date (start of day UTC)
+                now = datetime.now(timezone.utc)
+                today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+                
+                # Calculate cutoff date
+                cutoff_date = today_start - (days * 86400)
+                
+                cursor.execute("""
+                    DELETE FROM message_activity
+                    WHERE date < ?
+                """, (cutoff_date,))
+                
+                deleted_count = cursor.rowcount
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} old message activity records globally")
+                
+                return True
+        except Exception as e:
+            logger.error(f"Failed to cleanup old message activity globally: {e}")
+            return False
+

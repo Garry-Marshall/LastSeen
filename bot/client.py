@@ -3,11 +3,42 @@
 import discord
 from discord.ext import commands
 import logging
+import asyncio
 from pathlib import Path
+from datetime import datetime, timezone
 
 from database import DatabaseManager
 
 logger = logging.getLogger(__name__)
+
+
+async def _background_cleanup_task(bot: commands.Bot):
+    """
+    Background task that periodically cleans up old message activity records.
+    Runs daily, removing records older than 365 days.
+
+    Args:
+        bot: Bot instance
+    """
+    await bot.wait_until_ready()
+    
+    while not bot.is_closed():
+        try:
+            # Run cleanup daily
+            logger.info("Running daily message activity cleanup...")
+            
+            # Cleanup records older than 365 days
+            bot.db.cleanup_all_old_message_activity(days=365)
+            
+            logger.info("Message activity cleanup completed successfully")
+            
+            # Wait 24 hours before next cleanup
+            await asyncio.sleep(86400)  # 86400 seconds = 24 hours
+            
+        except Exception as e:
+            logger.error(f"Error during message activity cleanup: {e}", exc_info=True)
+            # If cleanup fails, retry in 1 hour instead of 24 hours
+            await asyncio.sleep(3600)
 
 
 def create_bot(config) -> commands.Bot:
@@ -59,6 +90,12 @@ def create_bot(config) -> commands.Bot:
             logger.info(f"Synced {len(synced)} command(s) with Discord")
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}", exc_info=True)
+
+        # Start background cleanup task (only on first ready)
+        if not hasattr(bot, 'cleanup_task_started'):
+            bot.cleanup_task_started = True
+            bot.loop.create_task(_background_cleanup_task(bot))
+            logger.info("Started background message activity cleanup task")
 
         logger.info("Bot is ready!")
 

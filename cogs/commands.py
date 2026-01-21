@@ -268,6 +268,18 @@ class CommandsCog(commands.Cog):
         else:
             embed.description += f"💎 Boosting: No\n"
 
+        embed.description += "\n"
+
+        # ===== MESSAGE ACTIVITY SECTION =====
+        activity_stats = self.db.get_message_activity_period(guild_id, member_data['user_id'], days=30)
+        if activity_stats and (activity_stats['total'] > 0 or activity_stats['today'] >= 0):
+            embed.description += f"📊 Activity:\n"
+            embed.description += f"     • Today: {activity_stats['today']:,} messages\n"
+            embed.description += f"     • This week: {activity_stats['this_week']:,} messages\n"
+            embed.description += f"     • This month: {activity_stats['this_month']:,} messages\n"
+            if activity_stats['avg_per_day'] > 0:
+                embed.description += f"     • Avg/day (7d): {activity_stats['avg_per_day']} messages\n"
+
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
 
@@ -530,6 +542,94 @@ class CommandsCog(commands.Cog):
 
         logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name} with threshold {inactive_days}")
         logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")
+
+    @app_commands.command(name="chat-history", description="View extended message activity history (365 days)")
+    @app_commands.describe(user="Username, nickname, or @mention of the user")
+    @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
+    async def chat_history(self, interaction: discord.Interaction, user: str):
+        """
+        Display extended message activity history for a user (365 days).
+
+        Args:
+            interaction: Discord interaction
+            user: Username, nickname, or user mention
+        """
+        # Check permissions
+        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
+        if not can_proceed:
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
+
+        guild_id = interaction.guild_id
+        search_term = parse_user_mention(user)
+
+        # Find member in database
+        member_data = self.db.find_member_by_name(guild_id, search_term)
+
+        if not member_data:
+            await interaction.followup.send(
+                embed=create_error_embed("User not found in the database."),
+                ephemeral=not channels_restricted
+            )
+            return
+
+        user_id = member_data['user_id']
+        username = member_data['username'] if member_data['username'] else "Unknown"
+
+        # Get 365 days of message activity
+        activity_trend = self.db.get_message_activity_trend(guild_id, user_id, days=365)
+
+        if not activity_trend:
+            embed = create_embed(f"📊 Chat History - {username}", discord.Color.blue())
+            embed.description = "No message activity recorded in the last 365 days."
+            await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
+            return
+
+        # Calculate statistics
+        total_messages = sum(record['message_count'] for record in activity_trend)
+        avg_per_day = round(total_messages / 365, 1)
+        max_day = max(activity_trend, key=lambda r: r['message_count'])
+        min_day = min(activity_trend, key=lambda r: r['message_count'])
+        max_day_str = format_timestamp(max_day['date'], 'D')
+        min_day_str = format_timestamp(min_day['date'], 'D')
+
+        # Get summary statistics
+        activity_stats_30 = self.db.get_message_activity_period(guild_id, user_id, days=30)
+        activity_stats_90 = self.db.get_message_activity_period(guild_id, user_id, days=90)
+
+        # Create main embed with statistics
+        embed = create_embed(f"📊 Chat History - {username}", discord.Color.blue())
+        
+        embed.description = "**📈 Long-Term Statistics (365 days)**\n"
+        embed.description += f"• Total Messages: **{total_messages:,}**\n"
+        embed.description += f"• Average/Day: **{avg_per_day}**\n"
+        embed.description += f"• Busiest Day: **{max_day['message_count']:,}** on {max_day_str}\n"
+        embed.description += f"• Quietest Day: **{min_day['message_count']:,}** on {min_day_str}\n\n"
+        
+        embed.description += "**📊 Activity by Period**\n"
+        embed.description += f"• Last 30 days: **{activity_stats_30['this_month']:,}** messages\n"
+        embed.description += f"• Last 90 days: **{activity_stats_90['this_month']:,}** messages\n"
+        embed.description += f"• Last 365 days: **{total_messages:,}** messages\n\n"
+        
+        # Calculate monthly breakdown for last 90 days
+        if activity_trend:
+            now = datetime.now()
+            current_month_count = sum(r['message_count'] for r in activity_trend 
+                                     if (now.year == datetime.fromtimestamp(r['date']).year and 
+                                         now.month == datetime.fromtimestamp(r['date']).month))
+            
+            embed.description += "**📅 Recent Activity**\n"
+            embed.description += f"• This month: **{current_month_count:,}** messages\n"
+            embed.description += f"• This week: **{activity_stats_30['this_week']:,}** messages\n"
+            embed.description += f"• Today: **{activity_stats_30['today']:,}** messages\n"
+
+        embed.set_footer(text="Activity data spans the last 365 days. Data before account join is unavailable.")
+
+        await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
+        logger.info(f"User {interaction.user} used /chat-history for '{user}' in guild {interaction.guild.name}")
 
     @app_commands.command(name="about", description="About this bot")
     async def about(self, interaction: discord.Interaction):

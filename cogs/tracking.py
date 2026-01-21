@@ -488,6 +488,45 @@ class TrackingCog(commands.Cog):
                         logger.debug(f"Updated username for {after} in guild {guild.name}")
 
     @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        """
+        Called when a message is sent in any channel the bot can see.
+        Tracks daily aggregate message counts per user per guild.
+        
+        Args:
+            message: The message that was sent
+        """
+        # Skip if message is from a bot
+        if message.author.bot:
+            return
+        
+        # Skip if message is a DM (no guild)
+        if message.guild is None:
+            return
+        
+        guild_id = message.guild.id
+        user_id = message.author.id
+        
+        try:
+            # Ensure member exists in database
+            if not self.db.member_exists(guild_id, user_id):
+                logger.debug(f"User {message.author} not tracked in guild {message.guild.name}, skipping message activity")
+                return
+            
+            # Get today's date (start of day UTC)
+            now = datetime.now(timezone.utc)
+            today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+            
+            # Increment message activity for today
+            if self.db.increment_message_activity(guild_id, user_id, today_start):
+                logger.debug(f"Recorded message from {message.author} in {message.guild.name}")
+            else:
+                logger.warning(f"Failed to record message activity for {message.author} in {message.guild.name}")
+        
+        except Exception as e:
+            logger.error(f"Error tracking message activity: {e}", exc_info=True)
+
+    @commands.Cog.listener()
     async def on_presence_update(self, before: discord.Member, after: discord.Member):
         """
         Called when a member's presence changes.
