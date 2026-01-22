@@ -110,7 +110,7 @@ DEBUG_LOGS_DAYS_TO_KEEP=5  # number of days to keep log files (older logs are de
             return
 
         try:
-            cutoff_date = datetime.now() - timedelta(days=self.logs_days_to_keep)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.logs_days_to_keep)
             deleted_count = 0
 
             for log_file in self.log_folder.glob('*.log'):

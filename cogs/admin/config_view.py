@@ -7,7 +7,7 @@ import json
 from database import DatabaseManager
 from bot.utils import create_embed, create_error_embed, create_success_embed
 from .permissions import get_bot_admin_role_name, check_admin_permission
-from .channel_config import ChannelModal, InactiveDaysModal
+from .channel_config import ChannelModal, InactiveDaysModal, RetentionDaysModal, TimezoneModal, ReportsConfigModal
 from .role_config import BotAdminRoleModal, UserRoleModal, TrackOnlyRolesModal
 from .channel_filter import AllowedChannelsModal
 from . import member_mgmt
@@ -158,7 +158,64 @@ class ConfigView(discord.ui.View):
         modal = AllowedChannelsModal(self.db, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="View Config", style=discord.ButtonStyle.secondary, emoji="⚙️", row=3)
+    @discord.ui.button(label="Set Retention Days", style=discord.ButtonStyle.primary, emoji="🗑️", row=2)
+    async def set_retention_days(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to set message activity retention period."""
+        if not await check_admin_permission(interaction, self.db, self.guild_id):
+            return
+
+        # Create modal for retention days input
+        modal = RetentionDaysModal(self.db, self.guild_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Set Timezone", style=discord.ButtonStyle.primary, emoji="🌍", row=3)
+    async def set_timezone(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to set server timezone."""
+        if not await check_admin_permission(interaction, self.db, self.guild_id):
+            return
+
+        # Create modal for timezone input
+        modal = TimezoneModal(self.db, self.guild_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Configure Reports", style=discord.ButtonStyle.primary, emoji="📊", row=3)
+    async def configure_reports(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to configure scheduled reports."""
+        if not await check_admin_permission(interaction, self.db, self.guild_id):
+            return
+
+        # Create modal for reports configuration
+        modal = ReportsConfigModal(self.db, self.guild_id)
+        await interaction.response.send_modal(modal)
+
+    @discord.ui.button(label="Disable Reports", style=discord.ButtonStyle.danger, emoji="🚫", row=4)
+    async def disable_reports(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to disable scheduled reports."""
+        if not await check_admin_permission(interaction, self.db, self.guild_id):
+            return
+
+        # Check if reports are currently enabled
+        guild_config = self.db.get_guild_config(self.guild_id)
+        if not guild_config or not guild_config.get('report_frequency'):
+            await interaction.response.send_message(
+                embed=create_error_embed("Scheduled reports are not currently enabled. Use 'Configure Reports' to set them up."),
+                ephemeral=True
+            )
+            return
+
+        success = self.db.disable_reports(self.guild_id)
+        if success:
+            await interaction.response.send_message(
+                embed=create_success_embed("✅ Scheduled reports have been disabled."),
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                embed=create_error_embed("Failed to disable reports."),
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="View Config", style=discord.ButtonStyle.secondary, emoji="⚙️", row=4)
     async def view_config(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to view current configuration."""
         guild_config = self.db.get_guild_config(self.guild_id)
@@ -188,6 +245,62 @@ class ConfigView(discord.ui.View):
             inline=False
         )
 
+        # Message retention days
+        retention_days = guild_config.get('message_retention_days', 365)
+        embed.add_field(
+            name="Message Retention Period",
+            value=f"{retention_days} days (auto-cleanup)",
+            inline=False
+        )
+
+        # Timezone
+        timezone = guild_config.get('timezone', 'UTC')
+        embed.add_field(
+            name="Server Timezone",
+            value=timezone,
+            inline=False
+        )
+
+        # Scheduled Reports
+        report_frequency = guild_config.get('report_frequency')
+        if report_frequency:
+            report_channel_id = guild_config.get('report_channel_id')
+            report_channel = interaction.guild.get_channel(report_channel_id) if report_channel_id else None
+            channel_mention = report_channel.mention if report_channel else f"Unknown ({report_channel_id})"
+            
+            report_types = guild_config.get('report_types', '[]')
+            try:
+                types_list = json.loads(report_types) if report_types else []
+                types_str = ', '.join(types_list) if types_list else 'None'
+            except (json.JSONDecodeError, TypeError):
+                logger.error(f"Failed to parse report_types JSON for guild {self.guild_id}")
+                types_str = 'Invalid'
+            
+            day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            schedule_info = ""
+            if report_frequency == 'weekly':
+                day_weekly = guild_config.get('report_day_weekly', 0)
+                schedule_info = f"Every {day_names[day_weekly]}"
+            elif report_frequency == 'monthly':
+                day_monthly = guild_config.get('report_day_monthly', 1)
+                schedule_info = f"Day {day_monthly} of each month"
+            else:  # both
+                day_weekly = guild_config.get('report_day_weekly', 0)
+                day_monthly = guild_config.get('report_day_monthly', 1)
+                schedule_info = f"{day_names[day_weekly]} (weekly) & Day {day_monthly} (monthly)"
+            
+            embed.add_field(
+                name="Scheduled Reports",
+                value=f"**Status:** ✅ Enabled\n**Channel:** {channel_mention}\n**Schedule:** {schedule_info}\n**Types:** {types_str}",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="Scheduled Reports",
+                value="❌ Disabled",
+                inline=False
+            )
+
         # Bot admin role
         bot_admin_role = guild_config.get('bot_admin_role_name', 'Bot Admin')
         embed.add_field(name="Bot Admin Role", value=bot_admin_role, inline=False)
@@ -207,8 +320,9 @@ class ConfigView(discord.ui.View):
             try:
                 roles_list = json.loads(track_only_roles)
                 track_only_str = ", ".join(roles_list) if roles_list else "All roles"
-            except:
-                track_only_str = "All roles"
+            except (json.JSONDecodeError, TypeError):
+                logger.error(f"Failed to parse track_only_roles JSON")
+                track_only_str = "Error parsing roles"
         else:
             track_only_str = "All roles"
         embed.add_field(name="Track Only Roles", value=track_only_str, inline=False)
@@ -224,11 +338,14 @@ class ConfigView(discord.ui.View):
                         channel = interaction.guild.get_channel(ch_id)
                         if channel:
                             channel_mentions.append(channel.mention)
-                    allowed_channels_str = ", ".join(channel_mentions) if channel_mentions else "All channels"
+                        else:
+                            channel_mentions.append(f"Unknown ({ch_id})")
+                    allowed_channels_str = ", ".join(channel_mentions)
                 else:
                     allowed_channels_str = "All channels"
-            except:
-                allowed_channels_str = "All channels"
+            except (json.JSONDecodeError, TypeError):
+                logger.error(f"Failed to parse allowed_channels JSON")
+                allowed_channels_str = "Error parsing channels"
         else:
             allowed_channels_str = "All channels"
         embed.add_field(name="Allowed Channels", value=allowed_channels_str, inline=False)

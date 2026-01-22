@@ -13,11 +13,23 @@ from bot.utils import get_member_roles, create_embed
 
 logger = logging.getLogger(__name__)
 
+# Time constants (in seconds)
+FLUSH_INTERVAL = 30  # How often to flush activity buffers
+CLEANUP_INTERVAL_HOURS = 24  # How often to run data cleanup
+REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
+
 
 class TrackingCog(commands.Cog):
     """Cog for tracking user joins, leaves, updates, and presence changes."""
 
     def __init__(self, bot: commands.Bot, db: DatabaseManager, config):
+        """Initialize the tracking cog.
+        
+        Args:
+            bot: Discord bot instance
+            db: Database manager instance
+            config: Bot configuration object
+        """
         """
         Initialize tracking cog.
 
@@ -36,8 +48,17 @@ class TrackingCog(commands.Cog):
         # Key: (guild_id, user_id, timestamp, hour), Value: count
         self.hourly_activity_buffer: Dict[Tuple[int, int, int, int], int] = defaultdict(int)
         
+        # Failed writes buffer for retry
+        self.failed_daily_writes: Dict[Tuple[int, int, int], int] = defaultdict(int)
+        self.failed_hourly_writes: Dict[Tuple[int, int, int, int], int] = defaultdict(int)
+        
+        # Buffer size limits to prevent memory issues
+        self.MAX_BUFFER_SIZE = 10000  # Max entries before forcing flush
+        
         # Start background task
         self.flush_activity_buffer.start()
+        self.cleanup_old_data.start()
+        self.check_scheduled_reports.start()
 
     async def _initialize_member_positions(self, guild: discord.Guild) -> bool:
         """
@@ -101,6 +122,16 @@ class TrackingCog(commands.Cog):
             return False
 
     def _should_track_member(self, member: discord.Member) -> bool:
+        """Check if member should be tracked based on guild settings.
+        
+        Applies role-based and channel-based tracking filters if configured.
+        
+        Args:
+            member: Discord member to check
+            
+        Returns:
+            bool: True if member should be tracked, False otherwise
+        """
         """
         Check if a member should be tracked based on guild configuration.
 
@@ -138,6 +169,14 @@ class TrackingCog(commands.Cog):
             return True  # If error parsing, default to tracking
 
     def _ensure_member_exists(self, member: discord.Member) -> bool:
+        """Ensure member exists in database, creating or updating record if needed.
+        
+        Args:
+            member: Discord member to ensure exists
+            
+        Returns:
+            bool: True if member record exists or was created successfully
+        """
         """
         Ensure a member exists in the database, adding them if not.
 
@@ -538,6 +577,13 @@ class TrackingCog(commands.Cog):
             hour_start = int(datetime(now.year, now.month, now.day, now.hour, tzinfo=timezone.utc).timestamp())
             self.hourly_activity_buffer[(guild_id, user_id, hour_start, hour)] += 1
             
+            # Check if buffers are getting too large and force flush if needed
+            total_buffer_size = len(self.daily_activity_buffer) + len(self.hourly_activity_buffer)
+            if total_buffer_size >= self.MAX_BUFFER_SIZE:
+                logger.warning(f"Buffer size limit reached ({total_buffer_size} entries), forcing flush")
+                # Trigger immediate flush by calling the task method directly
+                await self.flush_activity_buffer()
+            
             logger.debug(f"Buffered message from {message.author} in {message.guild.name}")
         
         except Exception as e:
@@ -586,6 +632,19 @@ class TrackingCog(commands.Cog):
         """
         try:
             # Get buffer sizes
+            # First, re-add any previously failed writes to the buffer (retry mechanism)
+            if self.failed_daily_writes:
+                for key, count in self.failed_daily_writes.items():
+                    self.daily_activity_buffer[key] += count
+                logger.info(f"Re-added {len(self.failed_daily_writes)} failed daily entries for retry")
+                self.failed_daily_writes.clear()
+                
+            if self.failed_hourly_writes:
+                for key, count in self.failed_hourly_writes.items():
+                    self.hourly_activity_buffer[key] += count
+                logger.info(f"Re-added {len(self.failed_hourly_writes)} failed hourly entries for retry")
+                self.failed_hourly_writes.clear()
+            
             daily_count = len(self.daily_activity_buffer)
             hourly_count = len(self.hourly_activity_buffer)
             
@@ -600,24 +659,32 @@ class TrackingCog(commands.Cog):
             self.daily_activity_buffer.clear()
             self.hourly_activity_buffer.clear()
             
-            # Flush daily activity
+            # Flush daily activity and track failures
             success_count = 0
             for (guild_id, user_id, date), count in daily_to_flush.items():
-                # Increment by the buffered count
-                for _ in range(count):
-                    if self.db.increment_message_activity(guild_id, user_id, date):
-                        success_count += 1
+                # Pass the count directly instead of calling N times
+                if self.db.increment_message_activity(guild_id, user_id, date, count):
+                    success_count += 1
+                else:
+                    # Store failed write for retry on next flush
+                    self.failed_daily_writes[(guild_id, user_id, date)] = count
             
+            if self.failed_daily_writes:
+                logger.warning(f"Failed to flush {len(self.failed_daily_writes)}/{daily_count} daily entries, will retry")
             logger.debug(f"Flushed {success_count}/{daily_count} daily activity entries")
             
-            # Flush hourly activity
+            # Flush hourly activity and track failures
             success_count = 0
             for (guild_id, user_id, timestamp, hour), count in hourly_to_flush.items():
-                # Increment by the buffered count
-                for _ in range(count):
-                    if self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour):
-                        success_count += 1
+                # Pass the count directly instead of calling N times
+                if self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour, count):
+                    success_count += 1
+                else:
+                    # Store failed write for retry on next flush
+                    self.failed_hourly_writes[(guild_id, user_id, timestamp, hour)] = count
             
+            if self.failed_hourly_writes:
+                logger.warning(f"Failed to flush {len(self.failed_hourly_writes)}/{hourly_count} hourly entries, will retry")
             logger.debug(f"Flushed {success_count}/{hourly_count} hourly activity entries")
             
         except Exception as e:
@@ -628,6 +695,134 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before starting the flush loop."""
         await self.bot.wait_until_ready()
 
+    @tasks.loop(hours=CLEANUP_INTERVAL_HOURS)
+    async def cleanup_old_data(self):
+        """
+        Background task that cleans up old message activity data daily.
+        Runs once every 24 hours based on each guild's retention settings.
+        """
+        try:
+            logger.info("Starting daily data retention cleanup...")
+            result = self.db.cleanup_all_guilds_message_activity()
+            
+            if result['daily_deleted'] > 0 or result['hourly_deleted'] > 0:
+                logger.info(
+                    f"Data retention cleanup completed: "
+                    f"{result['daily_deleted']} daily records, "
+                    f"{result['hourly_deleted']} hourly records deleted "
+                    f"across {result['guilds_processed']} guilds"
+                )
+            else:
+                logger.debug(f"Data retention cleanup: no old records to delete ({result['guilds_processed']} guilds checked)")
+                
+        except Exception as e:
+            logger.error(f"Error during data retention cleanup: {e}", exc_info=True)
+
+    @cleanup_old_data.before_loop
+    async def before_cleanup_old_data(self):
+        """Wait for bot to be ready before starting the cleanup loop."""
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(hours=REPORT_CHECK_INTERVAL_HOURS)
+    async def check_scheduled_reports(self):
+        """
+        Background task that checks and sends scheduled reports every hour.
+        Checks all guilds with reports enabled and sends reports when due.
+        """
+        try:
+            from bot.reports import send_scheduled_report
+            import json
+            
+            logger.debug("Checking scheduled reports...")
+            guilds_with_reports = self.db.get_guilds_with_reports_enabled()
+            
+            if not guilds_with_reports:
+                return
+            
+            now = datetime.now(timezone.utc)
+            current_weekday = now.weekday()  # 0=Monday, 6=Sunday
+            current_day_of_month = now.day
+            current_timestamp = int(now.timestamp())
+            
+            for guild_config in guilds_with_reports:
+                try:
+                    guild_id = int(guild_config['guild_id'])
+                    guild = self.bot.get_guild(guild_id)
+                    
+                    if not guild:
+                        logger.warning(f"Guild {guild_id} not found, skipping report")
+                        continue
+                    
+                    channel_id = int(guild_config['report_channel_id'])
+                    frequency = guild_config['report_frequency']
+                    try:
+                        report_types = json.loads(guild_config['report_types']) if guild_config['report_types'] else []
+                    except (json.JSONDecodeError, TypeError):
+                        logger.error(f"Failed to parse report_types JSON for guild {guild_id}")
+                        report_types = []
+                    
+                    if not report_types:
+                        continue
+                    
+                    # Check if weekly report is due
+                    if frequency in ['weekly', 'both']:
+                        day_weekly = guild_config.get('report_day_weekly', 0)
+                        last_weekly = guild_config.get('last_weekly_report', 0)
+                        
+                        # Check if it's the right day and report hasn't been sent today
+                        # Convert last report timestamp to date to prevent duplicates on same day
+                        should_send_weekly = False
+                        if current_weekday == day_weekly:
+                            if last_weekly == 0:
+                                # Never sent before
+                                should_send_weekly = True
+                            else:
+                                # Check if last report was sent on a different date (not today)
+                                last_report_date = datetime.fromtimestamp(last_weekly, tz=timezone.utc).date()
+                                current_date = now.date()
+                                should_send_weekly = (current_date != last_report_date)
+                        
+                        if should_send_weekly:
+                            logger.info(f"Sending weekly report for guild {guild.name}")
+                            success = await send_scheduled_report(guild, channel_id, self.db, report_types, 7)
+                            if success:
+                                self.db.update_last_report_time(guild_id, 'weekly')
+                    
+                    # Check if monthly report is due
+                    if frequency in ['monthly', 'both']:
+                        day_monthly = guild_config.get('report_day_monthly', 1)
+                        last_monthly = guild_config.get('last_monthly_report', 0)
+                        
+                        # Check if it's the right day and report hasn't been sent today
+                        # Convert last report timestamp to date to prevent duplicates on same day
+                        should_send_monthly = False
+                        if current_day_of_month == day_monthly:
+                            if last_monthly == 0:
+                                # Never sent before
+                                should_send_monthly = True
+                            else:
+                                # Check if last report was sent on a different date (not today)
+                                last_report_date = datetime.fromtimestamp(last_monthly, tz=timezone.utc).date()
+                                current_date = now.date()
+                                should_send_monthly = (current_date != last_report_date)
+                        
+                        if should_send_monthly:
+                            logger.info(f"Sending monthly report for guild {guild.name}")
+                            success = await send_scheduled_report(guild, channel_id, self.db, report_types, 30)
+                            if success:
+                                self.db.update_last_report_time(guild_id, 'monthly')
+                
+                except Exception as e:
+                    logger.error(f"Error processing scheduled report for guild: {e}", exc_info=True)
+                    
+        except Exception as e:
+            logger.error(f"Error in check_scheduled_reports task: {e}", exc_info=True)
+
+    @check_scheduled_reports.before_loop
+    async def before_check_scheduled_reports(self):
+        """Wait for bot to be ready before starting the reports loop."""
+        await self.bot.wait_until_ready()
+
     def cog_unload(self):
         """
         Called when the cog is unloaded.
@@ -635,20 +830,48 @@ class TrackingCog(commands.Cog):
         """
         logger.info("TrackingCog unloading, flushing remaining buffers...")
         self.flush_activity_buffer.cancel()
+        self.cleanup_old_data.cancel()
+        self.check_scheduled_reports.cancel()
         
-        # Synchronous flush of remaining data
+        # Schedule async flush task to run in the event loop
+        # This avoids blocking the shutdown process
+        async def async_flush():
+            try:
+                # Use asyncio.to_thread to run DB operations in thread pool
+                await asyncio.to_thread(self._flush_buffers_sync)
+                logger.info("Successfully flushed all buffers on unload")
+            except Exception as e:
+                logger.error(f"Error flushing buffers on unload: {e}", exc_info=True)
+        
+        # Schedule the async flush
         try:
-            for (guild_id, user_id, date), count in self.daily_activity_buffer.items():
-                for _ in range(count):
-                    self.db.increment_message_activity(guild_id, user_id, date)
-            
-            for (guild_id, user_id, timestamp, hour), count in self.hourly_activity_buffer.items():
-                for _ in range(count):
-                    self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour)
-            
-            logger.info("Successfully flushed all buffers on unload")
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(async_flush())
+            else:
+                # Fallback to sync if loop not running
+                self._flush_buffers_sync()
         except Exception as e:
-            logger.error(f"Error flushing buffers on unload: {e}", exc_info=True)
+            logger.error(f"Error scheduling buffer flush: {e}", exc_info=True)
+            # Last resort: try synchronous flush
+            try:
+                self._flush_buffers_sync()
+            except Exception as sync_e:
+                logger.error(f"Failed to flush buffers synchronously: {sync_e}", exc_info=True)
+    
+    def _flush_buffers_sync(self):
+        """Synchronous version of buffer flush for thread pool execution.
+        
+        This method is called via asyncio.to_thread() to avoid blocking
+        the event loop during shutdown. Flushes all pending activity data
+        to the database.
+        """
+        """Synchronous helper to flush buffers. Called from thread pool."""
+        for (guild_id, user_id, date), count in self.daily_activity_buffer.items():
+            self.db.increment_message_activity(guild_id, user_id, date, count)
+        
+        for (guild_id, user_id, timestamp, hour), count in self.hourly_activity_buffer.items():
+            self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour, count)
 
 
 async def setup(bot: commands.Bot):

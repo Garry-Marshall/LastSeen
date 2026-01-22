@@ -6,5 +6,8 @@ Discord.py>=2.3.0
 # Python-dotenv - Environment variable loader
 python-dotenv>=1.0.0
 
+# Timezone support
+pytz>=2024.1
+
 # System Monitoring
 psutil>=5.9.0

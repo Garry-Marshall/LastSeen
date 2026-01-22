@@ -1,11 +1,15 @@
 """Utility functions for LastSeen bot."""
 
 import discord
+import pytz
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+logger = logging.getLogger(__name__)
 
-def format_timestamp(timestamp: Optional[int], style: str = 'F') -> str:
+
+def format_timestamp(timestamp: Optional[int], style: str = 'F', guild_id: Optional[int] = None, db = None) -> str:
     """
     Format a Unix timestamp into a Discord timestamp.
 
@@ -19,6 +23,8 @@ def format_timestamp(timestamp: Optional[int], style: str = 'F') -> str:
                'f' = Short Date/Time (20 April 2021 16:20)
                'F' = Long Date/Time (Tuesday, 20 April 2021 16:20)
                'R' = Relative Time (2 months ago)
+        guild_id: Optional guild ID to use guild-specific timezone
+        db: Optional database manager to fetch guild timezone
 
     Returns:
         Formatted Discord timestamp string
@@ -27,23 +33,60 @@ def format_timestamp(timestamp: Optional[int], style: str = 'F') -> str:
         return "Never"
 
     try:
-        dt = datetime.fromtimestamp(timestamp)
+        # Create datetime in UTC first (always timezone-aware)
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        
+        # Validate that datetime is timezone-aware
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            logger.error(f"Created naive datetime from timestamp {timestamp}")
+            dt = dt.replace(tzinfo=timezone.utc)
+        
+        # Convert to guild timezone if provided
+        if guild_id and db:
+            try:
+                guild_config = db.get_guild_config(guild_id)
+                if guild_config:
+                    tz_str = guild_config.get('timezone', 'UTC')
+                    if tz_str and tz_str != 'UTC':
+                        # Validate timezone string before conversion
+                        if tz_str in pytz.all_timezones:
+                            tz = pytz.timezone(tz_str)
+                            dt_converted = dt.astimezone(tz)
+                            # Verify conversion was successful
+                            if dt_converted.tzinfo is not None:
+                                dt = dt_converted
+                            else:
+                                logger.warning(f"Timezone conversion resulted in naive datetime for {tz_str}")
+                        else:
+                            logger.warning(f"Invalid timezone in database: {tz_str}")
+            except Exception as e:
+                logger.error(f"Error during timezone conversion: {e}")
+                # Fall back to UTC on any error
+        
+        # Final validation before formatting
+        if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
+            logger.error(f"Datetime is naive before formatting, forcing UTC")
+            dt = dt.replace(tzinfo=timezone.utc)
+        
         return discord.utils.format_dt(dt, style=style)
-    except (ValueError, OSError):
+    except (ValueError, OSError, OverflowError) as e:
+        logger.error(f"Error formatting timestamp {timestamp}: {e}")
         return "Invalid date"
 
 
-def format_relative_time(timestamp: Optional[int]) -> str:
+def format_relative_time(timestamp: Optional[int], guild_id: Optional[int] = None, db = None) -> str:
     """
     Format a timestamp as relative time (e.g., '2 hours ago').
 
     Args:
         timestamp: Unix timestamp
+        guild_id: Optional guild ID to use guild-specific timezone
+        db: Optional database manager to fetch guild timezone
 
     Returns:
         Relative time string
     """
-    return format_timestamp(timestamp, style='R')
+    return format_timestamp(timestamp, style='R', guild_id=guild_id, db=db)
 
 
 def get_member_roles(member: discord.Member, exclude_everyone: bool = True) -> list[str]:

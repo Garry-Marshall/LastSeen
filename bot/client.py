@@ -11,6 +11,10 @@ from database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
+# Time constants (in seconds)
+DAILY_CLEANUP_INTERVAL = 86400  # 24 hours
+RETRY_INTERVAL = 3600  # 1 hour
+
 
 async def _background_cleanup_task(bot: commands.Bot):
     """
@@ -33,12 +37,12 @@ async def _background_cleanup_task(bot: commands.Bot):
             logger.info("Message activity cleanup completed successfully")
             
             # Wait 24 hours before next cleanup
-            await asyncio.sleep(86400)  # 86400 seconds = 24 hours
+            await asyncio.sleep(DAILY_CLEANUP_INTERVAL)
             
         except Exception as e:
             logger.error(f"Error during message activity cleanup: {e}", exc_info=True)
             # If cleanup fails, retry in 1 hour instead of 24 hours
-            await asyncio.sleep(3600)
+            await asyncio.sleep(RETRY_INTERVAL)
 
 
 def create_bot(config) -> commands.Bot:
@@ -116,6 +120,15 @@ def create_bot(config) -> commands.Bot:
             logger.info("Started background message activity cleanup task")
 
         logger.info("Bot is ready!")
+
+    @bot.event
+    async def on_close():
+        """Called when the bot is shutting down."""
+        logger.info("Bot is shutting down, closing database connection pool...")
+        try:
+            bot.db.close_pool()
+        except Exception as e:
+            logger.error(f"Error closing database pool: {e}", exc_info=True)
 
     @bot.event
     async def on_error(event: str, *args, **kwargs):

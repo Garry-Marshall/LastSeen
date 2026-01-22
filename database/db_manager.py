@@ -3,37 +3,90 @@
 import sqlite3
 import json
 import logging
+import threading
 from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from queue import Queue, Empty
 
 logger = logging.getLogger(__name__)
+
+# Time constants (in seconds)
+SECONDS_PER_DAY = 86400
+SECONDS_PER_HOUR = 3600
 
 
 class DatabaseManager:
     """Manages SQLite database connections and operations."""
 
-    def __init__(self, db_file: str):
+    def __init__(self, db_file: str, pool_size: int = 5):
         """
-        Initialize database manager.
+        Initialize database manager with connection pooling.
 
         Args:
             db_file: Path to SQLite database file
+            pool_size: Number of connections to maintain in the pool (default: 5)
         """
         self.db_file = db_file
+        self.pool_size = pool_size
+        self._pool: Queue = Queue(maxsize=pool_size)
+        self._pool_lock = threading.Lock()
+        self._connection_count = 0
+        
+        # Initialize the connection pool
+        self._initialize_pool()
         self._initialize_database()
+    
+    def _initialize_pool(self):
+        """Initialize the connection pool with connections."""
+        for _ in range(self.pool_size):
+            conn = sqlite3.connect(self.db_file, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            self._pool.put(conn)
+            self._connection_count += 1
+        logger.info(f"Initialized database connection pool with {self.pool_size} connections")
+    
+    def _get_connection_from_pool(self) -> sqlite3.Connection:
+        """Get a connection from the pool, creating a new one if pool is empty."""
+        try:
+            # Try to get a connection from the pool (non-blocking)
+            return self._pool.get_nowait()
+        except Empty:
+            # Pool is empty, create a temporary connection
+            logger.debug("Connection pool exhausted, creating temporary connection")
+            conn = sqlite3.connect(self.db_file, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            return conn
+    
+    def _return_connection_to_pool(self, conn: sqlite3.Connection):
+        """Return a connection to the pool."""
+        try:
+            # Only return to pool if there's space
+            self._pool.put_nowait(conn)
+        except:
+            # Pool is full, close the temporary connection
+            conn.close()
+    
+    def close_pool(self):
+        """Close all connections in the pool. Should be called on shutdown."""
+        while not self._pool.empty():
+            try:
+                conn = self._pool.get_nowait()
+                conn.close()
+            except Empty:
+                break
+        logger.info("Closed all database connections in pool")
 
     @contextmanager
     def get_connection(self):
         """
-        Context manager for database connections.
-        Ensures connections are properly closed.
+        Context manager for database connections from pool.
+        Ensures connections are properly returned to the pool.
 
         Yields:
-            sqlite3.Connection: Database connection
+            sqlite3.Connection: Database connection from pool
         """
-        conn = sqlite3.connect(self.db_file)
-        conn.row_factory = sqlite3.Row  # Access columns by name
+        conn = self._get_connection_from_pool()
         try:
             yield conn
             conn.commit()
@@ -42,7 +95,7 @@ class DatabaseManager:
             logger.error(f"Database error: {e}")
             raise
         finally:
-            conn.close()
+            self._return_connection_to_pool(conn)
 
     def _initialize_database(self):
         """Create tables if they don't exist."""
@@ -162,6 +215,49 @@ class DatabaseManager:
             if 'positions_initialized' not in columns:
                 cursor.execute("ALTER TABLE guilds ADD COLUMN positions_initialized INTEGER DEFAULT 0")
                 logger.info("Added positions_initialized column to guilds table")
+
+            if 'message_retention_days' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN message_retention_days INTEGER DEFAULT 365")
+                logger.info("Added message_retention_days column to guilds table")
+
+            if 'timezone' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN timezone TEXT DEFAULT 'UTC'")
+                logger.info("Added timezone column to guilds table")
+
+            if 'report_channel_id' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN report_channel_id INTEGER")
+                logger.info("Added report_channel_id column to guilds table")
+
+            if 'report_frequency' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN report_frequency TEXT")
+                logger.info("Added report_frequency column to guilds table")
+
+            if 'report_types' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN report_types TEXT")
+                logger.info("Added report_types column to guilds table")
+
+            if 'report_day_weekly' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN report_day_weekly INTEGER DEFAULT 0")
+                logger.info("Added report_day_weekly column to guilds table")
+
+            if 'report_day_monthly' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN report_day_monthly INTEGER DEFAULT 1")
+                logger.info("Added report_day_monthly column to guilds table")
+
+            if 'last_weekly_report' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN last_weekly_report INTEGER DEFAULT 0")
+                logger.info("Added last_weekly_report column to guilds table")
+
+            if 'last_monthly_report' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN last_monthly_report INTEGER DEFAULT 0")
+                logger.info("Added last_monthly_report column to guilds table")
+
+            # Create index for scheduled reports query (after columns exist)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_guilds_reports
+                ON guilds(report_frequency, report_channel_id)
+                WHERE report_frequency IS NOT NULL AND report_channel_id IS NOT NULL
+            """)
 
             # Check members table for new columns
             cursor.execute("PRAGMA table_info(members)")
@@ -287,6 +383,113 @@ class DatabaseManager:
                 return True
         except Exception as e:
             logger.error(f"Failed to set inactive days for guild {guild_id}: {e}")
+            return False
+
+    def set_message_retention_days(self, guild_id: int, retention_days: int, guild_name: str = 'Unknown') -> bool:
+        """Set the message retention period for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists (in case it wasn't added via on_guild_join)
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Now update the retention days and guild name if needed
+                cursor.execute("""
+                    UPDATE guilds
+                    SET message_retention_days = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (retention_days, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set message retention days for guild {guild_id}: {e}")
+            return False
+
+    def set_timezone(self, guild_id: int, timezone_str: str, guild_name: str = 'Unknown') -> bool:
+        """Set the timezone for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists (in case it wasn't added via on_guild_join)
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Now update the timezone and guild name if needed
+                cursor.execute("""
+                    UPDATE guilds
+                    SET timezone = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (timezone_str, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set timezone for guild {guild_id}: {e}")
+            return False
+
+    def set_report_config(self, guild_id: int, channel_id: int, frequency: str, report_types: list, 
+                         day_weekly: int = 0, day_monthly: int = 1, guild_name: str = 'Unknown') -> bool:
+        """Set the scheduled report configuration for a guild."""
+        try:
+            import json
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Update report configuration
+                cursor.execute("""
+                    UPDATE guilds
+                    SET report_channel_id = ?,
+                        report_frequency = ?,
+                        report_types = ?,
+                        report_day_weekly = ?,
+                        report_day_monthly = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (channel_id, frequency, json.dumps(report_types), day_weekly, day_monthly, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set report config for guild {guild_id}: {e}")
+            return False
+
+    def disable_reports(self, guild_id: int) -> bool:
+        """Disable scheduled reports for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE guilds
+                    SET report_channel_id = NULL,
+                        report_frequency = NULL,
+                        report_types = NULL
+                    WHERE guild_id = ?
+                """, (guild_id,))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to disable reports for guild {guild_id}: {e}")
+            return False
+
+    def update_last_report_time(self, guild_id: int, report_type: str) -> bool:
+        """Update the last report timestamp for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                if report_type == 'weekly':
+                    cursor.execute("UPDATE guilds SET last_weekly_report = ? WHERE guild_id = ?", (now, guild_id))
+                elif report_type == 'monthly':
+                    cursor.execute("UPDATE guilds SET last_monthly_report = ? WHERE guild_id = ?", (now, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to update last report time for guild {guild_id}: {e}")
             return False
 
     def set_bot_admin_role(self, guild_id: int, role_name: str, guild_name: str = 'Unknown') -> bool:
@@ -549,7 +752,7 @@ class DatabaseManager:
             return False
 
     def update_nickname_history(self, guild_id: int, user_id: int, old_nickname: Optional[str], new_nickname: Optional[str]) -> bool:
-        """Update nickname history for a member (keeps last 5, unique only).
+        """Update nickname history for a member (keeps last 10, unique only).
         
         Args:
             guild_id: Discord guild ID
@@ -560,6 +763,8 @@ class DatabaseManager:
         Returns:
             bool: True if successful
         """
+        MAX_NICKNAME_HISTORY = 10  # Limit to prevent unbounded growth
+        
         try:
             # Only track if nickname actually changed and new nickname exists
             if new_nickname and old_nickname != new_nickname:
@@ -577,8 +782,9 @@ class DatabaseManager:
                     
                     try:
                         history = json.loads(row[0]) if row[0] else []
-                    except:
+                    except (json.JSONDecodeError, TypeError):
                         history = []
+                        logger.warning(f"Invalid nickname_history JSON for user {user_id}, resetting to empty list")
                     
                     # Add old nickname if it's not already in history (check entire list for uniqueness)
                     if old_nickname and old_nickname not in history:
@@ -588,8 +794,8 @@ class DatabaseManager:
                     if new_nickname and new_nickname not in history:
                         history.append(new_nickname)
                     
-                    # Keep only last 5
-                    history = history[-5:]
+                    # Keep only last N entries to prevent unbounded growth
+                    history = history[-MAX_NICKNAME_HISTORY:]
                     
                     cursor.execute("""
                         UPDATE members SET nickname_history = ? WHERE guild_id = ? AND user_id = ?
@@ -931,9 +1137,9 @@ class DatabaseManager:
         try:
             current_time = int(datetime.now(timezone.utc).timestamp())
             hour_ago = current_time - 3600
-            day_ago = current_time - 86400
-            week_ago = current_time - (7 * 86400)
-            month_ago = current_time - (30 * 86400)
+            day_ago = current_time - SECONDS_PER_DAY
+            week_ago = current_time - (7 * SECONDS_PER_DAY)
+            month_ago = current_time - (30 * SECONDS_PER_DAY)
 
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -1061,6 +1267,15 @@ class DatabaseManager:
             logger.error(f"Invalid action '{action}', must be 'added' or 'removed'")
             return False
         
+        # Sanitize role name: strip whitespace, limit length, remove problematic characters
+        sanitized_role = role_name.strip()
+        # Remove any null bytes or control characters that could cause display issues
+        sanitized_role = ''.join(char for char in sanitized_role if ord(char) >= 32 or char == '\n')
+        # Limit length to 100 characters (Discord's role name limit)
+        if len(sanitized_role) > 100:
+            sanitized_role = sanitized_role[:100]
+            logger.warning(f"Role name truncated to 100 characters: {sanitized_role}")
+        
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -1069,7 +1284,7 @@ class DatabaseManager:
                 cursor.execute("""
                     INSERT INTO role_changes (guild_id, user_id, role_name, action, timestamp)
                     VALUES (?, ?, ?, ?, ?)
-                """, (guild_id, user_id, role_name.strip(), action, current_time))
+                """, (guild_id, user_id, sanitized_role, action, current_time))
                 
                 # Cleanup old role changes (keep only last 20)
                 self._cleanup_role_changes(conn, guild_id, user_id)
@@ -1158,7 +1373,7 @@ class DatabaseManager:
 
     # ==================== Message Activity Operations ====================
 
-    def increment_message_activity(self, guild_id: int, user_id: int, date: int) -> bool:
+    def increment_message_activity(self, guild_id: int, user_id: int, date: int, count: int = 1) -> bool:
         """
         Increment message count for a user on a specific date.
         Uses INSERT OR REPLACE for atomicity (handles race conditions).
@@ -1167,11 +1382,15 @@ class DatabaseManager:
             guild_id: Discord guild ID
             user_id: Discord user ID
             date: Unix timestamp of start of day (UTC)
+            count: Number of messages to add (default 1)
 
         Returns:
             bool: True if successful
         """
         try:
+            if count <= 0:
+                return False
+                
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -1179,20 +1398,20 @@ class DatabaseManager:
                 if not self.member_exists(guild_id, user_id):
                     return False
                 
-                # INSERT OR REPLACE approach: if record exists, increment; if not, create with count=1
+                # INSERT OR REPLACE approach: if record exists, increment; if not, create with count
                 cursor.execute("""
                     INSERT INTO message_activity (guild_id, user_id, date, message_count)
-                    VALUES (?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?)
                     ON CONFLICT(guild_id, user_id, date) DO UPDATE SET
-                    message_count = message_count + 1
-                """, (guild_id, user_id, date))
+                    message_count = message_count + ?
+                """, (guild_id, user_id, date, count, count))
                 
                 return True
         except Exception as e:
             logger.error(f"Failed to increment message activity for user {user_id}: {e}")
             return False
 
-    def increment_message_activity_hourly(self, guild_id: int, user_id: int, timestamp: int, hour: int) -> bool:
+    def increment_message_activity_hourly(self, guild_id: int, user_id: int, timestamp: int, hour: int, count: int = 1) -> bool:
         """
         Increment hourly message count for a user at a specific hour.
         
@@ -1200,12 +1419,16 @@ class DatabaseManager:
             guild_id: Discord guild ID
             user_id: Discord user ID
             timestamp: Unix timestamp rounded to the hour
+            count: Number of messages to add (default 1)
             hour: Hour of day (0-23)
         
         Returns:
             bool: True if successful
         """
         try:
+            if count <= 0:
+                return False
+                
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
@@ -1215,10 +1438,10 @@ class DatabaseManager:
                 
                 cursor.execute("""
                     INSERT INTO message_activity_hourly (guild_id, user_id, timestamp, hour, message_count)
-                    VALUES (?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(guild_id, user_id, timestamp) DO UPDATE SET
-                    message_count = message_count + 1
-                """, (guild_id, user_id, timestamp, hour))
+                    message_count = message_count + ?
+                """, (guild_id, user_id, timestamp, hour, count, count))
                 
                 return True
         except Exception as e:
@@ -1246,8 +1469,8 @@ class DatabaseManager:
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
                 
                 # Calculate cutoff date
-                cutoff_date = today_start - (days * 86400)  # 86400 seconds per day
-                week_cutoff = today_start - (7 * 86400)
+                cutoff_date = today_start - (days * SECONDS_PER_DAY)  # Convert days to seconds
+                week_cutoff = today_start - (7 * SECONDS_PER_DAY)
                 
                 # Get total messages in period
                 cursor.execute("""
@@ -1320,7 +1543,7 @@ class DatabaseManager:
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
                 
                 # Calculate cutoff date
-                cutoff_date = today_start - (days * 86400)
+                cutoff_date = today_start - (days * SECONDS_PER_DAY)
                 
                 cursor.execute("""
                     SELECT date, message_count
@@ -1361,10 +1584,10 @@ class DatabaseManager:
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
                 
                 # Calculate cutoff dates
-                cutoff_date = today_start - (days * 86400)
-                week_cutoff = today_start - (7 * 86400)
-                month_cutoff = today_start - (30 * 86400)
-                quarter_cutoff = today_start - (90 * 86400)
+                cutoff_date = today_start - (days * SECONDS_PER_DAY)
+                week_cutoff = today_start - (7 * SECONDS_PER_DAY)
+                month_cutoff = today_start - (30 * SECONDS_PER_DAY)
+                quarter_cutoff = today_start - (90 * SECONDS_PER_DAY)
                 
                 # Get total messages for all periods
                 cursor.execute("""
@@ -1482,7 +1705,7 @@ class DatabaseManager:
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
                 
                 # Calculate cutoff date
-                cutoff_date = today_start - (days * 86400)
+                cutoff_date = today_start - (days * SECONDS_PER_DAY)
                 
                 cursor.execute("""
                     DELETE FROM message_activity
@@ -1517,7 +1740,7 @@ class DatabaseManager:
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
                 
                 # Calculate cutoff date
-                cutoff_date = today_start - (days * 86400)
+                cutoff_date = today_start - (days * SECONDS_PER_DAY)
                 
                 cursor.execute("""
                     DELETE FROM message_activity
@@ -1549,7 +1772,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
-                thirty_days_ago = now - (30 * 86400)
+                thirty_days_ago = now - (30 * SECONDS_PER_DAY)
                 
                 # Total and active member counts
                 cursor.execute("""
@@ -1567,7 +1790,8 @@ class DatabaseManager:
                 active_30d = row['active_30d'] or 0
                 
                 # Get this month's joins and leaves
-                month_start = int(datetime(datetime.now().year, datetime.now().month, 1, tzinfo=timezone.utc).timestamp())
+                now_utc = datetime.now(timezone.utc)
+                month_start = int(datetime(now_utc.year, now_utc.month, 1, tzinfo=timezone.utc).timestamp())
                 
                 cursor.execute("""
                     SELECT COUNT(*) as joins
@@ -1638,7 +1862,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
-                period_start = now - (days * 86400)
+                period_start = now - (days * SECONDS_PER_DAY)
                 
                 # Members who joined in this period
                 cursor.execute("""
@@ -1695,9 +1919,9 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
-                thirty_days_ago = now - (30 * 86400)
-                sixty_days_ago = now - (60 * 86400)
-                ninety_days_ago = now - (90 * 86400)
+                thirty_days_ago = now - (30 * SECONDS_PER_DAY)
+                sixty_days_ago = now - (60 * SECONDS_PER_DAY)
+                ninety_days_ago = now - (90 * SECONDS_PER_DAY)
                 
                 cohorts = {}
                 
@@ -1775,7 +1999,7 @@ class DatabaseManager:
                 
                 if days > 0:
                     now = int(datetime.now(timezone.utc).timestamp())
-                    period_start = now - (days * 86400)
+                    period_start = now - (days * SECONDS_PER_DAY)
                     
                     cursor.execute("""
                         SELECT 
@@ -1836,7 +2060,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
-                period_start = now - (days * 86400)
+                period_start = now - (days * SECONDS_PER_DAY)
                 
                 cursor.execute("""
                     SELECT hour, SUM(message_count) as total
@@ -1875,7 +2099,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
-                period_start = now - (days * 86400)
+                period_start = now - (days * SECONDS_PER_DAY)
                 
                 cursor.execute("""
                     SELECT date, SUM(message_count) as count
@@ -1897,3 +2121,159 @@ class DatabaseManager:
             logger.error(f"Failed to get activity by day for guild {guild_id}: {e}")
             return {}
 
+    # ==================== Scheduled Reports Operations ====================
+
+    def get_guilds_with_reports_enabled(self) -> list:
+        """Get all guilds that have scheduled reports enabled."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT guild_id, report_channel_id, report_frequency, report_types,
+                           report_day_weekly, report_day_monthly, last_weekly_report, last_monthly_report,
+                           timezone
+                    FROM guilds
+                    WHERE report_frequency IS NOT NULL AND report_channel_id IS NOT NULL
+                """)
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get guilds with reports enabled: {e}")
+            return []
+
+    def get_new_members_period(self, guild_id: int, days: int) -> list:
+        """Get members who joined in the last N days."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cutoff = int(datetime.now(timezone.utc).timestamp()) - (days * SECONDS_PER_DAY)
+                cursor.execute("""
+                    SELECT user_id, username, nickname, join_date, join_position
+                    FROM members
+                    WHERE guild_id = ? AND join_date >= ? AND is_active = 1
+                    ORDER BY join_date DESC
+                """, (guild_id, cutoff))
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get new members for guild {guild_id}: {e}")
+            return []
+
+    def get_departed_members_period(self, guild_id: int, days: int) -> list:
+        """Get members who left in the last N days."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cutoff = int(datetime.now(timezone.utc).timestamp()) - (days * SECONDS_PER_DAY)
+                cursor.execute("""
+                    SELECT user_id, username, nickname, last_seen, left_date
+                    FROM members
+                    WHERE guild_id = ? AND is_active = 0 
+                    AND left_date IS NOT NULL AND left_date >= ?
+                    ORDER BY left_date DESC
+                """, (guild_id, cutoff))
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get departed members for guild {guild_id}: {e}")
+            return []
+
+    def get_top_active_users_period(self, guild_id: int, days: int, limit: int = 10) -> list:
+        """Get most active users by message count in the last N days."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cutoff = int(datetime.now(timezone.utc).timestamp()) - (days * SECONDS_PER_DAY)
+                cursor.execute("""
+                    SELECT m.user_id, m.username, m.nickname, SUM(ma.message_count) as total_messages
+                    FROM message_activity ma
+                    JOIN members m ON ma.user_id = m.user_id AND ma.guild_id = m.guild_id
+                    WHERE ma.guild_id = ? AND ma.date >= ? AND m.is_active = 1
+                    GROUP BY m.user_id, m.username, m.nickname
+                    ORDER BY total_messages DESC
+                    LIMIT ?
+                """, (guild_id, cutoff, limit))
+                columns = [desc[0] for desc in cursor.description]
+                return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get top active users for guild {guild_id}: {e}")
+            return []
+
+    # ==================== Data Retention Operations ====================
+
+    def cleanup_old_message_activity(self, guild_id: int, retention_days: int) -> Dict[str, int]:
+        """
+        Delete message activity records older than retention_days.
+
+        Args:
+            guild_id: Guild ID
+            retention_days: Number of days to retain (older records are deleted)
+
+        Returns:
+            Dictionary with 'daily_deleted' and 'hourly_deleted' counts
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                cutoff = now - (retention_days * 86400)
+                
+                # Delete old daily activity records
+                cursor.execute("""
+                    DELETE FROM message_activity
+                    WHERE guild_id = ? AND date < ?
+                """, (guild_id, cutoff))
+                daily_deleted = cursor.rowcount
+                
+                # Delete old hourly activity records
+                cursor.execute("""
+                    DELETE FROM message_activity_hourly
+                    WHERE guild_id = ? AND timestamp < ?
+                """, (guild_id, cutoff))
+                hourly_deleted = cursor.rowcount
+                
+                if daily_deleted > 0 or hourly_deleted > 0:
+                    logger.info(f"Cleaned up old activity for guild {guild_id}: {daily_deleted} daily, {hourly_deleted} hourly records")
+                
+                return {'daily_deleted': daily_deleted, 'hourly_deleted': hourly_deleted}
+        except Exception as e:
+            logger.error(f"Failed to cleanup old activity for guild {guild_id}: {e}", exc_info=True)
+            return {'daily_deleted': 0, 'hourly_deleted': 0}
+
+    def cleanup_all_guilds_message_activity(self) -> Dict[str, int]:
+        """
+        Run cleanup for all guilds based on their retention settings.
+
+        Returns:
+            Dictionary with total 'daily_deleted' and 'hourly_deleted' counts
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Get all guilds with their retention settings
+                cursor.execute("""
+                    SELECT guild_id, message_retention_days
+                    FROM guilds
+                    WHERE message_retention_days IS NOT NULL
+                """)
+                
+                guilds = cursor.fetchall()
+                total_daily = 0
+                total_hourly = 0
+                
+                for row in guilds:
+                    guild_id = row['guild_id']
+                    retention_days = row['message_retention_days'] or 365
+                    
+                    result = self.cleanup_old_message_activity(guild_id, retention_days)
+                    total_daily += result['daily_deleted']
+                    total_hourly += result['hourly_deleted']
+                
+                if total_daily > 0 or total_hourly > 0:
+                    logger.info(f"Global cleanup completed: {total_daily} daily, {total_hourly} hourly records deleted across {len(guilds)} guilds")
+                
+                return {'daily_deleted': total_daily, 'hourly_deleted': total_hourly, 'guilds_processed': len(guilds)}
+        except Exception as e:
+            logger.error(f"Failed to run global cleanup: {e}", exc_info=True)
+            return {'daily_deleted': 0, 'hourly_deleted': 0, 'guilds_processed': 0}

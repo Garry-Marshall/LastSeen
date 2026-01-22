@@ -56,7 +56,8 @@ class AdminCog(commands.Cog):
             "**👤 Set User Role:** Set which role can use bot commands (when required)\n"
             "**🎯 Set Track Only Roles:** Only track members with specific roles (optional)\n"
             "**📝 Set Allowed Channels:** Restrict bot commands to specific channels (optional)\n"
-            "**🔄 Update All Members:** Scan and update all current members in the database\n"
+            "**�️ Set Retention Days:** Configure message activity auto-cleanup period\n"
+            "**�🔄 Update All Members:** Scan and update all current members in the database\n"
             "**⚙️ View Config:** View current configuration settings"
         )
 

@@ -188,14 +188,14 @@ class CommandsCog(commands.Cog):
         # Account creation date - admin only
         if is_admin and member and hasattr(member, 'created_at'):
             try:
-                account_created = format_timestamp(int(member.created_at.timestamp()), 'F')
+                account_created = format_timestamp(int(member.created_at.timestamp()), 'F', guild_id, self.db)
                 embed.description += f"📅 Account Created: {account_created}\n"
             except (AttributeError, ValueError, OSError):
                 pass
         
         # Join info with position
         if member_data['join_date']:
-            join_str = format_timestamp(member_data['join_date'], 'F')
+            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db)
             join_position = member_data.get('join_position')
             if join_position:
                 embed.description += f"📥 Joined Server: {join_str} (Member #{join_position})\n"
@@ -255,7 +255,7 @@ class CommandsCog(commands.Cog):
             if hasattr(member, 'status') and member.status != discord.Status.offline:
                 embed.description += f"⏱️ Last Seen: Currently online\n"
             elif member_data['last_seen'] and member_data['last_seen'] != 0:
-                embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R')}\n"
+                embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R', guild_id, self.db)}\n"
             else:
                 embed.description += f"⏱️ Last Seen: Not available\n"
         else:
@@ -264,7 +264,7 @@ class CommandsCog(commands.Cog):
         # Boosting status
         if member and hasattr(member, 'premium_since') and member.premium_since:
             try:
-                boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F')
+                boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F', guild_id, self.db)
                 embed.description += f"💎 Boosting: Yes (since {boost_date})\n"
             except (AttributeError, ValueError, OSError):
                 pass
@@ -340,12 +340,12 @@ class CommandsCog(commands.Cog):
             if member_data['last_seen'] and member_data['last_seen'] != 0:
                 embed.add_field(
                     name="Last Seen",
-                    value=format_timestamp(member_data['last_seen'], 'R'),
+                    value=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db),
                     inline=False
                 )
                 embed.add_field(
                     name="Exact Time",
-                    value=format_timestamp(member_data['last_seen'], 'F'),
+                    value=format_timestamp(member_data['last_seen'], 'F', guild_id, self.db),
                     inline=False
                 )
             else:
@@ -460,7 +460,7 @@ class CommandsCog(commands.Cog):
             # Format action with emoji
             action_emoji = "➕" if action == "added" else "➖"
             action_text = "Added" if action == "added" else "Removed"
-            time_str = format_timestamp(timestamp, 'R')
+            time_str = format_timestamp(timestamp, 'R', guild_id, self.db)
             
             embed.description += f"{action_emoji} {action_text}: **{escaped_role_name}** ({time_str})\n"
 
@@ -532,7 +532,7 @@ class CommandsCog(commands.Cog):
                 # Create a field for each member
                 username = member_data['username'] if member_data['username'] else "Unknown"
                 nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
-                last_seen = format_timestamp(member_data['last_seen'], 'R') if member_data['last_seen'] else "Never"
+                last_seen = format_timestamp(member_data['last_seen'], 'R', guild_id, self.db) if member_data['last_seen'] else "Never"
 
                 member_info = f"**Nickname:** {nickname}\n**Last Seen:** {last_seen}"
                 embed.add_field(name=username, value=member_info, inline=False)
@@ -587,11 +587,11 @@ class CommandsCog(commands.Cog):
             embed.description += f"• Average/Day: **{stats['avg_per_day']:,}**\n"
             
             if stats['busiest_day']:
-                busiest_str = format_timestamp(stats['busiest_day']['date'], 'D')
+                busiest_str = format_timestamp(stats['busiest_day']['date'], 'D', guild_id, self.db)
                 embed.description += f"• Busiest Day: **{stats['busiest_day']['count']:,}** on {busiest_str}\n"
             
             if stats['quietest_day']:
-                quietest_str = format_timestamp(stats['quietest_day']['date'], 'D')
+                quietest_str = format_timestamp(stats['quietest_day']['date'], 'D', guild_id, self.db)
                 embed.description += f"• Quietest Day: **{stats['quietest_day']['count']:,}** on {quietest_str}\n"
             
             embed.description += "\n**📊 Activity by Period**\n"
@@ -648,8 +648,8 @@ class CommandsCog(commands.Cog):
         avg_per_day = round(total_messages / 365, 1)
         max_day = max(activity_trend, key=lambda r: r['message_count'])
         min_day = min(activity_trend, key=lambda r: r['message_count'])
-        max_day_str = format_timestamp(max_day['date'], 'D')
-        min_day_str = format_timestamp(min_day['date'], 'D')
+        max_day_str = format_timestamp(max_day['date'], 'D', guild_id, self.db)
+        min_day_str = format_timestamp(min_day['date'], 'D', guild_id, self.db)
 
         # Get summary statistics
         activity_stats_30 = self.db.get_message_activity_period(guild_id, user_id, days=30)
@@ -1540,7 +1540,7 @@ class SearchResultsView(discord.ui.View):
                 })
             
             output.seek(0)
-            filename = f"member_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            filename = f"member_search_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
             file = discord.File(fp=StringIO(output.getvalue()), filename=filename)
             await interaction.followup.send(
                 f"✅ Exported {len(self.results)} members to CSV",
@@ -1598,7 +1598,7 @@ class SearchResultsView(discord.ui.View):
                 output.write("\n")
             
             output.seek(0)
-            filename = f"member_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            filename = f"member_search_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
             file = discord.File(fp=output, filename=filename)
             await interaction.followup.send(
                 f"✅ Exported {len(self.results)} members to TXT",
@@ -1795,7 +1795,7 @@ class UserStatsView(discord.ui.View):
                 ])
             
             output.seek(0)
-            filename = f"server_stats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            filename = f"server_stats_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
             file = discord.File(fp=StringIO(output.getvalue()), filename=filename)
             
             await interaction.followup.send(
