@@ -62,6 +62,10 @@ Configurable database backups with automatic retention management. Set your back
 - `/inactive` - List all members inactive for more than configured days
 - `/chat-history <user>` - Show message posting stats for the last year
 - `/server-stats` - View detailed server activity statistics with visual charts
+- `/user-stats` - User statistics and analytics dashboard
+  - Interactive buttons for detailed reports
+  - Retention analysis, growth trends, activity leaderboard
+  - Activity heatmap and comprehensive CSV export
 - `/help` - Show available commands
 - `/about` - Show bot information
 
@@ -75,9 +79,9 @@ Configurable database backups with automatic retention management. Set your back
   - Configure user command permissions (toggle role requirement, set user role)
   - Set track only roles - Only track members with specific roles (optional)
   - Set allowed channels - Restrict bot commands to specific channels (optional)
-  - **Configure timezone** - Set guild-specific timezone for accurate timestamps (e.g., America/New_York, Europe/London)
-  - **Set message retention** - Configure how long to keep message activity data (default: 365 days)
-  - **Configure scheduled reports** - Set up automated weekly/monthly reports
+  - Configure timezone - Set guild-specific timezone for accurate timestamps (e.g., America/New_York, Europe/London)
+  - Set message retention - Configure how long to keep message activity data (default: 365 days)
+  - Configure scheduled reports - Set up automated weekly/monthly reports
     - Choose report channel
     - Select frequency (weekly, monthly, or both)
     - Pick report types (activity, new members, departures)
@@ -88,10 +92,6 @@ Configurable database backups with automatic retention management. Set your back
   - Search with multiple filters: roles, status, inactive days, activity, join date, username
   - Export results to CSV or TXT format
   - Paginated results with interactive navigation
-- `/user-stats` - User statistics and analytics dashboard
-  - Interactive buttons for detailed reports
-  - Retention analysis, growth trends, activity leaderboard
-  - Activity heatmap and comprehensive CSV export
 - `/role-history <user>` - Show the last 20 role changes for a member
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
 - `/help` - Show available commands
@@ -142,7 +142,6 @@ Configurable database backups with automatic retention management. Set your back
    - Enable these Privileged Gateway Intents:
      - ✅ PRESENCE INTENT
      - ✅ SERVER MEMBERS INTENT
-     - ✅ MESSAGE CONTENT INTENT
 
 6. **Invite bot to your server**
    - Go to OAuth2 > URL Generator
@@ -151,7 +150,6 @@ Configurable database backups with automatic retention management. Set your back
      - Read Messages/View Channels
      - Send Messages
      - Embed Links
-     - Read Message History
      - View Server Members (required)
    - Copy and open the generated URL to invite the bot
 
