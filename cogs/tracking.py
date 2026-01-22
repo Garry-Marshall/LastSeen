@@ -318,6 +318,21 @@ class TrackingCog(commands.Cog):
             logger.error(f"Failed to wipe data for guild {guild.id} during on_guild_remove")
 
     @commands.Cog.listener()
+    async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        """
+        Called when a guild is updated (e.g., name change).
+        Updates guild name in database if changed.
+        
+        Args:
+            before: Guild state before update
+            after: Guild state after update
+        """
+        # Check if guild name changed
+        if before.name != after.name:
+            logger.info(f"Guild name changed from '{before.name}' to '{after.name}' (ID: {after.id})")
+            self.db.update_guild_name(after.id, after.name)
+
+    @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         """
         Called when a member joins a guild.
