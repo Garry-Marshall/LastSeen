@@ -79,8 +79,8 @@ class TimezoneModal(discord.ui.Modal, title="Set Server Timezone"):
     """Modal for setting the server timezone."""
 
     timezone_input = discord.ui.TextInput(
-        label="Timezone (e.g., America/New_York)",
-        placeholder="Use IANA timezone format",
+        label="Timezone (e.g. Europe/London)",
+        placeholder="Examples: America/New_York, Asia/Tokyo, Australia/Sydney",
         required=True,
         max_length=50
     )

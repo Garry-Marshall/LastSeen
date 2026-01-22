@@ -10,6 +10,7 @@ from .permissions import get_bot_admin_role_name, check_admin_permission
 from .channel_config import ChannelModal, InactiveDaysModal, RetentionDaysModal, TimezoneModal, ReportsConfigModal
 from .role_config import BotAdminRoleModal, UserRoleModal, TrackOnlyRolesModal
 from .channel_filter import AllowedChannelsModal
+from .quick_setup import QuickSetupView
 from . import member_mgmt
 
 logger = logging.getLogger(__name__)
@@ -188,7 +189,7 @@ class ConfigView(discord.ui.View):
         modal = ReportsConfigModal(self.db, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Disable Reports", style=discord.ButtonStyle.danger, emoji="🚫", row=4)
+    @discord.ui.button(label="Disable Reports", style=discord.ButtonStyle.danger, emoji="⏹️", row=3)
     async def disable_reports(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to disable scheduled reports."""
         if not await check_admin_permission(interaction, self.db, self.guild_id):
@@ -214,6 +215,23 @@ class ConfigView(discord.ui.View):
                 embed=create_error_embed("Failed to disable reports."),
                 ephemeral=True
             )
+
+    @discord.ui.button(label="🚀 Quick Setup", style=discord.ButtonStyle.primary, row=4)
+    async def quick_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Launch quick setup wizard."""
+        if not await check_admin_permission(interaction, self.db, self.guild_id):
+            return
+
+        # Create wizard view
+        wizard_view = QuickSetupView(self.db, self.guild_id, self.config)
+        embed = wizard_view._get_step_embed()
+        
+        await interaction.response.send_message(
+            embed=embed,
+            view=wizard_view,
+            ephemeral=True
+        )
+        logger.info(f"Quick setup wizard started for guild {interaction.guild.name}")
 
     @discord.ui.button(label="View Config", style=discord.ButtonStyle.secondary, emoji="⚙️", row=4)
     async def view_config(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -302,7 +320,7 @@ class ConfigView(discord.ui.View):
             )
 
         # Bot admin role
-        bot_admin_role = guild_config.get('bot_admin_role_name', 'Bot Admin')
+        bot_admin_role = guild_config.get('bot_admin_role_name', 'LastSeen Admin')
         embed.add_field(name="Bot Admin Role", value=bot_admin_role, inline=False)
 
         # User role required
@@ -311,7 +329,7 @@ class ConfigView(discord.ui.View):
         embed.add_field(name="User Role Required", value=user_role_required_str, inline=False)
 
         # User role name
-        user_role_name = guild_config.get('user_role_name', 'Bot User')
+        user_role_name = guild_config.get('user_role_name', 'LastSeen User')
         embed.add_field(name="User Role Name", value=user_role_name, inline=False)
 
         # Track only roles

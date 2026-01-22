@@ -31,8 +31,16 @@ async def update_all_members(
     guild = interaction.guild
     added_count = 0
     updated_count = 0
+    total_members = len([m for m in guild.members if not m.bot])
 
     try:
+        # Send progress message for large servers
+        if total_members > 100:
+            await interaction.followup.send(
+                f"⏳ Scanning {total_members:,} members... This may take a moment.",
+                ephemeral=True
+            )
+        
         # First, ensure guild name is correct
         db.update_guild_name(guild.id, guild.name)
 

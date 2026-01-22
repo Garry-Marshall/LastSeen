@@ -48,7 +48,8 @@ class AdminCog(commands.Cog):
         # Create embed
         embed = create_embed("Bot Configuration", discord.Color.gold())
         embed.description = (
-            "Use the buttons below to configure the bot settings for this server.\n\n"
+            "Configure bot settings for this server.\n\n"
+            "**🚀 First time here?** Click **Quick Setup** for a guided walkthrough!\n\n"
             "**📢 Set Notification Channel:** Choose where member leave notifications are posted\n"
             "**📅 Set Inactive Days:** Set the threshold for /inactive command\n"
             "**👑 Set Bot Admin Role:** Set which role can manage bot settings\n"
@@ -56,8 +57,12 @@ class AdminCog(commands.Cog):
             "**👤 Set User Role:** Set which role can use bot commands (when required)\n"
             "**🎯 Set Track Only Roles:** Only track members with specific roles (optional)\n"
             "**📝 Set Allowed Channels:** Restrict bot commands to specific channels (optional)\n"
-            "**�️ Set Retention Days:** Configure message activity auto-cleanup period\n"
-            "**�🔄 Update All Members:** Scan and update all current members in the database\n"
+            "**🗑️ Set Retention Days:** Configure message activity auto-cleanup period (default: 365 days)\n"
+            "**🌍 Set Timezone:** Configure server timezone (e.g., America/New_York)\n"
+            "**📊 Configure Reports:** Set up automated weekly/monthly activity reports\n"
+            "**🚫 Disable Reports:** Turn off scheduled reports for this server\n"
+            "**🔄 Update All Members:** Scan and update all current members in the database\n"
+            "**🚀 Quick Setup:** Guided wizard for first-time setup\n"
             "**⚙️ View Config:** View current configuration settings"
         )
 
@@ -265,7 +270,13 @@ class AdminCog(commands.Cog):
         # Create help embed
         embed = create_embed("LastSeen Bot - Help", discord.Color.blue())
         embed.description = (
-            "Track user activity, monitor presence, and manage member data across your server."
+            "Track member activity, monitor server statistics, and automate reports. "
+            "Use `/config` to configure bot settings.\\n\\n"
+            "**Quick Start:**\\n"
+            "• Check when someone was last online: `/lastseen @user`\\n"
+            "• View member details: `/whois @user`\\n"
+            "• List inactive members: `/inactive`\\n"
+            "• Configure bot settings: `/config` (Admin only)"
         )
 
         # User Commands (shown to both admin and users)
@@ -318,3 +329,4 @@ class AdminCog(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"User {interaction.user} viewed help in guild {interaction.guild.name}")
+

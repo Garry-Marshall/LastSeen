@@ -6,19 +6,47 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
  - Invite LastSeen into your Discord Server: [Invite Bot](https://discord.com/oauth2/authorize?client_id=1068871708322320445) 
  - Get support in our Community Discord Server: [Get Support](https://discord.gg/d3N5sd58fh)
 
+## Core Features
+
+### 🚀 Quick Setup
+Guided step-by-step wizard for first-time configuration. No guesswork—just follow the prompts to set up notification channels, inactive thresholds, timezones, and more.
+
+### 👁️ LastSeen Tracking
+Know exactly when members were last online. Track presence changes, join/leave times, and activity patterns across your entire server.
+
+### 💤 Inactive Members
+Instantly identify members who've been offline beyond your threshold. Perfect for engagement campaigns, role cleanup, or understanding server health.
+
+### 👤 WhoIs (Member Profiles)
+Comprehensive member information at a glance: join date, roles, nickname history, last seen, and message activity stats.
+
+### 📊 Analytics Dashboard
+Interactive statistics with retention reports, growth trends, activity leaderboards, and heatmaps. Export to CSV for deeper analysis.
+
+### 📅 Scheduled Reports
+Automated weekly/monthly reports delivered to your chosen channel. Track activity, new members, and departures without lifting a finger.
+
+---
+
 ## Features
 
 - **Multi-Guild Support**: Works across multiple Discord servers simultaneously
 - **User Tracking**: Monitors joins, leaves, nickname changes, and role updates
 - **Presence Monitoring**: Tracks when users go offline/online
 - **Activity Statistics**: Detailed server activity metrics with visual charts
+- **Scheduled Reports**: Automated weekly/monthly reports with activity, new members, and departures
+- **Timezone Support**: Guild-specific timezone configuration for accurate timestamp display
 - **Role-Based Visibility**: Optionally track only members with specific roles
 - **Channel Restrictions**: Limit bot commands to specific channels
-- **Database Storage**: SQLite database with proper connection management
+- **Database Storage**: SQLite database with connection pooling for optimal performance
+- **Message Activity Tracking**: Monitor message posting patterns and trends with buffered writes
 - **Slash Commands**: Modern Discord slash command interface
 - **Admin Panel**: Interactive configuration with buttons and modals
-- **Logging**: Daily log files with configurable log levels
+- **Quick Setup Wizard**: Step-by-step guided configuration for first-time users
+- **Data Retention**: Configurable message activity retention periods per guild
+- **Logging**: Daily log files with configurable log levels and automatic cleanup
 - **Modular Design**: Clean separation of concerns with cogs
+- **Performance Optimized**: Connection pooling, buffered writes, indexed queries for high-load servers
 
 ## Commands
 
@@ -36,12 +64,20 @@ A modular Discord bot for monitoring and tracking user activity across guilds. T
 ### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
 
 - `/config` - Open interactive configuration panel
+  - **🚀 Quick Setup** - Guided wizard for first-time setup (recommended for new users)
   - Set notification channel for leave messages
   - Set inactive days threshold
   - Set bot admin role name
   - Configure user command permissions (toggle role requirement, set user role)
   - Set track only roles - Only track members with specific roles (optional)
   - Set allowed channels - Restrict bot commands to specific channels (optional)
+  - **Configure timezone** - Set guild-specific timezone for accurate timestamps (e.g., America/New_York, Europe/London)
+  - **Set message retention** - Configure how long to keep message activity data (default: 365 days)
+  - **Configure scheduled reports** - Set up automated weekly/monthly reports
+    - Choose report channel
+    - Select frequency (weekly, monthly, or both)
+    - Pick report types (activity, new members, departures)
+    - Set delivery day (day of week for weekly, day of month for monthly)
   - Update all members in database
   - View current configuration
 - `/search` - Advanced member search and filtering
@@ -143,6 +179,33 @@ DEBUG_LOGS_DAYS_TO_KEEP=5
 
 Use `/config` command in your Discord server to configure:
 
+#### 🚀 Quick Setup (Recommended for First-Time Users)
+
+The **Quick Setup wizard** provides a step-by-step guided walkthrough of essential configuration:
+
+1. **Notification Channel** - Where to post member leave alerts
+2. **Inactive Days Threshold** - When members appear in `/inactive` command
+3. **Bot Admin Role** - Which role can manage bot settings (optional)
+4. **Server Timezone** - For accurate timestamp display (optional)
+5. **Summary** - Review all settings at once
+
+**Features:**
+- Interactive buttons to configure each step
+- Clear explanations of why each setting matters
+- Recommended values and examples
+- Skip optional steps
+- Progress tracking (Step X/5)
+- 10-minute timeout for careful configuration
+
+**How to Access:**
+- Use `/config` command
+- Click the **🚀 Quick Setup** button
+- Follow the prompts to configure essential settings
+
+#### Manual Configuration
+
+Prefer to configure individual settings? Use the other buttons in `/config`:
+
 #### Basic Settings
 - **Notification Channel**: Where member leave messages are posted
 - **Inactive Days**: Threshold for `/inactive` command (default: 10 days)
@@ -152,6 +215,37 @@ Use `/config` command in your Discord server to configure:
 - **User Role Required**: Toggle whether a specific role is required to use bot commands
 - **User Role Name**: The role required to use bot commands (when enabled)
 - **Allowed Channels**: Restrict bot commands to specific channels (optional)
+
+#### Timezone Configuration
+- **Server Timezone**: Set your guild's timezone for accurate timestamp display
+  - All timestamps in `/lastseen`, `/whois`, and reports will be shown in your local time
+  - Supports all IANA timezone names (e.g., `America/New_York`, `Europe/London`, `Asia/Tokyo`)
+  - Defaults to UTC if not configured
+  - Timezone names are validated against the official pytz timezone database
+
+#### Message Activity & Retention
+- **Message Retention Days**: Control how long message activity data is stored
+  - Configure per guild (default: 365 days)
+  - Automatic cleanup runs daily to remove old records
+  - Helps manage database size for large servers
+  - Separate retention for daily and hourly activity data
+
+#### Scheduled Reports
+- **Automated Reports**: Configure weekly and/or monthly automated reports
+  - **Report Channel**: Choose which channel receives the reports
+  - **Frequency**: Weekly, monthly, or both
+  - **Report Types**:
+    - **Activity Report**: Message statistics, peak day, top 5 contributors
+    - **New Members**: List of members who joined during the period
+    - **Departures**: Members who left during the period (with last seen info)
+  - **Delivery Schedule**:
+    - Weekly: Choose day of week (0=Monday to 6=Sunday)
+    - Monthly: Choose day of month (1-28)
+  - **Smart Features**:
+    - Duplicate prevention (won't send same report twice on restarts)
+    - Rate limiting (60-second minimum between reports)
+    - Automatic retry on failures (up to 3 attempts with exponential backoff)
+    - Pagination for large departure lists (25 members per embed)
 
 #### Tracking Filter (Advanced)
 - **Track Only Roles**: Only track members with specific roles (optional)
@@ -374,11 +468,36 @@ Opens the interactive dashboard. Click any button to view detailed reports, then
 - When a user comes **online**, `last_seen` is set to 0 (indicating current activity)
 - This allows accurate "last seen" tracking while showing online users as "Currently online"
 
+### Message Activity Tracking
+- **Efficient Buffered Writes**: Messages are batched and written every 30 seconds
+- **Dual Granularity**: Tracks both daily aggregates and hourly breakdowns
+- **Retry Logic**: Failed writes are automatically retried on next flush
+- **Buffer Protection**: Automatic flush when buffer size reaches 10,000 entries
+- **Performance Optimized**: Uses single database calls with count parameters
+
 ### Activity Statistics
 - View comprehensive server activity metrics with `/server-stats`
 - See online/offline distribution across different time periods
 - Visual ASCII charts showing activity breakdown
 - Track engagement rates and recent activity percentages
+- Message activity tracked with hourly and daily granularity
+
+### Scheduled Reports
+- **Automated Delivery**: Reports are sent automatically based on your configured schedule
+- **Smart Scheduling**: 
+  - Weekly reports check day of week (Monday=0, Sunday=6)
+  - Monthly reports check day of month (1-28 for reliability across all months)
+  - Hourly check task ensures reports are sent within 1 hour of scheduled time
+- **Duplicate Prevention**: Date-based tracking ensures reports are only sent once per day
+- **Graceful Failures**: Missing permissions or unavailable channels are logged without crashing
+- **Content Filtering**: Empty reports (no new members, no departures) are automatically omitted
+
+### Timezone Support
+- **Guild-Specific Timezones**: Each server can set its own timezone
+- **Automatic Conversion**: All timestamps are converted to guild timezone
+- **Validation**: Invalid timezone strings fallback to UTC with logging
+- **Comprehensive Coverage**: Supports all IANA timezone names
+- **Consistent Display**: Timestamps in commands and reports use same timezone
 
 ### Role-Based Visibility
 - Optionally configure specific roles to track (via `/config`)
@@ -402,6 +521,15 @@ Opens the interactive dashboard. Click any button to view detailed reports, then
 - `is_active` flag is set back to 1
 - Username, nickname, and roles are refreshed
 
+### Performance & Reliability
+- **Connection Pooling**: Database connection pool (5 connections) reduces overhead by ~90%
+- **Buffered Writes**: Message activity is batched every 30 seconds for efficiency
+- **Async-Safe Shutdown**: Gracefully flushes all buffers using thread pool during shutdown
+- **Failed Write Retry**: Automatically retries failed database writes on next flush cycle
+- **Input Sanitization**: Role names are sanitized (length limits, control character removal)
+- **Database Indexes**: Optimized queries with strategic indexes on frequently accessed columns
+- **Rate Limiting**: Built-in protection against Discord API rate limits with exponential backoff
+
 ## Logging
 
 Logs are stored in the `logs/` directory with daily rotation:
@@ -424,10 +552,25 @@ Logs are stored in the `logs/` directory with daily rotation:
 ### Database errors
 - Ensure database file has write permissions
 - Check logs for specific error messages
+- Database migrations run automatically on startup
+- Connection pool closes gracefully on shutdown
 
 ### Commands not showing up
 - Wait a few minutes for Discord to sync commands globally
 - Try kicking and re-inviting the bot
+
+### Scheduled reports not sending
+- Verify report channel exists and bot has send permissions
+- Check timezone configuration matches your expectations
+- Review logs for "Sending weekly/monthly report" messages
+- Reports only send if there's content (empty reports are skipped)
+- Duplicate prevention: reports won't send twice on same calendar day
+
+### Timezone issues
+- Ensure timezone string is valid IANA format (e.g., `America/New_York`)
+- Check logs for "Invalid timezone" warnings
+- Invalid timezones automatically fallback to UTC
+- Test with `/lastseen` command to verify timezone display
 
 ## Privacy & Data
 

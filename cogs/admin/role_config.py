@@ -75,7 +75,10 @@ class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
             logger.info(f"Bot admin role set to '{role_name}' in guild {interaction.guild.name}")
         else:
             await interaction.response.send_message(
-                embed=create_error_embed("Failed to update bot admin role."),
+                embed=create_error_embed(
+                    "Failed to update bot admin role. "
+                    "Database error occurred. Please try again or contact support."
+                ),
                 ephemeral=True
             )
 
@@ -145,7 +148,10 @@ class UserRoleModal(discord.ui.Modal, title="Set User Role"):
             logger.info(f"User role set to '{role_name}' in guild {interaction.guild.name}")
         else:
             await interaction.response.send_message(
-                embed=create_error_embed("Failed to update user role."),
+                embed=create_error_embed(
+                    "Failed to update user role. "
+                    "Database error occurred. Please try again or contact support."
+                ),
                 ephemeral=True
             )
 

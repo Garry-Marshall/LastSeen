@@ -136,8 +136,51 @@ class CommandsCog(commands.Cog):
 
         return True, None, channels_restricted
 
+    async def user_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        """
+        Autocomplete callback for user parameters.
+        Suggests member names as user types.
+        
+        Args:
+            interaction: Discord interaction
+            current: Current user input
+            
+        Returns:
+            List of autocomplete choices
+        """
+        if not interaction.guild:
+            return []
+        
+        # Get all members from database for this guild
+        members = self.db.get_guild_members(interaction.guild_id, include_left=False)
+        
+        # Filter based on current input (case-insensitive)
+        current_lower = current.lower()
+        matches = []
+        
+        for member in members:
+            username = member.get('username', '')
+            nickname = member.get('nickname', '')
+            
+            # Match on username or nickname
+            if current_lower in username.lower() or (nickname and current_lower in nickname.lower()):
+                # Show nickname if available, otherwise username
+                display_name = nickname if nickname else username
+                matches.append(app_commands.Choice(name=display_name[:100], value=username[:100]))
+                
+            # Limit to 25 choices (Discord limit)
+            if len(matches) >= 25:
+                break
+        
+        return matches
+
     @app_commands.command(name="whois", description="👤 Get information about a user")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
+    @app_commands.autocomplete(user=user_autocomplete)
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
     async def whois(self, interaction: discord.Interaction, user: str):
@@ -360,6 +403,7 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="lastseen", description="👁️ Check when a user was last seen online")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
+    @app_commands.autocomplete(user=user_autocomplete)
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
     async def lastseen(self, interaction: discord.Interaction, user: str):
@@ -374,6 +418,7 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="seen", description="👁️ Alias for /lastseen - Check when a user was last seen")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
+    @app_commands.autocomplete(user=user_autocomplete)
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
     async def seen(self, interaction: discord.Interaction, user: str):
@@ -388,6 +433,7 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="role-history", description="📜 View role change history for a member (Admin only)")
     @app_commands.describe(user="Username, nickname, or @mention of the user")
+    @app_commands.autocomplete(user=user_autocomplete)
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
     async def role_history(self, interaction: discord.Interaction, user: str):
@@ -467,8 +513,8 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /role-history for '{user}' in guild {interaction.guild.name}")
 
-    @app_commands.command(name="inactive", description="💤 List members who have been inactive")
-    @app_commands.describe(days="Optional: Override the configured inactive days threshold (1-365)")
+    @app_commands.command(name="inactive", description="💤 List inactive members (add days to override server threshold)")
+    @app_commands.describe(days="Override default threshold - specify number of days (1-365)")
     @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
     async def inactive(self, interaction: discord.Interaction, days: int = None):
@@ -548,6 +594,7 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="chat-history", description="📈 View extended message activity history (365 days)")
     @app_commands.describe(user="Username, nickname, or @mention (leave empty for server-wide stats)")
+    @app_commands.autocomplete(user=user_autocomplete)
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
     async def chat_history(self, interaction: discord.Interaction, user: str = None):
@@ -724,10 +771,10 @@ class CommandsCog(commands.Cog):
     @app_commands.describe(
         roles="Filter by roles (comma-separated, e.g., @Mod,@Admin)",
         status="Filter by presence: online, offline, idle, dnd, or all",
-        inactive="Days since last seen (e.g., >30, <7, =14)",
-        activity="Message count in last 30 days (e.g., >100, <10)",
-        joined="Filter by join date (e.g., >2024-01-01, <2023-06-01)",
-        username="Search username (partial match)",
+        inactive="Days since last seen - use >30 (more than), <7 (less than), or =14 (exactly)",
+        activity="Messages in last 30 days - examples: >100, <10, =50",
+        joined="Join date filter - format: >2024-01-01, <2023-06-01, =2025-01-15",
+        username="Search username (partial match, case-insensitive)",
         export="Export results as file: csv, txt, or none"
     )
     async def search(
