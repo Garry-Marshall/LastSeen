@@ -1251,15 +1251,10 @@ class CommandsCog(commands.Cog):
         """Enrich database data with Discord member information."""
         last_seen = member_data.get('last_seen')
         
-        # Check if user is currently online according to Discord
-        # If they're offline but last_seen is 0 (which normally indicates online), 
-        # this means they haven't been seen online by this bot instance yet
-        if discord_member.status == discord.Status.offline and last_seen == 0:
-            # User is actually offline but we have no valid last_seen data
-            # Set to None to show "Never" instead of "Online now"
-            last_seen = None
-        elif discord_member.status != discord.Status.offline and last_seen != 0:
-            # User is online but DB has an old timestamp
+        # If last_seen is NULL, it means never tracked yet - keep as None to show "Never"
+        # If user is currently online but DB has an old timestamp, update to 0
+        if discord_member.status != discord.Status.offline and last_seen and last_seen > 0:
+            # User is online but DB has an old offline timestamp
             # Set to 0 to show "Online now"
             last_seen = 0
         

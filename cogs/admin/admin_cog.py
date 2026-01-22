@@ -165,9 +165,14 @@ class AdminCog(commands.Cog):
             )
 
             # === PRESENCE STATUS ===
+            # Get actual online count from Discord (not database)
+            # Database may have stale last_seen=0 for users who were online before bot restart
+            actual_online = sum(1 for m in interaction.guild.members 
+                              if not m.bot and m.status != discord.Status.offline)
+            
             total_tracked = guild_stats['active_members']
-            online_count = activity_stats['currently_online']
-            offline_count = activity_stats['currently_offline']
+            online_count = actual_online  # Use actual Discord status
+            offline_count = total_tracked - actual_online
             
             if total_tracked > 0:
                 online_pct = (online_count / total_tracked) * 100

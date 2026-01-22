@@ -705,7 +705,7 @@ class DatabaseManager:
                     INSERT OR REPLACE INTO members
                     (guild_id, user_id, username, nickname, join_date, last_seen, is_active, roles, nickname_history)
                     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-                """, (guild_id, user_id, username, nickname, join_date, 0, roles_json, nickname_history))
+                """, (guild_id, user_id, username, nickname, join_date, None, roles_json, nickname_history))
                 return True
         except Exception as e:
             logger.error(f"Failed to add member {user_id} to guild {guild_id}: {e}")
@@ -1152,9 +1152,13 @@ class DatabaseManager:
                 result = cursor.fetchone()
                 stats['currently_online'] = result[0] if result else 0
 
-                # Never seen offline (last_seen = 0, but could be online now)
-                # This is same as currently_online
-                stats['never_seen_offline'] = stats['currently_online']
+                # Never seen offline (never tracked - last_seen IS NULL)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1 AND last_seen IS NULL
+                """, (guild_id,))
+                result = cursor.fetchone()
+                stats['never_seen_offline'] = result[0] if result else 0
 
                 # Offline within last hour
                 cursor.execute("""
@@ -1779,7 +1783,7 @@ class DatabaseManager:
                     SELECT 
                         COUNT(*) as total_members,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_members,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_30d
+                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_30d
                     FROM members
                     WHERE guild_id = ?
                 """, (thirty_days_ago, guild_id))
@@ -1930,7 +1934,7 @@ class DatabaseManager:
                     SELECT 
                         COUNT(*) as total_joined,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
                     FROM members
                     WHERE guild_id = ? AND join_date >= ?
                 """, (thirty_days_ago, guild_id, thirty_days_ago))
@@ -1947,7 +1951,7 @@ class DatabaseManager:
                     SELECT 
                         COUNT(*) as total_joined,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
                     FROM members
                     WHERE guild_id = ? AND join_date >= ? AND join_date < ?
                 """, (thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago))
@@ -1964,7 +1968,7 @@ class DatabaseManager:
                     SELECT 
                         COUNT(*) as total_joined,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
                     FROM members
                     WHERE guild_id = ? AND join_date >= ? AND join_date < ?
                 """, (thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago))

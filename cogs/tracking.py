@@ -261,6 +261,7 @@ class TrackingCog(commands.Cog):
 
         # Enumerate and add all members
         member_count = 0
+        online_count = 0
         for member in guild.members:
             if member.bot:
                 continue  # Skip bots
@@ -280,11 +281,19 @@ class TrackingCog(commands.Cog):
                     join_date=join_date,
                     roles=roles
                 )
+                
+                # Check initial status and set last_seen accordingly
+                if member.status != discord.Status.offline:
+                    # Member is currently online - set last_seen to 0
+                    self.db.update_last_seen(guild.id, member.id, 0)
+                    online_count += 1
+                # If offline, leave as NULL (never seen online yet)
+                
                 member_count += 1
             except Exception as e:
                 logger.error(f"Failed to add member {member.id} in guild {guild.id}: {e}")
 
-        logger.info(f"Added {member_count} members from guild {guild.name}")
+        logger.info(f"Added {member_count} members from guild {guild.name} ({online_count} online, {member_count - online_count} offline/never tracked)")
 
         # Initialize member positions (for join order tracking)
         # Run as background task to avoid blocking the bot
@@ -346,6 +355,13 @@ class TrackingCog(commands.Cog):
                 join_date=join_date,
                 roles=roles
             )
+            
+            # Check their initial status and set last_seen accordingly
+            if member.status != discord.Status.offline:
+                # Member joined while online - set last_seen to 0
+                self.db.update_last_seen(guild_id, user_id, 0)
+                logger.debug(f"New member {member} joined while {member.status} - set last_seen to 0")
+            # If offline, leave as NULL (never seen online yet)
             
             # If positions are already initialized, assign position to this new member
             if self.db.guild_positions_initialized(guild_id):
