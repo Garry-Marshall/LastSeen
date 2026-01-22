@@ -301,7 +301,8 @@ lastseen_bot/
 │   ├── __init__.py
 │   ├── client.py          # Bot client setup
 │   ├── config.py          # Configuration loader
-│   └── utils.py           # Helper functions
+│   ├── utils.py           # Helper functions
+│   └── reports.py         # Scheduled report generation
 ├── cogs/
 │   ├── __init__.py
 │   ├── tracking.py        # Event listeners (join/leave/update)
@@ -310,6 +311,7 @@ lastseen_bot/
 │       ├── __init__.py            # Package setup & exports
 │       ├── admin_cog.py           # Admin slash commands
 │       ├── config_view.py         # Interactive config UI
+│       ├── quick_setup.py         # Quick Setup wizard
 │       ├── permissions.py         # Permission checking utilities
 │       ├── channel_config.py      # Channel & timing modals
 │       ├── role_config.py         # Role-based access modals
