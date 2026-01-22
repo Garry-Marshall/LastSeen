@@ -55,10 +55,11 @@ class TrackingCog(commands.Cog):
         # Buffer size limits to prevent memory issues
         self.MAX_BUFFER_SIZE = 10000  # Max entries before forcing flush
         
-        # Start background task
+        # Start background tasks
         self.flush_activity_buffer.start()
         self.cleanup_old_data.start()
         self.check_scheduled_reports.start()
+        self.backup_database.start()
 
     async def _initialize_member_positions(self, guild: discord.Guild) -> bool:
         """
@@ -823,6 +824,54 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before starting the reports loop."""
         await self.bot.wait_until_ready()
 
+    @tasks.loop(hours=1)  # Check every hour, will use config to determine actual interval
+    async def backup_database(self):
+        """
+        Background task that creates database backups at configured intervals.
+        Manages backup retention by deleting old backups.
+        """
+        try:
+            # Check if it's time to backup based on configured interval
+            backup_interval_hours = self.config.backup_interval_hours
+            
+            # Get the last backup time (use a simple file check or track in memory)
+            # For simplicity, we'll backup at the configured interval
+            # Store last backup time as an attribute
+            if not hasattr(self, '_last_backup_time'):
+                self._last_backup_time = 0
+            
+            current_time = datetime.now(timezone.utc).timestamp()
+            time_since_last_backup = (current_time - self._last_backup_time) / 3600  # hours
+            
+            if time_since_last_backup >= backup_interval_hours:
+                logger.info(f"Starting database backup (interval: {backup_interval_hours}h)...")
+                
+                # Create backup
+                backup_file = self.db.create_backup(str(self.config.backup_folder))
+                
+                if backup_file:
+                    logger.info(f"Database backup completed: {backup_file}")
+                    
+                    # Cleanup old backups
+                    retention_count = self.config.backup_retention_count
+                    deleted = self.db.cleanup_old_backups(str(self.config.backup_folder), retention_count)
+                    
+                    if deleted > 0:
+                        logger.info(f"Deleted {deleted} old backup(s), keeping {retention_count} most recent")
+                    
+                    # Update last backup time
+                    self._last_backup_time = current_time
+                else:
+                    logger.error("Database backup failed")
+                    
+        except Exception as e:
+            logger.error(f"Error during database backup: {e}", exc_info=True)
+
+    @backup_database.before_loop
+    async def before_backup_database(self):
+        """Wait for bot to be ready before starting the backup loop."""
+        await self.bot.wait_until_ready()
+
     def cog_unload(self):
         """
         Called when the cog is unloaded.
@@ -832,6 +881,7 @@ class TrackingCog(commands.Cog):
         self.flush_activity_buffer.cancel()
         self.cleanup_old_data.cancel()
         self.check_scheduled_reports.cancel()
+        self.backup_database.cancel()
         
         # Schedule async flush task to run in the event loop
         # This avoids blocking the shutdown process

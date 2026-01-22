@@ -49,6 +49,8 @@ venv.bak/
 Logs/
 *.log
 
+# Backup directory
+backups/
 
 # Backup files
 *.backup

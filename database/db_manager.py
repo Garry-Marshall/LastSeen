@@ -2277,3 +2277,91 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to run global cleanup: {e}", exc_info=True)
             return {'daily_deleted': 0, 'hourly_deleted': 0, 'guilds_processed': 0}
+
+    # ==================== Database Backup Operations ====================
+
+    def create_backup(self, backup_folder: str) -> Optional[str]:
+        """
+        Create a backup of the database using SQLite's backup API.
+
+        Args:
+            backup_folder: Path to the folder where backups should be stored
+
+        Returns:
+            Path to the created backup file, or None if backup failed
+        """
+        from pathlib import Path
+        
+        try:
+            # Ensure backup folder exists
+            backup_path = Path(backup_folder)
+            backup_path.mkdir(exist_ok=True)
+            
+            # Generate backup filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            backup_file = backup_path / f"lastseen_backup_{timestamp}.db"
+            
+            # Create backup using SQLite's backup API
+            # This creates a separate connection to avoid interfering with the pool
+            source_conn = sqlite3.connect(self.db_file)
+            backup_conn = sqlite3.connect(str(backup_file))
+            
+            try:
+                # Perform the backup
+                with backup_conn:
+                    source_conn.backup(backup_conn)
+                
+                logger.info(f"Database backup created successfully: {backup_file.name}")
+                return str(backup_file)
+            finally:
+                source_conn.close()
+                backup_conn.close()
+                
+        except Exception as e:
+            logger.error(f"Failed to create database backup: {e}", exc_info=True)
+            return None
+
+    def cleanup_old_backups(self, backup_folder: str, retention_count: int) -> int:
+        """
+        Delete old backup files, keeping only the most recent backups.
+
+        Args:
+            backup_folder: Path to the folder containing backups
+            retention_count: Number of recent backups to keep
+
+        Returns:
+            Number of backup files deleted
+        """
+        from pathlib import Path
+        
+        try:
+            backup_path = Path(backup_folder)
+            
+            if not backup_path.exists():
+                return 0
+            
+            # Get all backup files sorted by modification time (newest first)
+            backup_files = sorted(
+                backup_path.glob("lastseen_backup_*.db"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            
+            # Delete old backups beyond retention count
+            deleted_count = 0
+            for backup_file in backup_files[retention_count:]:
+                try:
+                    backup_file.unlink()
+                    deleted_count += 1
+                    logger.info(f"Deleted old backup: {backup_file.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete backup {backup_file.name}: {e}")
+            
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} old backup(s), keeping {min(len(backup_files), retention_count)} most recent")
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup old backups: {e}", exc_info=True)
+            return 0

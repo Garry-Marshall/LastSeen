@@ -61,11 +61,31 @@ class Config:
             self.logs_days_to_keep = 5
             logger.warning("Invalid DEBUG_LOGS_DAYS_TO_KEEP, using 5")
 
+        # Load backup settings
+        try:
+            self.backup_interval_hours = int(os.getenv('DB_BACKUP_INTERVAL_HOURS', '24'))
+            if self.backup_interval_hours < 1:
+                self.backup_interval_hours = 24
+                logger.warning("DB_BACKUP_INTERVAL_HOURS must be at least 1, using 24")
+        except ValueError:
+            self.backup_interval_hours = 24
+            logger.warning("Invalid DB_BACKUP_INTERVAL_HOURS, using 24")
+
+        try:
+            self.backup_retention_count = int(os.getenv('DB_BACKUP_RETENTION_COUNT', '5'))
+            if self.backup_retention_count < 1:
+                self.backup_retention_count = 5
+                logger.warning("DB_BACKUP_RETENTION_COUNT must be at least 1, using 5")
+        except ValueError:
+            self.backup_retention_count = 5
+            logger.warning("Invalid DB_BACKUP_RETENTION_COUNT, using 5")
+
         logger.info("Configuration loaded successfully")
         logger.info(f"Database file: {self.db_file}")
         logger.info(f"Log level: {logging.getLevelName(self.log_level)}")
         logger.info(f"Bot admin role: {self.bot_admin_role_name}")
         logger.info(f"Log retention: {self.logs_days_to_keep} days")
+        logger.info(f"Database backup: every {self.backup_interval_hours} hours, keep {self.backup_retention_count} backups")
 
     def _create_default_env(self):
         """Create a default .env file from template if it doesn't exist."""
@@ -90,6 +110,10 @@ DB_FILE=lastseen_bot.db
 DEBUG_LEVEL=info  # options: info, debug, warning, error
 DEBUG_LOGS_DAYS_TO_KEEP=5  # number of days to keep log files (older logs are deleted)
 
+# Database Backup Settings
+DB_BACKUP_INTERVAL_HOURS=24  # how often to backup the database (in hours)
+DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups are deleted)
+
 """
                 self.env_path.write_text(default_content)
                 logger.info("Created default .env file")
@@ -101,6 +125,11 @@ DEBUG_LOGS_DAYS_TO_KEEP=5  # number of days to keep log files (older logs are de
     def log_folder(self) -> Path:
         """Get the logs folder path."""
         return Path('logs')
+
+    @property
+    def backup_folder(self) -> Path:
+        """Get the database backup folder path."""
+        return Path('backups')
 
     def cleanup_old_logs(self):
         """Delete log files older than the configured retention period."""

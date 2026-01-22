@@ -26,6 +26,9 @@ Interactive statistics with retention reports, growth trends, activity leaderboa
 ### 📅 Scheduled Reports
 Automated weekly/monthly reports delivered to your chosen channel. Track activity, new members, and departures without lifting a finger.
 
+### 💾 Automatic Backups
+Configurable database backups with automatic retention management. Set your backup interval and retention count to ensure your data is always safe.
+
 ---
 
 ## Features
@@ -44,6 +47,7 @@ Automated weekly/monthly reports delivered to your chosen channel. Track activit
 - **Admin Panel**: Interactive configuration with buttons and modals
 - **Quick Setup Wizard**: Step-by-step guided configuration for first-time users
 - **Data Retention**: Configurable message activity retention periods per guild
+- **Automatic Backups**: Scheduled database backups with configurable interval and retention
 - **Logging**: Daily log files with configurable log levels and automatic cleanup
 - **Modular Design**: Clean separation of concerns with cogs
 - **Performance Optimized**: Connection pooling, buffered writes, indexed queries for high-load servers
@@ -173,6 +177,10 @@ DEBUG_LEVEL=info
 # Log retention: Number of days to keep log files (default: 5)
 # Older logs are automatically deleted on bot startup
 DEBUG_LOGS_DAYS_TO_KEEP=5
+
+# Database backup settings
+DB_BACKUP_INTERVAL_HOURS=24  # How often to backup the database (default: 24)
+DB_BACKUP_RETENTION_COUNT=5  # Number of backup copies to keep (default: 5)
 ```
 
 ### Per-Guild Configuration
