@@ -252,12 +252,17 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE guilds ADD COLUMN last_monthly_report INTEGER DEFAULT 0")
                 logger.info("Added last_monthly_report column to guilds table")
 
-            # Create index for scheduled reports query (after columns exist)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_guilds_reports
-                ON guilds(report_frequency, report_channel_id)
-                WHERE report_frequency IS NOT NULL AND report_channel_id IS NOT NULL
-            """)
+            # Refresh column list after migrations to ensure all columns exist
+            cursor.execute("PRAGMA table_info(guilds)")
+            columns = [row[1] for row in cursor.fetchall()]
+
+            # Create index for scheduled reports query (only if columns exist)
+            if 'report_frequency' in columns and 'report_channel_id' in columns:
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_guilds_reports
+                    ON guilds(report_frequency, report_channel_id)
+                    WHERE report_frequency IS NOT NULL AND report_channel_id IS NOT NULL
+                """)
 
             # Check members table for new columns
             cursor.execute("PRAGMA table_info(members)")
@@ -270,6 +275,10 @@ class DatabaseManager:
             if 'nickname_history' not in member_columns:
                 cursor.execute("ALTER TABLE members ADD COLUMN nickname_history TEXT")
                 logger.info("Added nickname_history column to members table")
+
+            if 'left_date' not in member_columns:
+                cursor.execute("ALTER TABLE members ADD COLUMN left_date INTEGER")
+                logger.info("Added left_date column to members table")
 
             # Create message_activity_hourly table for hour-of-day tracking
             cursor.execute("""

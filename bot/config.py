@@ -2,6 +2,7 @@
 
 import os
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
@@ -133,7 +134,7 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
 
     def cleanup_old_logs(self):
         """Delete log files older than the configured retention period."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         if not self.log_folder.exists():
             return
@@ -172,8 +173,8 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
         # Cleanup old log files
         self.cleanup_old_logs()
 
-        # Get current date for log file name
-        from datetime import datetime
+        # Get current date for log file base name
+        from datetime import datetime, timezone
         log_date = datetime.now().strftime('%Y-%m-%d')
         log_file = self.log_folder / f"{log_date}.log"
 
@@ -188,10 +189,19 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
         # Set root logger level
         root_logger.setLevel(self.log_level)
 
-        # File handler
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        # File handler with automatic daily rotation
+        file_handler = TimedRotatingFileHandler(
+            log_file,
+            when='midnight',
+            interval=1,
+            backupCount=self.logs_days_to_keep,
+            encoding='utf-8',
+            utc=True
+        )
         file_handler.setLevel(self.log_level)
         file_handler.setFormatter(logging.Formatter(log_format, date_format))
+        # Set suffix for rotated files to match our naming convention
+        file_handler.suffix = '%Y-%m-%d.log'
         root_logger.addHandler(file_handler)
 
         # Console handler
