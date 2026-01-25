@@ -61,13 +61,13 @@ Configurable database backups with automatic retention management. Set your back
 - `/seen <user>` - Alias for `/lastseen`
 - `/inactive` - List all members inactive for more than configured days
 - `/chat-history <user>` - Show message posting stats for the last year
-- `/server-stats` - View detailed server activity statistics with visual charts
 - `/user-stats` - User statistics and analytics dashboard
   - Interactive buttons for detailed reports
   - Retention analysis, growth trends, activity leaderboard
   - Activity heatmap and comprehensive CSV export
+  - Last seen distribution chart
 - `/help` - Show available commands
-- `/about` - Show bot information
+- `/about` - Show bot information and system resources
 
 ### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
 
@@ -357,16 +357,6 @@ lastseen_bot/
 ```
 Shows all members inactive for more than the configured threshold.
 
-### View server activity statistics
-```
-/server-stats
-```
-Displays comprehensive server activity metrics including:
-- Current online/offline counts
-- Activity breakdown by time period (last hour, 24h, 7d, 30d, 30d+)
-- Activity percentages and engagement rates
-- Visual ASCII chart of activity distribution
-
 ### Configure the bot (Admin only)
 ```
 /config
@@ -484,9 +474,9 @@ Opens the interactive dashboard. Click any button to view detailed reports, then
 - **Performance Optimized**: Uses single database calls with count parameters
 
 ### Activity Statistics
-- View comprehensive server activity metrics with `/server-stats`
+- View comprehensive server activity metrics with `/user-stats`
 - See online/offline distribution across different time periods
-- Visual ASCII charts showing activity breakdown
+- Visual ASCII charts showing activity breakdown and last seen distribution
 - Track engagement rates and recent activity percentages
 - Message activity tracked with hourly and daily granularity
 
