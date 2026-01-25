@@ -299,6 +299,10 @@ class TrackingCog(commands.Cog):
             guild: The guild that was joined
         """
         logger.info(f"Joined guild: {guild.name} (ID: {guild.id})")
+        
+        # Sound alert in console when debug mode is enabled
+        if logger.level == logging.DEBUG:
+            print('\a')  # ASCII bell character - produces beep sound
 
         # Add guild to database
         self.db.add_guild(

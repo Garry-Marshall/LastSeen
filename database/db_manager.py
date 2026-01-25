@@ -2434,3 +2434,33 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to cleanup old backups: {e}", exc_info=True)
             return 0
+
+    def get_bot_statistics(self) -> dict:
+        """
+        Get global bot statistics across all guilds.
+        
+        Returns:
+            dict: Statistics including total guilds and total unique users tracked
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Total guilds
+                cursor.execute("SELECT COUNT(DISTINCT guild_id) FROM guilds")
+                total_guilds = cursor.fetchone()[0]
+                
+                # Total active member records (not distinct - counts each guild membership)
+                cursor.execute("SELECT COUNT(*) FROM members WHERE is_active = 1")
+                total_users = cursor.fetchone()[0]
+                
+                return {
+                    'total_guilds': total_guilds,
+                    'total_users': total_users
+                }
+        except Exception as e:
+            logger.error(f"Failed to get bot statistics: {e}")
+            return {
+                'total_guilds': 0,
+                'total_users': 0
+            }

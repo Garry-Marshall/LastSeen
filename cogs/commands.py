@@ -735,6 +735,10 @@ class CommandsCog(commands.Cog):
 
     @app_commands.command(name="about", description="ℹ️ About this bot")
     async def about(self, interaction: discord.Interaction):
+        import psutil
+        import os
+        import sys
+        
         embed = create_embed("📊 LastSeen", discord.Color.green())
 
         embed.description = (
@@ -747,6 +751,75 @@ class CommandsCog(commands.Cog):
             "• Presence and activity status\n\n"
             "Designed for server moderators who want clear insight into member activity "
             "without unnecessary noise."
+        )
+
+        # Bot Statistics
+        bot_stats = self.db.get_bot_statistics()
+        
+        embed.add_field(
+            name="📡 Servers served:",
+            value=f"{bot_stats['total_guilds']:,}",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="👥 Users counted:",
+            value=f"{bot_stats['total_users']:,}",
+            inline=True
+        )
+        
+        # Add empty field for layout (3 columns)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+        # System Resources
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        cpu_percent = process.cpu_percent(interval=0.1)
+        thread_count = process.num_threads()
+        
+        # Bot uptime
+        if self.bot.start_time:
+            uptime_delta = datetime.now(timezone.utc) - self.bot.start_time
+            days = uptime_delta.days
+            hours, remainder = divmod(uptime_delta.seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            
+            if days > 0:
+                uptime_str = f"{days}d {hours}h {minutes}m {seconds}s"
+            elif hours > 0:
+                uptime_str = f"{hours}h {minutes}m {seconds}s"
+            else:
+                uptime_str = f"{minutes}m {seconds}s"
+        else:
+            uptime_str = "Unknown"
+        
+        # Latency
+        latency_ms = round(self.bot.latency * 1000)
+        
+        # Database status
+        db_health = self.db.get_database_health()
+        db_status = "✅ Healthy" if db_health['status'] == 'healthy' else "❌ Unhealthy"
+        
+        # Python version
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        
+        system_info = (
+            f"```\n"
+            f"Memory:    {memory_mb:.1f} MB\n"
+            f"CPU:       {cpu_percent:.1f}%\n"
+            f"Threads:   {thread_count}\n"
+            f"Uptime:    {uptime_str}\n"
+            f"Latency:   {latency_ms} ms\n"
+            f"Python:    {python_version}\n"
+            f"Database:  {db_status}\n"
+            f"DB Size:   {db_health['file_size_mb']:.2f} MB\n"
+            f"```"
+        )
+        
+        embed.add_field(
+            name="⚙️ System Resources",
+            value=system_info,
+            inline=False
         )
 
         embed.add_field(
@@ -955,6 +1028,9 @@ class CommandsCog(commands.Cog):
             prev_stats = self.db.get_member_growth_stats(interaction.guild_id, days=60)
             growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
             
+            # Add guild_id to stats for distribution chart
+            stats['guild_id'] = interaction.guild_id
+            
             # Create overview embed
             embed = self._create_stats_overview_embed(stats, growth_rate)
             
@@ -1011,6 +1087,40 @@ class CommandsCog(commands.Cog):
             ),
             inline=False
         )
+        
+        # Last Seen Distribution
+        activity_stats = self.db.get_activity_stats(stats.get('guild_id', 0))
+        if activity_stats:
+            def create_bar(count: int, max_count: int, length: int = 20) -> str:
+                if max_count == 0:
+                    return "░" * length
+                filled = int((count / max_count) * length)
+                return "█" * filled + "░" * (length - filled)
+
+            max_offline = max(
+                activity_stats['offline_1h'],
+                activity_stats['offline_24h'],
+                activity_stats['offline_7d'],
+                activity_stats['offline_30d'],
+                activity_stats['offline_30d_plus'],
+                1
+            )
+
+            chart = (
+                f"```\n"
+                f"<1 hour  {create_bar(activity_stats['offline_1h'], max_offline)} {activity_stats['offline_1h']:>5,}\n"
+                f"<24 hrs  {create_bar(activity_stats['offline_24h'], max_offline)} {activity_stats['offline_24h']:>5,}\n"
+                f"<7 days  {create_bar(activity_stats['offline_7d'], max_offline)} {activity_stats['offline_7d']:>5,}\n"
+                f"<30 days {create_bar(activity_stats['offline_30d'], max_offline)} {activity_stats['offline_30d']:>5,}\n"
+                f"30+ days {create_bar(activity_stats['offline_30d_plus'], max_offline)} {activity_stats['offline_30d_plus']:>5,}\n"
+                f"```"
+            )
+
+            embed.add_field(
+                name="⏰ Last Seen Distribution",
+                value=chart,
+                inline=False
+            )
         
         embed.set_footer(text="Click buttons below to view detailed reports")
         return embed
