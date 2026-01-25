@@ -171,10 +171,18 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
         default="activity,members,departures"
     )
 
-    day_input = discord.ui.TextInput(
-        label="Day (0-6 for weekly, 1-28 for monthly)",
-        placeholder="Weekly: 0=Mon, 6=Sun | Monthly: 1-28",
+    days_input = discord.ui.TextInput(
+        label="Days: weekly,monthly (e.g., 1,15)",
+        placeholder="Weekly(1-7): 1=Mon,7=Sun | Monthly(1-28)",
         required=False,
+        max_length=10
+    )
+
+    hour_input = discord.ui.TextInput(
+        label="Hour (server timezone)",
+        placeholder="0-23 (e.g., 9 for 9 AM, 14 for 2 PM)",
+        required=False,
+        default="9",
         max_length=2
     )
 
@@ -205,6 +213,14 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                 except (json.JSONDecodeError, TypeError):
                     logger.error(f"Failed to parse report_types JSON for guild {guild_id}")
                     pass
+            
+            # Pre-fill schedule fields
+            day_weekly = guild_config.get('report_day_weekly', 0)
+            day_monthly = guild_config.get('report_day_monthly', 1)
+            time_hour = guild_config.get('report_time_hour', 9)
+            # Convert internal 0-6 to user-friendly 1-7
+            self.days_input.default = f"{day_weekly + 1},{day_monthly}"
+            self.hour_input.default = str(time_hour)
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
@@ -261,32 +277,73 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                 )
                 return
 
-            # Parse day settings
+            # Parse schedule settings
             day_weekly = 0  # Default Monday
             day_monthly = 1  # Default 1st of month
+            time_hour = 9  # Default 9 AM
 
-            if self.day_input.value.strip():
+            # Parse days input (format: weekly,monthly or just one value)
+            days_str = self.days_input.value.strip()
+            if days_str:
+                parts = [p.strip() for p in days_str.split(',')]
+                
+                # Parse weekly day (first value)
+                if len(parts) >= 1 and parts[0]:
+                    try:
+                        day_weekly = int(parts[0])
+                        if not 1 <= day_weekly <= 7:
+                            await interaction.response.send_message(
+                                embed=create_error_embed(
+                                    "Weekly day must be 1-7\n"
+                                    "• 1=Monday, 2=Tuesday, 3=Wednesday\n"
+                                    "• 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday"
+                                ),
+                                ephemeral=True
+                            )
+                            return
+                        # Convert user input (1-7) to internal format (0-6)
+                        day_weekly = day_weekly - 1
+                    except ValueError:
+                        await interaction.response.send_message(
+                            embed=create_error_embed("First value (weekly day) must be a number 1-7"),
+                            ephemeral=True
+                        )
+                        return
+                
+                # Parse monthly day (second value)
+                if len(parts) >= 2 and parts[1]:
+                    try:
+                        day_monthly = int(parts[1])
+                        if not 1 <= day_monthly <= 28:
+                            await interaction.response.send_message(
+                                embed=create_error_embed("Monthly day must be 1-28"),
+                                ephemeral=True
+                            )
+                            return
+                    except ValueError:
+                        await interaction.response.send_message(
+                            embed=create_error_embed("Second value (monthly day) must be a number 1-28"),
+                            ephemeral=True
+                        )
+                        return
+
+            # Parse hour
+            hour_str = self.hour_input.value.strip()
+            if hour_str:
                 try:
-                    day = int(self.day_input.value.strip())
-                    if frequency == 'weekly':
-                        if 0 <= day <= 6:
-                            day_weekly = day
-                        else:
-                            raise ValueError("Weekly day must be 0-6")
-                    elif frequency == 'monthly':
-                        if 1 <= day <= 28:
-                            day_monthly = day
-                        else:
-                            raise ValueError("Monthly day must be 1-28")
-                    else:  # both
-                        # Use same value for both, validate range
-                        if 0 <= day <= 6:
-                            day_weekly = day
-                        if 1 <= day <= 28:
-                            day_monthly = day if day > 0 else 1
-                except ValueError as e:
+                    time_hour = int(hour_str)
+                    if not 0 <= time_hour <= 23:
+                        await interaction.response.send_message(
+                            embed=create_error_embed(
+                                "Hour must be 0-23\n"
+                                "Examples: 0=midnight, 9=9 AM, 14=2 PM, 23=11 PM"
+                            ),
+                            ephemeral=True
+                        )
+                        return
+                except ValueError:
                     await interaction.response.send_message(
-                        embed=create_error_embed(f"Invalid day: {str(e)}"),
+                        embed=create_error_embed("Hour must be a number 0-23"),
                         ephemeral=True
                     )
                     return
@@ -299,18 +356,23 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                 report_types,
                 day_weekly,
                 day_monthly,
+                time_hour,
                 interaction.guild.name
             )
 
             if success:
+                # Get timezone for display
+                guild_config = self.db.get_guild_config(self.guild_id)
+                guild_tz_str = guild_config.get('timezone', 'UTC') if guild_config else 'UTC'
+                
                 day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                 schedule_info = ""
                 if frequency == 'weekly':
-                    schedule_info = f"\n• Sends every **{day_names[day_weekly]}**"
+                    schedule_info = f"\n• Sends every **{day_names[day_weekly]}** (day {day_weekly + 1}) at **{time_hour:02d}:00 {guild_tz_str}**"
                 elif frequency == 'monthly':
-                    schedule_info = f"\n• Sends on day **{day_monthly}** of each month"
+                    schedule_info = f"\n• Sends on day **{day_monthly}** of each month at **{time_hour:02d}:00 {guild_tz_str}**"
                 else:  # both
-                    schedule_info = f"\n• Weekly: every **{day_names[day_weekly]}**\n• Monthly: day **{day_monthly}** of each month"
+                    schedule_info = f"\n• Weekly: every **{day_names[day_weekly]}** (day {day_weekly + 1}) at **{time_hour:02d}:00 {guild_tz_str}**\n• Monthly: day **{day_monthly}** of each month at **{time_hour:02d}:00 {guild_tz_str}**"
 
                 await interaction.response.send_message(
                     embed=create_success_embed(
@@ -322,7 +384,7 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                     ),
                     ephemeral=True
                 )
-                logger.info(f"Reports configured for guild {self.guild_id}: {frequency} to {channel.name}")
+                logger.info(f"Reports configured for guild {self.guild_id}: {frequency} to {channel.name} at {time_hour:02d}:00 {guild_tz_str}")
             else:
                 await interaction.response.send_message(
                     embed=create_error_embed("Failed to save report configuration."),

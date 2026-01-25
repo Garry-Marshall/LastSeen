@@ -276,11 +276,11 @@ class AdminCog(commands.Cog):
         embed = create_embed("LastSeen Bot - Help", discord.Color.blue())
         embed.description = (
             "Track member activity, monitor server statistics, and automate reports. "
-            "Use `/config` to configure bot settings.\\n\\n"
-            "**Quick Start:**\\n"
-            "• Check when someone was last online: `/lastseen @user`\\n"
-            "• View member details: `/whois @user`\\n"
-            "• List inactive members: `/inactive`\\n"
+            "Use `/config` to configure bot settings.\n\n"
+            "**Quick Start:**\n"
+            "• Check when someone was last online: `/lastseen @user`\n"
+            "• View member details: `/whois @user`\n"
+            "• List inactive members: `/inactive`\n"
             "• Configure bot settings: `/config` (Admin only)"
         )
 

@@ -296,16 +296,18 @@ class ConfigView(discord.ui.View):
             
             day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
             schedule_info = ""
+            time_hour = guild_config.get('report_time_hour', 9)
+            guild_tz_str = guild_config.get('timezone', 'UTC')
             if report_frequency == 'weekly':
                 day_weekly = guild_config.get('report_day_weekly', 0)
-                schedule_info = f"Every {day_names[day_weekly]}"
+                schedule_info = f"Every {day_names[day_weekly]} (day {day_weekly + 1}) at {time_hour:02d}:00 {guild_tz_str}"
             elif report_frequency == 'monthly':
                 day_monthly = guild_config.get('report_day_monthly', 1)
-                schedule_info = f"Day {day_monthly} of each month"
+                schedule_info = f"Day {day_monthly} of each month at {time_hour:02d}:00 {guild_tz_str}"
             else:  # both
                 day_weekly = guild_config.get('report_day_weekly', 0)
                 day_monthly = guild_config.get('report_day_monthly', 1)
-                schedule_info = f"{day_names[day_weekly]} (weekly) & Day {day_monthly} (monthly)"
+                schedule_info = f"{day_names[day_weekly]} (day {day_weekly + 1}) at {time_hour:02d}:00 {guild_tz_str} & Day {day_monthly} (monthly) at {time_hour:02d}:00 {guild_tz_str}"
             
             embed.add_field(
                 name="Scheduled Reports",

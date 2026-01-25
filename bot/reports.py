@@ -30,8 +30,8 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
     guild_id = int(guild.id)
     period_name = "Weekly" if days == 7 else "Monthly"
     
-    # Get message activity stats
-    activity_stats = db.get_message_activity_period(guild_id, None, days)
+    # Get guild-wide message activity stats
+    activity_stats = db.get_guild_message_activity_stats(guild_id, days)
     
     # Get top active users
     top_users = db.get_top_active_users_period(guild_id, days, limit=5)
@@ -48,10 +48,16 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
     embed = create_embed(f"📊 {period_name} Activity Report - {guild.name}", discord.Color.blue())
     embed.timestamp = datetime.now(timezone.utc)
     
-    # Overall statistics
-    total_messages = activity_stats.get('total', 0)
-    # Guard against division by zero
-    avg_per_day = round(total_messages / days, 1) if days > 0 else 0
+    # Overall statistics - use appropriate key based on period
+    if days <= 7:
+        total_messages = activity_stats.get('total_7d', 0)
+    elif days <= 30:
+        total_messages = activity_stats.get('total_30d', 0)
+    elif days <= 90:
+        total_messages = activity_stats.get('total_90d', 0)
+    else:
+        total_messages = activity_stats.get('total_365d', 0)
+    avg_per_day = activity_stats.get('avg_per_day', 0)
     
     embed.description = f"**📈 Message Activity ({days} days)**\n"
     embed.description += f"• Total Messages: **{total_messages:,}**\n"
@@ -169,22 +175,21 @@ async def generate_departed_report(guild: discord.Guild, db, days: int) -> Optio
             username = member['username'] or "Unknown"
             nickname = member['nickname']
             display = f"{nickname} ({username})" if nickname else username
-            
+
             if member['left_date']:
                 left_date_str = format_timestamp(member['left_date'], 'R', guild_id, db)
-        else:
-            left_date_str = "Unknown"
-        
-        if member['last_seen'] and member['last_seen'] > 0:
-            last_seen_str = format_timestamp(member['last_seen'], 'R', guild_id, db)
-            embed.description += f"• **{display}** - Left {left_date_str} (Last seen: {last_seen_str})\n"
-        else:
-            embed.description += f"• **{display}** - Left {left_date_str}\n"
-    
-    if len(departed) > 25:
-        embed.description += f"\n*...and {len(departed) - 25} more*"
-    
-    return embed
+            else:
+                left_date_str = "Unknown"
+
+            if member['last_seen'] and member['last_seen'] > 0:
+                last_seen_str = format_timestamp(member['last_seen'], 'R', guild_id, db)
+                embed.description += f"• **{display}** - Left {left_date_str} (Last seen: {last_seen_str})\n"
+            else:
+                embed.description += f"• **{display}** - Left {left_date_str}\n"
+
+        embeds.append(embed)
+
+    return embeds
 
 
 async def send_scheduled_report(guild: discord.Guild, channel_id: int, db: DatabaseManager, 

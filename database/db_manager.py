@@ -7,7 +7,7 @@ import threading
 from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class DatabaseManager:
         try:
             # Only return to pool if there's space
             self._pool.put_nowait(conn)
-        except:
+        except Full:
             # Pool is full, close the temporary connection
             conn.close()
     
@@ -181,6 +181,12 @@ class DatabaseManager:
                 ON members(guild_id, join_date)
             """)
 
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_members_left_date
+                ON members(guild_id, left_date)
+                WHERE left_date IS NOT NULL
+            """)
+
             # Indexes for role_changes table
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_role_changes_guild_user
@@ -256,6 +262,10 @@ class DatabaseManager:
             if 'last_monthly_report' not in columns:
                 cursor.execute("ALTER TABLE guilds ADD COLUMN last_monthly_report INTEGER DEFAULT 0")
                 logger.info("Added last_monthly_report column to guilds table")
+
+            if 'report_time_hour' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN report_time_hour INTEGER DEFAULT 9")
+                logger.info("Added report_time_hour column to guilds table")
 
             # Refresh column list after migrations to ensure all columns exist
             cursor.execute("PRAGMA table_info(guilds)")
@@ -446,8 +456,19 @@ class DatabaseManager:
             return False
 
     def set_report_config(self, guild_id: int, channel_id: int, frequency: str, report_types: list, 
-                         day_weekly: int = 0, day_monthly: int = 1, guild_name: str = 'Unknown') -> bool:
-        """Set the scheduled report configuration for a guild."""
+                         day_weekly: int = 0, day_monthly: int = 1, time_hour: int = 9, guild_name: str = 'Unknown') -> bool:
+        """Set the scheduled report configuration for a guild.
+        
+        Args:
+            guild_id: Discord guild ID
+            channel_id: Channel ID where reports will be sent
+            frequency: 'weekly', 'monthly', or 'both'
+            report_types: List of report types to send
+            day_weekly: Day of week for weekly reports (0=Monday, 6=Sunday)
+            day_monthly: Day of month for monthly reports (1-28)
+            time_hour: Hour of day to send reports (0-23, UTC)
+            guild_name: Name of the guild
+        """
         try:
             import json
             with self.get_connection() as conn:
@@ -466,9 +487,10 @@ class DatabaseManager:
                         report_types = ?,
                         report_day_weekly = ?,
                         report_day_monthly = ?,
+                        report_time_hour = ?,
                         guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
                     WHERE guild_id = ?
-                """, (channel_id, frequency, json.dumps(report_types), day_weekly, day_monthly, guild_name, guild_id))
+                """, (channel_id, frequency, json.dumps(report_types), day_weekly, day_monthly, time_hour, guild_name, guild_id))
                 return True
         except Exception as e:
             logger.error(f"Failed to set report config for guild {guild_id}: {e}")

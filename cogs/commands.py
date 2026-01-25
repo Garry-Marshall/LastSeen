@@ -261,7 +261,7 @@ class CommandsCog(commands.Cog):
                     if previous_nicknames:
                         history_str = ", ".join(previous_nicknames)
                         embed.description += f"     Previously known as: {history_str}\n"
-            except:
+            except (json.JSONDecodeError, TypeError):
                 pass
         
         # Roles
@@ -1796,9 +1796,9 @@ class UserStatsView(discord.ui.View):
             logger.error(f"Failed to show activity heatmap: {e}", exc_info=True)
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-    @discord.ui.button(label="📋 Export CSV", style=discord.ButtonStyle.green, row=1)
+    @discord.ui.button(label="📋 Export Report", style=discord.ButtonStyle.green, row=1)
     async def export_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Export comprehensive stats to CSV."""
+        """Export comprehensive stats to text report."""
         await interaction.response.defer(ephemeral=True)
         
         try:
@@ -1807,53 +1807,52 @@ class UserStatsView(discord.ui.View):
             growth_90d = self.db.get_member_growth_stats(self.guild_id, days=90)
             leaderboard = self.db.get_activity_leaderboard(self.guild_id, days=30, limit=25)
             
-            # Generate CSV
+            # Generate text report
             output = StringIO()
-            writer = csv.writer(output, quoting=csv.QUOTE_ALL)
             
             # Header
-            writer.writerow(['Server Statistics Report'])
-            writer.writerow(['Generated', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')])
-            writer.writerow([])
+            output.write("=" * 80 + "\n")
+            output.write("SERVER STATISTICS REPORT\n")
+            output.write(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n")
+            output.write("=" * 80 + "\n\n")
             
             # Overview
-            writer.writerow(['OVERVIEW'])
-            writer.writerow(['Total Members', stats['total_members']])
-            writer.writerow(['Active (30d)', stats['active_30d']])
-            writer.writerow(['Inactive (30d)', stats['inactive_30d']])
-            writer.writerow([])
+            output.write("OVERVIEW\n")
+            output.write("-" * 80 + "\n")
+            output.write(f"Total Members:     {stats['total_members']}\n")
+            output.write(f"Active (30d):      {stats['active_30d']}\n")
+            output.write(f"Inactive (30d):    {stats['inactive_30d']}\n\n")
             
             # Growth
-            writer.writerow(['GROWTH (30 DAYS)'])
-            writer.writerow(['Joins', growth_30d.get('joins', 0)])
-            writer.writerow(['Leaves', growth_30d.get('leaves', 0)])
-            writer.writerow(['Net Growth', growth_30d.get('net_growth', 0)])
-            writer.writerow(['Growth Rate %', f"{growth_30d.get('growth_rate', 0):.2f}"])
-            writer.writerow([])
+            output.write("GROWTH (30 DAYS)\n")
+            output.write("-" * 80 + "\n")
+            output.write(f"Joins:             {growth_30d.get('joins', 0)}\n")
+            output.write(f"Leaves:            {growth_30d.get('leaves', 0)}\n")
+            output.write(f"Net Growth:        {growth_30d.get('net_growth', 0)}\n")
+            output.write(f"Growth Rate:       {growth_30d.get('growth_rate', 0):.2f}%\n\n")
             
             # Activity
-            writer.writerow(['ACTIVITY (30 DAYS)'])
-            writer.writerow(['Total Messages', stats['total_messages_30d']])
-            writer.writerow(['Avg per Member', f"{stats['avg_messages_per_member']:.1f}"])
-            writer.writerow([])
+            output.write("ACTIVITY (30 DAYS)\n")
+            output.write("-" * 80 + "\n")
+            output.write(f"Total Messages:    {stats['total_messages_30d']}\n")
+            output.write(f"Avg per Member:    {stats['avg_messages_per_member']:.1f}\n\n")
             
             # Leaderboard
-            writer.writerow(['TOP 25 MOST ACTIVE MEMBERS'])
-            writer.writerow(['Rank', 'Username', 'Display Name', 'Messages (30d)'])
+            output.write("TOP 25 MOST ACTIVE MEMBERS\n")
+            output.write("-" * 80 + "\n")
+            output.write(f"{'Rank':<6} {'Username':<30} {'Display Name':<30} {'Messages':<10}\n")
+            output.write("-" * 80 + "\n")
             for i, member in enumerate(leaderboard, 1):
-                writer.writerow([
-                    i,
-                    member['username'],
-                    member['display_name'],
-                    member['total_messages']
-                ])
+                username = member['username'][:28] if len(member['username']) > 28 else member['username']
+                display = member['display_name'][:28] if len(member['display_name']) > 28 else member['display_name']
+                output.write(f"{i:<6} {username:<30} {display:<30} {member['total_messages']:<10}\n")
             
             output.seek(0)
-            filename = f"server_stats_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
-            file = discord.File(fp=StringIO(output.getvalue()), filename=filename)
+            filename = f"server_stats_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
+            file = discord.File(fp=output, filename=filename)
             
             await interaction.followup.send(
-                f"✅ Exported server statistics to CSV",
+                f"✅ Exported server statistics report",
                 file=file,
                 ephemeral=True
             )

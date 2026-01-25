@@ -166,7 +166,7 @@ class TrackingCog(commands.Cog):
                     return True
 
             return False  # Member doesn't have any required roles
-        except:
+        except (json.JSONDecodeError, TypeError):
             return True  # If error parsing, default to tracking
 
     def _calculate_and_set_join_position(self, member: discord.Member) -> bool:
@@ -812,6 +812,7 @@ class TrackingCog(commands.Cog):
         try:
             from bot.reports import send_scheduled_report
             import json
+            import pytz
             
             logger.debug("Checking scheduled reports...")
             guilds_with_reports = self.db.get_guilds_with_reports_enabled()
@@ -819,10 +820,7 @@ class TrackingCog(commands.Cog):
             if not guilds_with_reports:
                 return
             
-            now = datetime.now(timezone.utc)
-            current_weekday = now.weekday()  # 0=Monday, 6=Sunday
-            current_day_of_month = now.day
-            current_timestamp = int(now.timestamp())
+            now_utc = datetime.now(timezone.utc)
             
             for guild_config in guilds_with_reports:
                 try:
@@ -835,6 +833,25 @@ class TrackingCog(commands.Cog):
                     
                     channel_id = int(guild_config['report_channel_id'])
                     frequency = guild_config['report_frequency']
+                    time_hour = guild_config.get('report_time_hour', 9)  # Default 9 AM
+                    
+                    # Get guild timezone and convert current time
+                    guild_tz_str = guild_config.get('timezone', 'UTC')
+                    try:
+                        guild_tz = pytz.timezone(guild_tz_str)
+                        now_local = now_utc.astimezone(guild_tz)
+                    except (pytz.UnknownTimeZoneError, AttributeError):
+                        logger.warning(f"Invalid timezone '{guild_tz_str}' for guild {guild_id}, using UTC")
+                        now_local = now_utc
+                    
+                    current_weekday = now_local.weekday()  # 0=Monday, 6=Sunday
+                    current_day_of_month = now_local.day
+                    current_hour = now_local.hour
+                    
+                    # Check if current hour matches the configured report time (in guild's timezone)
+                    if current_hour != time_hour:
+                        continue  # Skip this guild if it's not the right hour
+                    
                     try:
                         report_types = json.loads(guild_config['report_types']) if guild_config['report_types'] else []
                     except (json.JSONDecodeError, TypeError):
@@ -859,11 +876,11 @@ class TrackingCog(commands.Cog):
                             else:
                                 # Check if last report was sent on a different date (not today)
                                 last_report_date = datetime.fromtimestamp(last_weekly, tz=timezone.utc).date()
-                                current_date = now.date()
+                                current_date = now_local.date()
                                 should_send_weekly = (current_date != last_report_date)
                         
                         if should_send_weekly:
-                            logger.info(f"Sending weekly report for guild {guild.name}")
+                            logger.info(f"Sending weekly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
                             success = await send_scheduled_report(guild, channel_id, self.db, report_types, 7)
                             if success:
                                 self.db.update_last_report_time(guild_id, 'weekly')
@@ -883,11 +900,11 @@ class TrackingCog(commands.Cog):
                             else:
                                 # Check if last report was sent on a different date (not today)
                                 last_report_date = datetime.fromtimestamp(last_monthly, tz=timezone.utc).date()
-                                current_date = now.date()
+                                current_date = now_local.date()
                                 should_send_monthly = (current_date != last_report_date)
                         
                         if should_send_monthly:
-                            logger.info(f"Sending monthly report for guild {guild.name}")
+                            logger.info(f"Sending monthly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
                             success = await send_scheduled_report(guild, channel_id, self.db, report_types, 30)
                             if success:
                                 self.db.update_last_report_time(guild_id, 'monthly')

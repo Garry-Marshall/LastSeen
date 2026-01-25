@@ -247,7 +247,7 @@ def is_channel_allowed(channel_id: int, guild_config: dict) -> bool:
 
         # Check if current channel is in allowed list
         return channel_id in allowed_channels
-    except:
+    except (json.JSONDecodeError, TypeError):
         return True  # If error parsing, default to allowing
 
 

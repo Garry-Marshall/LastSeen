@@ -147,7 +147,7 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
                 try:
                     # Parse date from filename (YYYY-MM-DD.log)
                     file_date_str = log_file.stem  # Gets filename without extension
-                    file_date = datetime.strptime(file_date_str, '%Y-%m-%d')
+                    file_date = datetime.strptime(file_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
 
                     # Delete if older than retention period
                     if file_date < cutoff_date:
