@@ -848,8 +848,13 @@ class TrackingCog(commands.Cog):
                     current_day_of_month = now_local.day
                     current_hour = now_local.hour
                     
+                    logger.debug(f"Guild {guild.name}: Current time {now_local.strftime('%Y-%m-%d %H:%M')} {guild_tz_str}, "
+                                f"Current hour: {current_hour}, Configured hour: {time_hour}, "
+                                f"Frequency: {frequency}, Weekday: {current_weekday}, Day of month: {current_day_of_month}")
+                    
                     # Check if current hour matches the configured report time (in guild's timezone)
                     if current_hour != time_hour:
+                        logger.debug(f"Guild {guild.name}: Skipping - current hour {current_hour} != configured hour {time_hour}")
                         continue  # Skip this guild if it's not the right hour
                     
                     try:
@@ -866,18 +871,27 @@ class TrackingCog(commands.Cog):
                         day_weekly = guild_config.get('report_day_weekly', 0)
                         last_weekly = guild_config.get('last_weekly_report', 0)
                         
+                        logger.debug(f"Guild {guild.name}: Checking weekly - configured day: {day_weekly}, current weekday: {current_weekday}, last report: {last_weekly}")
+                        
                         # Check if it's the right day and report hasn't been sent today
-                        # Convert last report timestamp to date to prevent duplicates on same day
                         should_send_weekly = False
                         if current_weekday == day_weekly:
                             if last_weekly == 0:
                                 # Never sent before
                                 should_send_weekly = True
+                                logger.debug(f"Guild {guild.name}: Weekly report never sent, will send now")
                             else:
                                 # Check if last report was sent on a different date (not today)
-                                last_report_date = datetime.fromtimestamp(last_weekly, tz=timezone.utc).date()
+                                # Convert last report timestamp to the guild's timezone for comparison
+                                last_report_datetime = datetime.fromtimestamp(last_weekly, tz=timezone.utc).astimezone(guild_tz)
+                                last_report_date = last_report_datetime.date()
                                 current_date = now_local.date()
+                                logger.debug(f"Guild {guild.name}: Last weekly report: {last_report_date}, Current date: {current_date}")
                                 should_send_weekly = (current_date != last_report_date)
+                                if not should_send_weekly:
+                                    logger.debug(f"Guild {guild.name}: Weekly report already sent today, skipping")
+                        else:
+                            logger.debug(f"Guild {guild.name}: Not the configured weekly day")
                         
                         if should_send_weekly:
                             logger.info(f"Sending weekly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
@@ -890,18 +904,27 @@ class TrackingCog(commands.Cog):
                         day_monthly = guild_config.get('report_day_monthly', 1)
                         last_monthly = guild_config.get('last_monthly_report', 0)
                         
+                        logger.debug(f"Guild {guild.name}: Checking monthly - configured day: {day_monthly}, current day: {current_day_of_month}, last report: {last_monthly}")
+                        
                         # Check if it's the right day and report hasn't been sent today
-                        # Convert last report timestamp to date to prevent duplicates on same day
                         should_send_monthly = False
                         if current_day_of_month == day_monthly:
                             if last_monthly == 0:
                                 # Never sent before
                                 should_send_monthly = True
+                                logger.debug(f"Guild {guild.name}: Monthly report never sent, will send now")
                             else:
                                 # Check if last report was sent on a different date (not today)
-                                last_report_date = datetime.fromtimestamp(last_monthly, tz=timezone.utc).date()
+                                # Convert last report timestamp to the guild's timezone for comparison
+                                last_report_datetime = datetime.fromtimestamp(last_monthly, tz=timezone.utc).astimezone(guild_tz)
+                                last_report_date = last_report_datetime.date()
                                 current_date = now_local.date()
+                                logger.debug(f"Guild {guild.name}: Last monthly report: {last_report_date}, Current date: {current_date}")
                                 should_send_monthly = (current_date != last_report_date)
+                                if not should_send_monthly:
+                                    logger.debug(f"Guild {guild.name}: Monthly report already sent today, skipping")
+                        else:
+                            logger.debug(f"Guild {guild.name}: Not the configured monthly day")
                         
                         if should_send_monthly:
                             logger.info(f"Sending monthly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
@@ -917,8 +940,17 @@ class TrackingCog(commands.Cog):
 
     @check_scheduled_reports.before_loop
     async def before_check_scheduled_reports(self):
-        """Wait for bot to be ready before starting the reports loop."""
+        """Wait for bot to be ready and sync to the next hour mark."""
         await self.bot.wait_until_ready()
+        
+        # Wait until the next hour mark (XX:00:00) to sync the schedule
+        now = datetime.now(timezone.utc)
+        minutes_until_next_hour = 60 - now.minute
+        seconds_until_next_hour = (minutes_until_next_hour * 60) - now.second
+        
+        if seconds_until_next_hour > 0:
+            logger.info(f"Syncing scheduled reports to hour mark. Waiting {minutes_until_next_hour} minutes...")
+            await asyncio.sleep(seconds_until_next_hour)
 
     @tasks.loop(hours=1)  # Check every hour, will use config to determine actual interval
     async def backup_database(self):

@@ -7,7 +7,7 @@ import json
 from database import DatabaseManager
 from bot.utils import create_embed, create_error_embed, create_success_embed
 from .permissions import get_bot_admin_role_name, check_admin_permission
-from .channel_config import ChannelModal, InactiveDaysModal, RetentionDaysModal, TimezoneModal, ReportsConfigModal
+from .channel_config import ChannelModal, InactiveDaysModal, TimezoneModal, ReportsConfigModal
 from .role_config import BotAdminRoleModal, UserRoleModal, TrackOnlyRolesModal
 from .channel_filter import AllowedChannelsModal
 from .quick_setup import QuickSetupView
@@ -41,7 +41,7 @@ class ConfigView(discord.ui.View):
             self.toggle_user_role_required.style = discord.ButtonStyle.success if user_role_required else discord.ButtonStyle.danger
 
         enabled = bool(guild_config.get("user_role_required", 0))
-        self.toggle_user_role_required.label = (f"User Role Required: {'ON' if enabled else 'OFF'}")
+        self.toggle_user_role_required.label = (f"User Role Required = {'ON' if enabled else 'OFF'}")
 
 
     @discord.ui.button(label="Set Notification Channel", style=discord.ButtonStyle.primary, emoji="📢", row=0)
@@ -64,14 +64,15 @@ class ConfigView(discord.ui.View):
         modal = InactiveDaysModal(self.db, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Update All Members", style=discord.ButtonStyle.success, emoji="🔄", row=0)
-    async def update_members(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Button to enumerate and update all members."""
+    @discord.ui.button(label="Set Timezone", style=discord.ButtonStyle.primary, emoji="🌍", row=0)
+    async def set_timezone(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Button to set server timezone."""
         if not await check_admin_permission(interaction, self.db, self.guild_id):
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await member_mgmt.update_all_members(interaction, self.db)
+        # Create modal for timezone input
+        modal = TimezoneModal(self.db, self.guild_id)
+        await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Set Bot Admin Role", style=discord.ButtonStyle.primary, emoji="👑", row=1)
     async def set_bot_admin_role(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -93,7 +94,7 @@ class ConfigView(discord.ui.View):
         modal = UserRoleModal(self.db, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="User Role Required: OFF", emoji="🔐", row=1)
+    @discord.ui.button(label="User Role Required = OFF", emoji="🔐", row=1)
     async def toggle_user_role_required(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to toggle user role requirement."""
         if not await check_admin_permission(interaction, self.db, self.guild_id):
@@ -127,7 +128,7 @@ class ConfigView(discord.ui.View):
             # Update button style dynamically for the current view instance - Note: Ephemeral messages can't be edited after sending
             #button.style = discord.ButtonStyle.success if new_value else discord.ButtonStyle.danger
             #await interaction.message.edit(view=self)
-            button.label = f"User Role Required: {'ON' if new_value else 'OFF'}"
+            button.label = f"User Role Required = {'ON' if new_value else 'OFF'}"
             button.style = (discord.ButtonStyle.success if new_value else discord.ButtonStyle.danger)
 
             await interaction.edit_original_response(view=self) 
@@ -159,26 +160,6 @@ class ConfigView(discord.ui.View):
         modal = AllowedChannelsModal(self.db, self.guild_id)
         await interaction.response.send_modal(modal)
 
-    @discord.ui.button(label="Set Retention Days", style=discord.ButtonStyle.primary, emoji="🗑️", row=2)
-    async def set_retention_days(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Button to set message activity retention period."""
-        if not await check_admin_permission(interaction, self.db, self.guild_id):
-            return
-
-        # Create modal for retention days input
-        modal = RetentionDaysModal(self.db, self.guild_id)
-        await interaction.response.send_modal(modal)
-
-    @discord.ui.button(label="Set Timezone", style=discord.ButtonStyle.primary, emoji="🌍", row=3)
-    async def set_timezone(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Button to set server timezone."""
-        if not await check_admin_permission(interaction, self.db, self.guild_id):
-            return
-
-        # Create modal for timezone input
-        modal = TimezoneModal(self.db, self.guild_id)
-        await interaction.response.send_modal(modal)
-
     @discord.ui.button(label="Configure Reports", style=discord.ButtonStyle.primary, emoji="📊", row=3)
     async def configure_reports(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to configure scheduled reports."""
@@ -204,17 +185,16 @@ class ConfigView(discord.ui.View):
             )
             return
 
-        success = self.db.disable_reports(self.guild_id)
-        if success:
-            await interaction.response.send_message(
-                embed=create_success_embed("✅ Scheduled reports have been disabled."),
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                embed=create_error_embed("Failed to disable reports."),
-                ephemeral=True
-            )
+        # Show confirmation dialog
+        confirmation_view = DisableReportsConfirmView(self.db, self.guild_id)
+        embed = create_embed("Confirm Disable Reports", discord.Color.orange())
+        embed.description = "Are you sure you want to disable scheduled reports?\n\nThis will stop all automated weekly and monthly reports."
+        
+        await interaction.response.send_message(
+            embed=embed,
+            view=confirmation_view,
+            ephemeral=True
+        )
 
     @discord.ui.button(label="🚀 Quick Setup", style=discord.ButtonStyle.primary, row=4)
     async def quick_setup(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -260,14 +240,6 @@ class ConfigView(discord.ui.View):
         embed.add_field(
             name="Inactive Days Threshold",
             value=f"{guild_config['inactive_days']} days",
-            inline=False
-        )
-
-        # Message retention days
-        retention_days = guild_config.get('message_retention_days', 365)
-        embed.add_field(
-            name="Message Retention Period",
-            value=f"{retention_days} days (auto-cleanup)",
             inline=False
         )
 
@@ -375,3 +347,39 @@ class ConfigView(discord.ui.View):
         embed.add_field(name="Tracked Members", value=str(member_count), inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class DisableReportsConfirmView(discord.ui.View):
+    """Confirmation view for disabling scheduled reports."""
+
+    def __init__(self, db: DatabaseManager, guild_id: int):
+        super().__init__(timeout=60)
+        self.db = db
+        self.guild_id = guild_id
+
+    @discord.ui.button(label="Yes, Disable Reports", style=discord.ButtonStyle.danger, emoji="✅")
+    async def confirm_disable(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Confirm disabling reports."""
+        success = self.db.disable_reports(self.guild_id)
+        if success:
+            await interaction.response.edit_message(
+                embed=create_success_embed("✅ Scheduled reports have been disabled."),
+                view=None
+            )
+        else:
+            await interaction.response.edit_message(
+                embed=create_error_embed("Failed to disable reports."),
+                view=None
+            )
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="❌")
+    async def cancel_disable(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Cancel the disable operation."""
+        embed = create_embed("Cancelled", discord.Color.blue())
+        embed.description = "Scheduled reports were not disabled."
+        await interaction.response.edit_message(
+            embed=embed,
+            view=None
+        )
+        self.stop()

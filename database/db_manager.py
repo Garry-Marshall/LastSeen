@@ -2200,7 +2200,7 @@ class DatabaseManager:
                 cursor.execute("""
                     SELECT guild_id, report_channel_id, report_frequency, report_types,
                            report_day_weekly, report_day_monthly, last_weekly_report, last_monthly_report,
-                           timezone
+                           timezone, report_time_hour
                     FROM guilds
                     WHERE report_frequency IS NOT NULL AND report_channel_id IS NOT NULL
                 """)

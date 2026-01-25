@@ -45,15 +45,9 @@ class Config:
         debug_level = os.getenv('DEBUG_LEVEL', 'info').strip().upper()
         self.log_level = getattr(logging, debug_level, logging.INFO)
 
-        # Load bot admin settings
-        self.bot_admin_role_name = os.getenv('BOT_ADMIN_ROLE_NAME', 'Bot Admin').strip()
-
-        # Load default settings
-        try:
-            self.default_inactive_days = int(os.getenv('DEFAULT_INACTIVE_DAYS', '10'))
-        except ValueError:
-            self.default_inactive_days = 10
-            logger.warning("Invalid DEFAULT_INACTIVE_DAYS, using 10")
+        # Default bot settings
+        self.bot_admin_role_name = 'LastSeen Admin'
+        self.default_inactive_days = 10
 
         # Load log retention settings
         try:
@@ -84,7 +78,6 @@ class Config:
         logger.info("Configuration loaded successfully")
         logger.info(f"Database file: {self.db_file}")
         logger.info(f"Log level: {logging.getLevelName(self.log_level)}")
-        logger.info(f"Bot admin role: {self.bot_admin_role_name}")
         logger.info(f"Log retention: {self.logs_days_to_keep} days")
         logger.info(f"Database backup: every {self.backup_interval_hours} hours, keep {self.backup_retention_count} backups")
 
