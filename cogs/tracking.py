@@ -169,6 +169,47 @@ class TrackingCog(commands.Cog):
         except:
             return True  # If error parsing, default to tracking
 
+    def _calculate_and_set_join_position(self, member: discord.Member) -> bool:
+        """Calculate and set join position for a member based on their join date.
+        
+        This handles the edge case where a user joins while the bot is offline.
+        When the bot comes back online and detects the user (via presence or role change),
+        this method calculates their correct position based on when they actually joined.
+        
+        Args:
+            member: Discord member to calculate position for
+            
+        Returns:
+            bool: True if position was set successfully
+        """
+        guild_id = member.guild.id
+        user_id = member.id
+        
+        if not member.joined_at:
+            logger.warning(f"Cannot calculate join position for {member} - no join_date available")
+            return False
+        
+        try:
+            # Calculate position based on how many members joined before this one
+            join_timestamp = int(member.joined_at.timestamp())
+            position = self.db.calculate_join_position(guild_id, join_timestamp)
+            
+            if position is not None:
+                success = self.db.set_member_join_position(guild_id, user_id, position)
+                if success:
+                    logger.info(f"Set join position {position} for {member} (joined late)")
+                    return True
+                else:
+                    logger.error(f"Failed to set join position for {member}")
+                    return False
+            else:
+                logger.error(f"Failed to calculate join position for {member}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error calculating join position for {member}: {e}", exc_info=True)
+            return False
+
     def _ensure_member_exists(self, member: discord.Member) -> bool:
         """Ensure member exists in database, creating or updating record if needed.
         
@@ -207,6 +248,13 @@ class TrackingCog(commands.Cog):
                 join_date=join_date,
                 roles=roles
             )
+            
+            # Fix edge case: If positions are initialized for this guild,
+            # calculate and set the join position for this member
+            # This handles the case where the bot was offline when the user joined
+            if self.db.guild_positions_initialized(guild_id):
+                self._calculate_and_set_join_position(member)
+            
             return True
         return False
 
@@ -643,8 +691,8 @@ class TrackingCog(commands.Cog):
         # Track status changes
         if before.status != after.status:
             # Log status change to console
-            print(f"{after} ({after.guild}) changed status from {before.status} to {after.status}") # not included in log files
-            #logger.info(f"{after} ({after.guild}) changed status from {before.status} to {after.status}") # included in log files
+            #print(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
+            #logger.debug(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
 
             if after.status == discord.Status.offline:
                 # User went offline - record timestamp

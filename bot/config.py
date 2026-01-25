@@ -210,4 +210,13 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
         console_handler.setFormatter(logging.Formatter(log_format, date_format))
         root_logger.addHandler(console_handler)
 
+        # Suppress debug messages from discord.py and other noisy libraries
+        # Even when bot is in DEBUG mode, keep these at INFO level
+        logging.getLogger('discord').setLevel(logging.INFO)
+        logging.getLogger('discord.client').setLevel(logging.INFO)
+        logging.getLogger('discord.gateway').setLevel(logging.INFO)
+        logging.getLogger('discord.http').setLevel(logging.INFO)
+        logging.getLogger('discord.state').setLevel(logging.INFO)
+        logging.getLogger('discord.webhook').setLevel(logging.INFO)
+
         logger.info(f"Logging configured: {log_file}")

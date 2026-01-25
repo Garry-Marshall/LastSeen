@@ -176,6 +176,11 @@ class DatabaseManager:
                 ON members(guild_id, is_active, last_seen)
             """)
 
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_members_join_date
+                ON members(guild_id, join_date)
+            """)
+
             # Indexes for role_changes table
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_role_changes_guild_user
@@ -684,6 +689,35 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to set join position for user {user_id} in guild {guild_id}: {e}")
             return False
+    
+    def calculate_join_position(self, guild_id: int, join_timestamp: int) -> Optional[int]:
+        """Calculate the correct join position for a member based on their join timestamp.
+        
+        This counts how many active (non-bot) members in the guild joined before this timestamp,
+        and returns position + 1 (since positions start at 1, not 0).
+        
+        Args:
+            guild_id: Discord guild ID
+            join_timestamp: Unix timestamp of when the member joined
+            
+        Returns:
+            int: The calculated join position (1-indexed), or None if failed
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Count how many members joined before this timestamp
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND join_date < ?
+                """, (guild_id, join_timestamp))
+                count_before = cursor.fetchone()[0]
+                
+                # Position is count_before + 1 (1-indexed)
+                return count_before + 1
+        except Exception as e:
+            logger.error(f"Failed to calculate join position for guild {guild_id} at timestamp {join_timestamp}: {e}")
+            return None
 
     # ==================== Member Operations ====================
 
