@@ -13,13 +13,6 @@ logger = logging.getLogger(__name__)
 class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
     """Modal for setting the bot admin role name."""
 
-    role_input = discord.ui.TextInput(
-        label="Bot Admin Role Name",
-        placeholder="e.g., LastSeen Admin, Moderator, Admin",
-        required=True,
-        max_length=100
-    )
-
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
         Initialize modal.
@@ -31,6 +24,20 @@ class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
         super().__init__()
         self.db = db
         self.guild_id = guild_id
+        
+        # Get current role name from database
+        guild_config = db.get_guild_config(guild_id)
+        current_role = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        
+        # Create text input with current value
+        self.role_input = discord.ui.TextInput(
+            label="Bot Admin Role Name",
+            placeholder="e.g., LastSeen Admin, Moderator, Admin",
+            default=current_role,
+            required=True,
+            max_length=100
+        )
+        self.add_item(self.role_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
@@ -86,13 +93,6 @@ class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
 class UserRoleModal(discord.ui.Modal, title="Set User Role"):
     """Modal for setting the user role name."""
 
-    role_input = discord.ui.TextInput(
-        label="User Role Name",
-        placeholder="e.g., LastSeen User, Member, Verified",
-        required=True,
-        max_length=100
-    )
-
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
         Initialize modal.
@@ -104,6 +104,20 @@ class UserRoleModal(discord.ui.Modal, title="Set User Role"):
         super().__init__()
         self.db = db
         self.guild_id = guild_id
+        
+        # Get current role name from database
+        guild_config = db.get_guild_config(guild_id)
+        current_role = guild_config.get('user_role_name', 'LastSeen User') if guild_config else 'LastSeen User'
+        
+        # Create text input with current value
+        self.role_input = discord.ui.TextInput(
+            label="User Role Name",
+            placeholder="e.g., LastSeen User, Member, Verified",
+            default=current_role,
+            required=True,
+            max_length=100
+        )
+        self.add_item(self.role_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""

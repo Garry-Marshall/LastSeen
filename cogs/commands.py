@@ -629,7 +629,7 @@ class CommandsCog(commands.Cog):
             # Create guild-wide stats embed
             embed = create_embed(f"📊 Server Chat History - {interaction.guild.name}", discord.Color.blue())
             
-            embed.description = "**📈 Long-Term Statistics (365 days)**\n"
+            embed.description = "**📈 Long-Term Statistics (last 365 days)**\n"
             embed.description += f"• Total Messages: **{stats['total_365d']:,}**\n"
             embed.description += f"• Average/Day: **{stats['avg_per_day']:,}**\n"
             
@@ -705,7 +705,7 @@ class CommandsCog(commands.Cog):
         # Create main embed with statistics
         embed = create_embed(f"📊 Chat History - {username}", discord.Color.blue())
         
-        embed.description = "**📈 Long-Term Statistics (365 days)**\n"
+        embed.description = "**📈 Long-Term Statistics (last 365 days)**\n"
         embed.description += f"• Total Messages: **{total_messages:,}**\n"
         embed.description += f"• Average/Day: **{avg_per_day}**\n"
         embed.description += f"• Busiest Day: **{max_day['message_count']:,}** on {max_day_str}\n"

@@ -342,8 +342,8 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at, bot_admin_role_name, user_role_name)
+                    VALUES (?, ?, ?, ?, 'LastSeen Admin', 'LastSeen User')
                 """, (guild_id, guild_name, inactive_days, int(datetime.now(timezone.utc).timestamp())))
                 return cursor.rowcount > 0
         except Exception as e:
@@ -1862,19 +1862,27 @@ class DatabaseManager:
                 now_utc = datetime.now(timezone.utc)
                 month_start = int(datetime(now_utc.year, now_utc.month, 1, tzinfo=timezone.utc).timestamp())
                 
+                # Get when bot was added to guild to filter out historical joins/leaves
+                cursor.execute("""
+                    SELECT added_at FROM guilds WHERE guild_id = ?
+                """, (guild_id,))
+                result = cursor.fetchone()
+                bot_added_at = result['added_at'] if result else 0
+                
+                # Count joins this month (only after bot was added)
                 cursor.execute("""
                     SELECT COUNT(*) as joins
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ?
-                """, (guild_id, month_start))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date >= ?
+                """, (guild_id, month_start, bot_added_at))
                 joins_this_month = cursor.fetchone()['joins'] or 0
                 
-                # Count members who left this month (is_active = 0 and last_seen >= month_start)
+                # Count members who left this month (only after bot was added)
                 cursor.execute("""
                     SELECT COUNT(*) as leaves
                     FROM members
-                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ?
-                """, (guild_id, month_start))
+                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ? AND last_seen >= ?
+                """, (guild_id, month_start, bot_added_at))
                 leaves_this_month = cursor.fetchone()['leaves'] or 0
                 
                 # Get total message count for last 30 days
@@ -1933,20 +1941,28 @@ class DatabaseManager:
                 now = int(datetime.now(timezone.utc).timestamp())
                 period_start = now - (days * SECONDS_PER_DAY)
                 
-                # Members who joined in this period
+                # Get when bot was added to guild to filter out historical joins
+                cursor.execute("""
+                    SELECT added_at FROM guilds WHERE guild_id = ?
+                """, (guild_id,))
+                result = cursor.fetchone()
+                bot_added_at = result['added_at'] if result else 0
+                
+                # Members who joined in this period (but only after the bot was added)
                 cursor.execute("""
                     SELECT COUNT(*) as joins
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ?
-                """, (guild_id, period_start))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date >= ?
+                """, (guild_id, period_start, bot_added_at))
                 joins = cursor.fetchone()['joins'] or 0
                 
                 # Members who left in this period (is_active = 0 and last_seen >= period_start)
+                # Only count leaves after bot was added
                 cursor.execute("""
                     SELECT COUNT(*) as leaves
                     FROM members
-                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ?
-                """, (guild_id, period_start))
+                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ? AND last_seen >= ?
+                """, (guild_id, period_start, bot_added_at))
                 leaves = cursor.fetchone()['leaves'] or 0
                 
                 # Current total members
