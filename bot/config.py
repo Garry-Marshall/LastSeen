@@ -128,6 +128,7 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
     def cleanup_old_logs(self):
         """Delete log files older than the configured retention period."""
         from datetime import datetime, timedelta, timezone
+        import re
 
         if not self.log_folder.exists():
             return
@@ -136,10 +137,22 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=self.logs_days_to_keep)
             deleted_count = 0
 
-            for log_file in self.log_folder.glob('*.log'):
+            # Pattern matches both old format (YYYY-MM-DD.log) and new format (bot.log.YYYY-MM-DD)
+            date_pattern = re.compile(r'(\d{4}-\d{2}-\d{2})')
+
+            for log_file in self.log_folder.glob('*.log*'):
                 try:
-                    # Parse date from filename (YYYY-MM-DD.log)
-                    file_date_str = log_file.stem  # Gets filename without extension
+                    # Skip the current active log file
+                    if log_file.name == 'bot.log':
+                        continue
+
+                    # Extract date from filename
+                    match = date_pattern.search(log_file.name)
+                    if not match:
+                        logger.debug(f"Skipping file without date pattern: {log_file.name}")
+                        continue
+
+                    file_date_str = match.group(1)
                     file_date = datetime.strptime(file_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
 
                     # Delete if older than retention period
@@ -166,10 +179,8 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
         # Cleanup old log files
         self.cleanup_old_logs()
 
-        # Get current date for log file base name
-        from datetime import datetime, timezone
-        log_date = datetime.now().strftime('%Y-%m-%d')
-        log_file = self.log_folder / f"{log_date}.log"
+        # Use a base log filename without date - TimedRotatingFileHandler will add the date
+        log_file = self.log_folder / "bot.log"
 
         # Configure logging format
         log_format = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
@@ -193,8 +204,8 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
         )
         file_handler.setLevel(self.log_level)
         file_handler.setFormatter(logging.Formatter(log_format, date_format))
-        # Set suffix for rotated files to match our naming convention
-        file_handler.suffix = '%Y-%m-%d.log'
+        # Set suffix for rotated files - this will be appended to the base filename
+        file_handler.suffix = '.%Y-%m-%d'
         root_logger.addHandler(file_handler)
 
         # Console handler
