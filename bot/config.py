@@ -179,7 +179,7 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
         # Cleanup old log files
         self.cleanup_old_logs()
 
-        # Use a base log filename without date - TimedRotatingFileHandler will add the date
+        # Use a simple base log filename
         log_file = self.log_folder / "bot.log"
 
         # Configure logging format
@@ -204,8 +204,24 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
         )
         file_handler.setLevel(self.log_level)
         file_handler.setFormatter(logging.Formatter(log_format, date_format))
-        # Set suffix for rotated files - this will be appended to the base filename
-        file_handler.suffix = '.%Y-%m-%d'
+        file_handler.suffix = '%Y-%m-%d'
+
+        # Custom namer to rename directly from bot.log to YYYY-MM-DD.log
+        def custom_namer(default_name):
+            # When rotating, TimedRotatingFileHandler calls this with default_name like:
+            # 'logs\\bot.log.2026-01-27'
+            # We extract the date and return: 'logs\\2026-01-27.log'
+            dir_name = os.path.dirname(default_name)
+            base_name = os.path.basename(default_name)
+
+            # Extract date from the default name (everything after the last dot)
+            parts = base_name.split('.')
+            if len(parts) >= 2:
+                date_part = parts[-1]  # This should be YYYY-MM-DD
+                return os.path.join(dir_name, f"{date_part}.log")
+            return default_name
+
+        file_handler.namer = custom_namer
         root_logger.addHandler(file_handler)
 
         # Console handler
