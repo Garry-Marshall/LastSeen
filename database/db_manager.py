@@ -2461,10 +2461,64 @@ class DatabaseManager:
                 logger.info(f"Cleaned up {deleted_count} old backup(s), keeping {min(len(backup_files), retention_count)} most recent")
             
             return deleted_count
-            
+
         except Exception as e:
             logger.error(f"Failed to cleanup old backups: {e}", exc_info=True)
             return 0
+
+    def vacuum_database(self) -> bool:
+        """
+        Run VACUUM on the database to reclaim space and optimize performance.
+        This should be called after significant deletions (e.g., removing stale guilds).
+
+        VACUUM requires an exclusive lock and can take time on large databases.
+        It's recommended to run this during low-activity periods (e.g., startup).
+
+        Returns:
+            bool: True if VACUUM completed successfully, False otherwise
+        """
+        try:
+            logger.info("Starting database VACUUM operation...")
+            start_time = datetime.now(timezone.utc)
+
+            # Get a connection from pool
+            # VACUUM cannot run in a transaction, so we handle this specially
+            conn = self._get_connection_from_pool()
+            try:
+                # Get database size before VACUUM
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA page_count")
+                page_count_before = cursor.fetchone()[0]
+                cursor.execute("PRAGMA page_size")
+                page_size = cursor.fetchone()[0]
+                size_before_mb = (page_count_before * page_size) / (1024 * 1024)
+
+                # Run VACUUM (this cannot be in a transaction)
+                conn.isolation_level = None  # Autocommit mode required for VACUUM
+                cursor.execute("VACUUM")
+                conn.isolation_level = ""  # Restore default
+
+                # Get database size after VACUUM
+                cursor.execute("PRAGMA page_count")
+                page_count_after = cursor.fetchone()[0]
+                size_after_mb = (page_count_after * page_size) / (1024 * 1024)
+
+                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                reclaimed_mb = size_before_mb - size_after_mb
+
+                logger.info(
+                    f"VACUUM completed in {elapsed:.2f}s. "
+                    f"Database size: {size_before_mb:.2f}MB -> {size_after_mb:.2f}MB "
+                    f"(reclaimed {reclaimed_mb:.2f}MB)"
+                )
+                return True
+
+            finally:
+                self._return_connection_to_pool(conn)
+
+        except Exception as e:
+            logger.error(f"VACUUM operation failed: {e}", exc_info=True)
+            return False
 
     def get_bot_statistics(self) -> dict:
         """

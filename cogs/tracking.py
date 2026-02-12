@@ -197,6 +197,17 @@ class TrackingCog(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to process members for guild {guild.name}: {e}", exc_info=True)
 
+    async def _vacuum_database_background(self):
+        """
+        Run database VACUUM operation in the background.
+        This reclaims disk space after large deletions (e.g., removing stale guilds).
+        """
+        try:
+            # Run VACUUM in thread pool to avoid blocking the event loop
+            await asyncio.to_thread(self.db.vacuum_database)
+        except Exception as e:
+            logger.error(f"Background VACUUM task failed: {e}", exc_info=True)
+
     def _should_track_member(self, member: discord.Member) -> bool:
         """Check if member should be tracked based on guild settings.
         
@@ -356,6 +367,10 @@ class TrackingCog(commands.Cog):
                 else:
                     logger.warning(f"Failed to remove stale guild {guild_id}")
 
+            # Run VACUUM in background to reclaim space after deletions
+            logger.info("Scheduling database VACUUM to reclaim space...")
+            asyncio.create_task(self._vacuum_database_background())
+
         # Ensure all guilds exist in database (handles restart edge case)
         # This is necessary if the database was cleared or the bot restarted
         missing_guilds = 0
@@ -407,16 +422,19 @@ class TrackingCog(commands.Cog):
         """
         Called when the bot leaves a guild or the guild is deleted.
         Removes all guild-related data from the database.
-        
+
         Args:
             guild: The guild that was removed
         """
         logger.info(f"Bot left guild: {guild.name} ({guild.id}). Cleaning up database...")
-        
+
         success = self.db.remove_guild_data(guild.id)
-        
+
         if success:
             logger.info(f"Successfully wiped data for guild {guild.id}")
+            # Run VACUUM in background to reclaim space after deletion
+            logger.info("Scheduling database VACUUM to reclaim space...")
+            asyncio.create_task(self._vacuum_database_background())
         else:
             logger.error(f"Failed to wipe data for guild {guild.id} during on_guild_remove")
 
