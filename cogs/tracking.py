@@ -122,6 +122,81 @@ class TrackingCog(commands.Cog):
             logger.error(f"Failed to initialize member positions for guild {guild.name}: {e}", exc_info=True)
             return False
 
+    async def _process_guild_members(self, guild: discord.Guild):
+        """
+        Process and add all members from a guild in chunks to avoid blocking.
+        Runs as a background task after joining a guild.
+
+        Args:
+            guild: The guild whose members should be processed
+        """
+        try:
+            logger.info(f"Starting member enumeration for {guild.name} ({len(guild.members)} cached members)...")
+
+            # Process members in chunks to avoid blocking the event loop
+            chunk_size = 100
+            member_count = 0
+            online_count = 0
+            total_members = len(guild.members)
+
+            for i in range(0, total_members, chunk_size):
+                chunk = guild.members[i:i+chunk_size]
+
+                # Process chunk in a thread to avoid blocking
+                def process_chunk():
+                    nonlocal member_count, online_count
+                    chunk_added = 0
+                    chunk_online = 0
+
+                    for member in chunk:
+                        if member.bot:
+                            continue  # Skip bots
+
+                        try:
+                            roles = get_member_roles(member)
+                            join_date = int(member.joined_at.timestamp()) if member.joined_at else 0
+                            nickname = member.display_name if member.display_name != str(member) else None
+
+                            self.db.add_member(
+                                guild_id=guild.id,
+                                user_id=member.id,
+                                username=str(member),
+                                nickname=nickname,
+                                join_date=join_date,
+                                roles=roles
+                            )
+
+                            # Check initial status and set last_seen accordingly
+                            if member.status != discord.Status.offline:
+                                self.db.update_last_seen(guild.id, member.id, 0)
+                                chunk_online += 1
+
+                            chunk_added += 1
+                        except Exception as e:
+                            logger.error(f"Failed to add member {member.id} in guild {guild.id}: {e}")
+
+                    return chunk_added, chunk_online
+
+                # Run chunk processing in thread pool
+                added, online = await asyncio.to_thread(process_chunk)
+                member_count += added
+                online_count += online
+
+                # Log progress every 1000 members
+                if (i + chunk_size) % 1000 == 0 or i + chunk_size >= total_members:
+                    logger.info(f"Processed {min(i + chunk_size, total_members)}/{total_members} members from {guild.name}")
+
+                # Yield control to event loop between chunks
+                await asyncio.sleep(0.05)
+
+            logger.info(f"Completed member enumeration for {guild.name}: added {member_count} members ({online_count} online, {member_count - online_count} offline)")
+
+            # After all members are added, initialize their join positions
+            await self._initialize_member_positions(guild)
+
+        except Exception as e:
+            logger.error(f"Failed to process members for guild {guild.name}: {e}", exc_info=True)
+
     def _should_track_member(self, member: discord.Member) -> bool:
         """Check if member should be tracked based on guild settings.
         
@@ -264,6 +339,23 @@ class TrackingCog(commands.Cog):
         logger.info(f"Bot logged in as {self.bot.user}")
         logger.info(f"Connected to {len(self.bot.guilds)} guilds")
 
+        # Get current guild IDs from Discord
+        current_guild_ids = {guild.id for guild in self.bot.guilds}
+
+        # Get all guild IDs from database
+        db_guild_ids = set(self.db.get_all_guild_ids())
+
+        # Find stale guilds (in database but not connected)
+        stale_guild_ids = db_guild_ids - current_guild_ids
+
+        if stale_guild_ids:
+            logger.info(f"Found {len(stale_guild_ids)} stale guild(s) in database, removing...")
+            for guild_id in stale_guild_ids:
+                if self.db.remove_guild_data(guild_id):
+                    logger.info(f"Removed stale guild {guild_id} from database")
+                else:
+                    logger.warning(f"Failed to remove stale guild {guild_id}")
+
         # Ensure all guilds exist in database (handles restart edge case)
         # This is necessary if the database was cleared or the bot restarted
         missing_guilds = 0
@@ -272,7 +364,7 @@ class TrackingCog(commands.Cog):
                 self.db.add_guild(guild.id, guild.name)
                 missing_guilds += 1
                 logger.info(f"Guild '{guild.name}' (ID: {guild.id}) was added to database (on_ready sync)")
-        
+
         if missing_guilds > 0:
             logger.warning(f"Added {missing_guilds} missing guild(s) to database during on_ready sync")
 
@@ -299,7 +391,7 @@ class TrackingCog(commands.Cog):
             guild: The guild that was joined
         """
         logger.info(f"Joined guild: {guild.name} (ID: {guild.id})")
-        
+
         # Add guild to database
         self.db.add_guild(
             guild_id=guild.id,
@@ -307,45 +399,8 @@ class TrackingCog(commands.Cog):
             inactive_days=self.config.default_inactive_days
         )
 
-        # Enumerate and add all members
-        member_count = 0
-        online_count = 0
-        for member in guild.members:
-            if member.bot:
-                continue  # Skip bots
-
-            try:
-                roles = get_member_roles(member)
-                join_date = int(member.joined_at.timestamp()) if member.joined_at else 0
-
-                # Use display_name if it differs from username, otherwise None
-                nickname = member.display_name if member.display_name != str(member) else None
-
-                self.db.add_member(
-                    guild_id=guild.id,
-                    user_id=member.id,
-                    username=str(member),
-                    nickname=nickname,
-                    join_date=join_date,
-                    roles=roles
-                )
-                
-                # Check initial status and set last_seen accordingly
-                if member.status != discord.Status.offline:
-                    # Member is currently online - set last_seen to 0
-                    self.db.update_last_seen(guild.id, member.id, 0)
-                    online_count += 1
-                # If offline, leave as NULL (never seen online yet)
-                
-                member_count += 1
-            except Exception as e:
-                logger.error(f"Failed to add member {member.id} in guild {guild.id}: {e}")
-
-        logger.info(f"Added {member_count} members from guild {guild.name} ({online_count} online, {member_count - online_count} offline/never tracked)")
-
-        # Initialize member positions (for join order tracking)
-        # Run as background task to avoid blocking the bot
-        asyncio.create_task(self._initialize_member_positions(guild))
+        # Process members in background to avoid blocking the event loop
+        asyncio.create_task(self._process_guild_members(guild))
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):

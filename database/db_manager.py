@@ -699,6 +699,21 @@ class DatabaseManager:
             logger.error(f"Failed to mark positions initialized for guild {guild_id}: {e}")
             return False
 
+    def get_all_guild_ids(self) -> List[int]:
+        """Get a list of all guild IDs currently in the database.
+
+        Returns:
+            List of guild IDs
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT guild_id FROM guilds")
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get all guild IDs: {e}")
+            return []
+
     def set_member_join_position(self, guild_id: int, user_id: int, position: int) -> bool:
         """Set the join position for a member."""
         try:
