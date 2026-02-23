@@ -432,6 +432,22 @@ class TrackingCog(commands.Cog):
 
         if success:
             logger.info(f"Successfully wiped data for guild {guild.id}")
+
+            # Discard any buffered activity entries for this guild to prevent
+            # flush retries against a guild that no longer exists in the database
+            daily_purged = sum(1 for k in list(self.daily_activity_buffer) if k[0] == guild.id)
+            hourly_purged = sum(1 for k in list(self.hourly_activity_buffer) if k[0] == guild.id)
+            for k in [k for k in self.daily_activity_buffer if k[0] == guild.id]:
+                del self.daily_activity_buffer[k]
+            for k in [k for k in self.hourly_activity_buffer if k[0] == guild.id]:
+                del self.hourly_activity_buffer[k]
+            for k in [k for k in self.failed_daily_writes if k[0] == guild.id]:
+                del self.failed_daily_writes[k]
+            for k in [k for k in self.failed_hourly_writes if k[0] == guild.id]:
+                del self.failed_hourly_writes[k]
+            if daily_purged or hourly_purged:
+                logger.info(f"Purged {daily_purged} daily and {hourly_purged} hourly buffered activity entries for guild {guild.id}")
+
             # Run VACUUM in background to reclaim space after deletion
             logger.info("Scheduling database VACUUM to reclaim space...")
             asyncio.create_task(self._vacuum_database_background())

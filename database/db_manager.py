@@ -37,15 +37,22 @@ class DatabaseManager:
         self._initialize_pool()
         self._initialize_database()
     
+    def _create_connection(self) -> sqlite3.Connection:
+        """Create and configure a new database connection."""
+        conn = sqlite3.connect(self.db_file, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        # Enable foreign key enforcement so ON DELETE CASCADE works on all tables
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
     def _initialize_pool(self):
         """Initialize the connection pool with connections."""
         for _ in range(self.pool_size):
-            conn = sqlite3.connect(self.db_file, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
+            conn = self._create_connection()
             self._pool.put(conn)
             self._connection_count += 1
         logger.info(f"Initialized database connection pool with {self.pool_size} connections")
-    
+
     def _get_connection_from_pool(self) -> sqlite3.Connection:
         """Get a connection from the pool, creating a new one if pool is empty."""
         try:
@@ -54,9 +61,7 @@ class DatabaseManager:
         except Empty:
             # Pool is empty, create a temporary connection
             logger.debug("Connection pool exhausted, creating temporary connection")
-            conn = sqlite3.connect(self.db_file, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            return conn
+            return self._create_connection()
     
     def _return_connection_to_pool(self, conn: sqlite3.Connection):
         """Return a connection to the pool."""
@@ -1314,16 +1319,24 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
-                # Delete all members associated with this guild
-                cursor.execute("DELETE FROM members WHERE guild_id = ?", (guild_id,))
-                members_deleted = cursor.rowcount
-                
-                # Delete the guild configuration/entry
+
+                # Count records before deletion for logging
+                cursor.execute("SELECT COUNT(*) FROM members WHERE guild_id = ?", (guild_id,))
+                members_count = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM message_activity WHERE guild_id = ?", (guild_id,))
+                activity_count = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM message_activity_hourly WHERE guild_id = ?", (guild_id,))
+                hourly_count = cursor.fetchone()[0]
+
+                # Deleting the guild cascades to members, role_changes,
+                # message_activity, and message_activity_hourly automatically
                 cursor.execute("DELETE FROM guilds WHERE guild_id = ?", (guild_id,))
-                guild_deleted = cursor.rowcount
-                
-                logger.info(f"Removed guild {guild_id} from database. Deleted {members_deleted} member records.")
+
+                logger.info(
+                    f"Removed guild {guild_id} from database. "
+                    f"Deleted {members_count} members, "
+                    f"{activity_count} daily and {hourly_count} hourly activity records."
+                )
                 return True
         except Exception as e:
             logger.error(f"Failed to remove guild data for {guild_id}: {e}")
