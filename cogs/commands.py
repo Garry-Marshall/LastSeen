@@ -1,5 +1,6 @@
 """User commands cog for querying member information."""
 
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -113,7 +114,7 @@ class CommandsCog(commands.Cog):
             Tuple of (can_proceed, error_embed, channels_restricted)
             channels_restricted: True if allowed_channels is configured (means output should not be ephemeral)
         """
-        guild_config = self.db.get_guild_config(interaction.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         channels_restricted = False
 
         # Check role permissions
@@ -540,17 +541,17 @@ class CommandsCog(commands.Cog):
                 )
                 return
 
+        await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
+
         # Get guild config
         guild_id = interaction.guild_id
-        guild_config = self.db.get_guild_config(guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, guild_id)
         if not guild_config:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=create_error_embed("Guild configuration not found. Please contact an administrator."),
                 ephemeral=True
             )
             return
-
-        await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
 
         # Use provided days or fall back to config
         inactive_days = days if days is not None else guild_config['inactive_days']
@@ -560,7 +561,12 @@ class CommandsCog(commands.Cog):
 
         if not inactive_members:
             embed = create_embed("Inactive Members", discord.Color.blue())
-            embed.description = f"No members have been inactive for more than {inactive_days} days."
+            embed.description = (
+                f"No members have been inactive for more than {inactive_days} days.\n\n"
+                f"**Note:** The bot can only track a member's last seen time after observing "
+                f"them go offline at least once. Members who were already offline when the bot "
+                f"joined, and haven't gone online since, will not appear here yet."
+            )
             await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             return
 
@@ -1625,8 +1631,8 @@ class SearchResultsView(discord.ui.View):
         # Join results and check field value limit (1024 characters)
         result_text = '\n\n'.join(result_lines)
         if len(result_text) > 1024:
-            # If too long, truncate with warning
-            result_text = result_text[:1000] + "\n\n... (truncated, use export for full list)"
+            suffix = "\n\n... (truncated, use export for full list)"
+            result_text = result_text[:1024 - len(suffix)] + suffix
         
         embed.add_field(name="Members", value=result_text, inline=False)
         

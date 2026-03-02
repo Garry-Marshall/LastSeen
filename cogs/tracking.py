@@ -79,45 +79,39 @@ class TrackingCog(commands.Cog):
             if self.db.guild_positions_initialized(guild_id):
                 logger.info(f"Member positions already initialized for guild {guild.name}")
                 return True
-            
+
             logger.info(f"Starting member position initialization for guild {guild.name}...")
-            
-            # Fetch all members sorted by join date
-            logger.info(f"Fetching members for {guild.name}...")
-            all_members = [m async for m in guild.fetch_members(limit=None)]
-            # Filter out bots - only track human members
-            members = [m for m in all_members if not m.bot]
-            logger.info(f"Fetched {len(all_members)} total members ({len(members)} human members), sorting by join date...")
-            members_sorted = sorted(members, key=lambda m: m.joined_at or datetime.now(timezone.utc))
-            
-            logger.info(f"Fetched {len(members_sorted)} human members, assigning positions...")
-            
-            # Batch update in chunks (1000 at a time)
-            chunk_size = 1000
-            updated_count = 0
-            for i in range(0, len(members_sorted), chunk_size):
-                chunk = members_sorted[i:i+chunk_size]
-                for idx, member in enumerate(chunk, start=i+1):
-                    # Ensure member exists in database first
-                    self._ensure_member_exists(member)
-                    # Then set their join position
-                    if self.db.set_member_join_position(guild_id, member.id, idx):
-                        updated_count += 1
-                
-                logger.info(f"Processed {min(i+chunk_size, len(members_sorted))}/{len(members_sorted)} members ({updated_count} updated)")
-                await asyncio.sleep(0.1)  # Small delay between chunks to avoid overwhelming the bot
-            
-            # Mark as initialized
+
+            # Use DB records instead of fetching from Discord — members were already
+            # stored with their join_date by _process_guild_members, so there is no
+            # need to hit the Discord API again (which floods the event loop with
+            # member chunk events and causes interaction timeouts on large guilds).
+            def assign_positions():
+                members = self.db.get_all_guild_members(guild_id)
+                if not members:
+                    return 0
+
+                # Sort ascending by join_date; treat 0/None as unknown, place last
+                members_sorted = sorted(
+                    members,
+                    key=lambda m: m['join_date'] if m.get('join_date') else float('inf')
+                )
+
+                updated = 0
+                for idx, member in enumerate(members_sorted, start=1):
+                    if self.db.set_member_join_position(guild_id, member['user_id'], idx):
+                        updated += 1
+                return updated
+
+            updated_count = await asyncio.to_thread(assign_positions)
+
             if self.db.mark_positions_initialized(guild_id):
-                logger.info(f"Successfully initialized positions for {updated_count}/{len(members_sorted)} members in {guild.name}")
+                logger.info(f"Initialized join positions for {updated_count} members in {guild.name}")
                 return True
             else:
-                logger.error(f"Failed to mark guild {guild_id} as initialized after updating positions")
+                logger.error(f"Failed to mark guild {guild_id} as positions-initialized")
                 return False
-            
-        except asyncio.TimeoutError:
-            logger.error(f"Timeout while fetching members for guild {guild.name} - positions not initialized")
-            return False
+
         except Exception as e:
             logger.error(f"Failed to initialize member positions for guild {guild.name}: {e}", exc_info=True)
             return False
@@ -320,6 +314,12 @@ class TrackingCog(commands.Cog):
 
         guild_id = member.guild.id
         user_id = member.id
+
+        # Guard: if the guild isn't registered yet (e.g. presence/member events
+        # that arrive before on_guild_join), skip silently. The member will be
+        # added by _process_guild_members once the guild is registered.
+        if not self.db.get_guild_config(guild_id):
+            return False
 
         if not self.db.member_exists(guild_id, user_id):
             roles = get_member_roles(member)
@@ -828,33 +828,39 @@ class TrackingCog(commands.Cog):
             self.daily_activity_buffer.clear()
             self.hourly_activity_buffer.clear()
             
-            # Flush daily activity and track failures
-            success_count = 0
-            for (guild_id, user_id, date), count in daily_to_flush.items():
-                # Pass the count directly instead of calling N times
-                if self.db.increment_message_activity(guild_id, user_id, date, count):
-                    success_count += 1
-                else:
-                    # Store failed write for retry on next flush
-                    self.failed_daily_writes[(guild_id, user_id, date)] = count
-            
-            if self.failed_daily_writes:
-                logger.warning(f"Failed to flush {len(self.failed_daily_writes)}/{daily_count} daily entries, will retry")
-            logger.debug(f"Flushed {success_count}/{daily_count} daily activity entries")
-            
-            # Flush hourly activity and track failures
-            success_count = 0
-            for (guild_id, user_id, timestamp, hour), count in hourly_to_flush.items():
-                # Pass the count directly instead of calling N times
-                if self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour, count):
-                    success_count += 1
-                else:
-                    # Store failed write for retry on next flush
-                    self.failed_hourly_writes[(guild_id, user_id, timestamp, hour)] = count
-            
-            if self.failed_hourly_writes:
-                logger.warning(f"Failed to flush {len(self.failed_hourly_writes)}/{hourly_count} hourly entries, will retry")
-            logger.debug(f"Flushed {success_count}/{hourly_count} hourly activity entries")
+            # Flush daily activity in thread pool to avoid blocking event loop
+            def flush_daily():
+                failed = {}
+                success = 0
+                for (gid, uid, date), count in daily_to_flush.items():
+                    if self.db.increment_message_activity(gid, uid, date, count):
+                        success += 1
+                    else:
+                        failed[(gid, uid, date)] = count
+                return success, failed
+
+            daily_success, daily_failed = await asyncio.to_thread(flush_daily)
+            self.failed_daily_writes.update(daily_failed)
+            if daily_failed:
+                logger.warning(f"Failed to flush {len(daily_failed)}/{daily_count} daily entries, will retry")
+            logger.debug(f"Flushed {daily_success}/{daily_count} daily activity entries")
+
+            # Flush hourly activity in thread pool to avoid blocking event loop
+            def flush_hourly():
+                failed = {}
+                success = 0
+                for (gid, uid, timestamp, hour), count in hourly_to_flush.items():
+                    if self.db.increment_message_activity_hourly(gid, uid, timestamp, hour, count):
+                        success += 1
+                    else:
+                        failed[(gid, uid, timestamp, hour)] = count
+                return success, failed
+
+            hourly_success, hourly_failed = await asyncio.to_thread(flush_hourly)
+            self.failed_hourly_writes.update(hourly_failed)
+            if hourly_failed:
+                logger.warning(f"Failed to flush {len(hourly_failed)}/{hourly_count} hourly entries, will retry")
+            logger.debug(f"Flushed {hourly_success}/{hourly_count} hourly activity entries")
             
         except Exception as e:
             logger.error(f"Error flushing activity buffers: {e}", exc_info=True)
