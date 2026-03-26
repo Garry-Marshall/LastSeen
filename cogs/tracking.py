@@ -582,18 +582,11 @@ class TrackingCog(commands.Cog):
             embed.description += f"🏷️ Nickname: {nickname}\n"
             embed.description += "\n"
             
-            # Roles and Highest Role
-            if member_data['roles']:
-                roles_str = ", ".join(member_data['roles'])
-                embed.description += f"🎭 Roles: {roles_str}\n"
-                
-                # Highest role (using top_role from member object if available)
-                if member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
-                    highest_role = member.top_role
-                    if highest_role.name != "@everyone":
-                        embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
-            else:
-                embed.description += f"🎭 Roles: None\n"
+            # Highest Role
+            if member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
+                highest_role = member.top_role
+                if highest_role.name != "@everyone":
+                    embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
             
             embed.description += "\n"
             

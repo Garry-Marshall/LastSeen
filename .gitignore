@@ -38,6 +38,7 @@ venv.bak/
 *~
 .DS_Store
 .github
+.claude
 
 # Environment variables
 .env

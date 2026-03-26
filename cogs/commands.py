@@ -157,7 +157,7 @@ class CommandsCog(commands.Cog):
             return []
         
         # Get all members from database for this guild
-        members = self.db.get_guild_members(interaction.guild_id, include_left=False)
+        members = await asyncio.to_thread(self.db.get_guild_members, interaction.guild_id, False)
         
         # Filter based on current input (case-insensitive)
         current_lower = current.lower()
@@ -264,13 +264,6 @@ class CommandsCog(commands.Cog):
                         embed.description += f"     Previously known as: {history_str}\n"
             except (json.JSONDecodeError, TypeError):
                 pass
-        
-        # Roles
-        if member_data['roles']:
-            roles_str = ", ".join(member_data['roles'])
-            embed.description += f"🎭 Roles: {roles_str}\n"
-        else:
-            embed.description += f"🎭 Roles: None\n"
         
         # Highest role
         if member and hasattr(member, 'roles') and member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
