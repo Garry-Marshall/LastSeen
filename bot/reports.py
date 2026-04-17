@@ -4,15 +4,28 @@ import discord
 import logging
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 from database import DatabaseManager
 from bot.utils import create_embed, format_timestamp
 
 logger = logging.getLogger(__name__)
 
 # Rate limiting for report sending
-_last_report_send = {}  # guild_id -> timestamp
+_last_report_send: Dict[int, float] = {}  # guild_id -> timestamp
+_report_locks: Dict[int, asyncio.Lock] = {}  # guild_id -> lock
 _RATE_LIMIT_WINDOW = 60  # seconds between reports per guild
+
+
+def _get_report_lock(guild_id: int) -> asyncio.Lock:
+    if guild_id not in _report_locks:
+        _report_locks[guild_id] = asyncio.Lock()
+    return _report_locks[guild_id]
+
+
+def purge_guild_state(guild_id: int) -> None:
+    """Remove all module-level per-guild state for a guild that has been removed."""
+    _report_locks.pop(guild_id, None)
+    _last_report_send.pop(guild_id, None)
 
 
 async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: int) -> discord.Embed:
@@ -208,73 +221,73 @@ async def send_scheduled_report(guild: discord.Guild, channel_id: int, db: Datab
     Returns:
         True if report sent successfully, False otherwise
     """
-    # Rate limiting check
-    now = datetime.now(timezone.utc).timestamp()
-    last_send = _last_report_send.get(guild.id, 0)
-    
-    if now - last_send < _RATE_LIMIT_WINDOW:
-        wait_time = _RATE_LIMIT_WINDOW - (now - last_send)
-        logger.warning(f"Rate limit: waiting {wait_time:.1f}s before sending report to {guild.name}")
-        await asyncio.sleep(wait_time)
-    
-    for attempt in range(max_retries):
-        try:
-            channel = guild.get_channel(channel_id)
-            if not channel or not isinstance(channel, discord.TextChannel):
-                logger.error(f"Report channel {channel_id} not found or not a text channel in guild {guild.name}")
+    async with _get_report_lock(guild.id):
+        now = datetime.now(timezone.utc).timestamp()
+        last_send = _last_report_send.get(guild.id, 0)
+
+        if now - last_send < _RATE_LIMIT_WINDOW:
+            wait_time = _RATE_LIMIT_WINDOW - (now - last_send)
+            logger.warning(f"Rate limit: waiting {wait_time:.1f}s before sending report to {guild.name}")
+            await asyncio.sleep(wait_time)
+
+        for attempt in range(max_retries):
+            try:
+                channel = guild.get_channel(channel_id)
+                if not channel or not isinstance(channel, discord.TextChannel):
+                    logger.error(f"Report channel {channel_id} not found or not a text channel in guild {guild.name}")
+                    return False
+
+                embeds = []
+
+                # Generate requested reports
+                if 'activity' in report_types:
+                    activity_embed = await generate_activity_report(guild, db, days)
+                    embeds.append(activity_embed)
+
+                if 'members' in report_types:
+                    members_embed = await generate_members_report(guild, db, days)
+                    if members_embed:
+                        embeds.append(members_embed)
+
+                if 'departures' in report_types:
+                    departures_embeds = await generate_departed_report(guild, db, days)
+                    if departures_embeds:
+                        # departures_embeds is a list, add all of them
+                        embeds.extend(departures_embeds)
+
+                # Send embeds (Discord allows up to 10 embeds per message)
+                if embeds:
+                    await channel.send(embeds=embeds[:10])
+                    _last_report_send[guild.id] = datetime.now(timezone.utc).timestamp()
+                    logger.info(f"Sent scheduled report to {channel.name} in guild {guild.name}")
+                    return True
+                else:
+                    logger.info(f"No report content to send for guild {guild.name}")
+                    return True
+
+            except discord.Forbidden:
+                logger.error(f"Missing permissions to send report in channel {channel_id} in guild {guild.name}")
                 return False
-            
-            embeds = []
-            
-            # Generate requested reports
-            if 'activity' in report_types:
-                activity_embed = await generate_activity_report(guild, db, days)
-                embeds.append(activity_embed)
-            
-            if 'members' in report_types:
-                members_embed = await generate_members_report(guild, db, days)
-                if members_embed:
-                    embeds.append(members_embed)
-            
-            if 'departures' in report_types:
-                departures_embeds = await generate_departed_report(guild, db, days)
-                if departures_embeds:
-                    # departures_embeds is a list, add all of them
-                    embeds.extend(departures_embeds)
-            
-            # Send embeds (Discord allows up to 10 embeds per message)
-            if embeds:
-                await channel.send(embeds=embeds[:10])
-                _last_report_send[guild.id] = datetime.now(timezone.utc).timestamp()
-                logger.info(f"Sent scheduled report to {channel.name} in guild {guild.name}")
-                return True
-            else:
-                logger.info(f"No report content to send for guild {guild.name}")
-                return True
-            
-        except discord.Forbidden:
-            logger.error(f"Missing permissions to send report in channel {channel_id} in guild {guild.name}")
-            return False
-        
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited by Discord
-                retry_after = e.retry_after if hasattr(e, 'retry_after') else 5
-                logger.warning(f"Discord rate limit hit, retrying after {retry_after}s (attempt {attempt + 1}/{max_retries})")
-                await asyncio.sleep(retry_after)
-                continue
-            else:
-                logger.error(f"Discord HTTP error sending report to {guild.name}: {e}")
+
+            except discord.HTTPException as e:
+                if e.status == 429:  # Rate limited by Discord
+                    retry_after = e.retry_after if hasattr(e, 'retry_after') else 5
+                    logger.warning(f"Discord rate limit hit, retrying after {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(retry_after)
+                    continue
+                else:
+                    logger.error(f"Discord HTTP error sending report to {guild.name}: {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    return False
+
+            except Exception as e:
+                logger.error(f"Failed to send scheduled report for guild {guild.name} (attempt {attempt + 1}/{max_retries}): {e}", exc_info=True)
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     continue
                 return False
-        
-        except Exception as e:
-            logger.error(f"Failed to send scheduled report for guild {guild.name} (attempt {attempt + 1}/{max_retries}): {e}", exc_info=True)
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                continue
-            return False
-    
-    logger.error(f"Failed to send report to {guild.name} after {max_retries} attempts")
-    return False
+
+        logger.error(f"Failed to send report to {guild.name} after {max_retries} attempts")
+        return False

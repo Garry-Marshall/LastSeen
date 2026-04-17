@@ -824,7 +824,8 @@ class CommandsCog(commands.Cog):
         embed.add_field(
             name="🔐 Privacy",
             value="This bot does **not** store or read message content. "
-                "Only metadata required for activity tracking is recorded.",
+                "Only metadata required for activity tracking is recorded.\n"
+                "[Privacy Policy](https://lastseen.bot.nu/privacy-policy/)",
             inline=False
         )
 

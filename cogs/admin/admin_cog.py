@@ -35,6 +35,7 @@ class AdminCog(commands.Cog):
 
     @app_commands.command(name="config", description="⚙️ Configure bot settings (Admin only)")
     @app_commands.guild_only()
+    @app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
     async def config(self, interaction: discord.Interaction):
         """
         Display bot configuration interface.

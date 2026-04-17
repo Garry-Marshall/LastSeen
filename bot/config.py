@@ -138,7 +138,7 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
             deleted_count = 0
 
             # Pattern matches both old format (YYYY-MM-DD.log) and new format (bot.log.YYYY-MM-DD)
-            date_pattern = re.compile(r'(\d{4}-\d{2}-\d{2})')
+            date_pattern = re.compile(r'^(?:.*\.)?(\d{4}-\d{2}-\d{2})')
 
             for log_file in self.log_folder.glob('*.log*'):
                 try:

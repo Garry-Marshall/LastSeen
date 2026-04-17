@@ -10,6 +10,7 @@ from collections import defaultdict
 
 from database import DatabaseManager
 from bot.utils import get_member_roles, create_embed
+from bot.reports import purge_guild_state
 
 logger = logging.getLogger(__name__)
 
@@ -24,36 +25,28 @@ class TrackingCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot, db: DatabaseManager, config):
         """Initialize the tracking cog.
-        
+
         Args:
             bot: Discord bot instance
             db: Database manager instance
             config: Bot configuration object
         """
-        """
-        Initialize tracking cog.
-
-        Args:
-            bot: Discord bot instance
-            db: Database manager
-            config: Bot configuration
-        """
         self.bot = bot
         self.db = db
         self.config = config
-        
+
         # Batch processing buffers for message activity
         # Key: (guild_id, user_id, date), Value: count
         self.daily_activity_buffer: Dict[Tuple[int, int, int], int] = defaultdict(int)
         # Key: (guild_id, user_id, timestamp, hour), Value: count
         self.hourly_activity_buffer: Dict[Tuple[int, int, int, int], int] = defaultdict(int)
-        
+
         # Failed writes buffer for retry
         self.failed_daily_writes: Dict[Tuple[int, int, int], int] = defaultdict(int)
         self.failed_hourly_writes: Dict[Tuple[int, int, int, int], int] = defaultdict(int)
-        
-        # Buffer size limits to prevent memory issues
-        self.MAX_BUFFER_SIZE = 10000  # Max entries before forcing flush
+
+        # Flush when buffer reaches this size to cap memory usage between flush intervals
+        self.MAX_BUFFER_SIZE = 10000
         
         # Start background tasks
         self.flush_activity_buffer.start()
@@ -447,6 +440,8 @@ class TrackingCog(commands.Cog):
                 del self.failed_hourly_writes[k]
             if daily_purged or hourly_purged:
                 logger.info(f"Purged {daily_purged} daily and {hourly_purged} hourly buffered activity entries for guild {guild.id}")
+
+            purge_guild_state(guild.id)
 
             # Run VACUUM in background to reclaim space after deletion
             logger.info("Scheduling database VACUUM to reclaim space...")

@@ -602,10 +602,13 @@ class DatabaseManager:
             logger.error(f"Failed to set user role name for guild {guild_id}: {e}")
             return False
 
+    _MAX_ROLE_NAME_LENGTH = 100
+
     def set_track_only_roles(self, guild_id: int, role_names: List[str], guild_name: str = 'Unknown') -> bool:
         """Set which roles should be tracked (empty list = track all)."""
         try:
-            roles_json = json.dumps(role_names) if role_names else None
+            truncated = [r[:self._MAX_ROLE_NAME_LENGTH] for r in role_names if isinstance(r, str)]
+            roles_json = json.dumps(truncated) if truncated else None
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 # First ensure guild exists
