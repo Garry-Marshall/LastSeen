@@ -627,6 +627,11 @@ class TrackingCog(commands.Cog):
         if self._ensure_member_exists(after):
             return  # Member was just added, no need to check for updates
 
+        # If _ensure_member_exists returned False but the member still isn't in the
+        # DB, it means they're untracked or the guild isn't registered — skip.
+        if not self.db.member_exists(guild_id, user_id):
+            return
+
         # Check for display name change (includes server nickname and global display name)
         before_display = before.display_name if before.display_name != str(before) else None
         after_display = after.display_name if after.display_name != str(after) else None

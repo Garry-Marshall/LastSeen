@@ -39,6 +39,7 @@ venv.bak/
 .DS_Store
 .github
 .claude
+CLAUDE.md
 
 # Environment variables
 .env
