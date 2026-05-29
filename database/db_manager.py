@@ -43,6 +43,12 @@ class DatabaseManager:
         conn.row_factory = sqlite3.Row
         # Enable foreign key enforcement so ON DELETE CASCADE works on all tables
         conn.execute("PRAGMA foreign_keys = ON")
+        # WAL lets readers and a writer proceed concurrently (important with a
+        # threaded connection pool); busy_timeout avoids immediate "database is
+        # locked" errors under contention.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
         return conn
 
     def _initialize_pool(self):
@@ -186,12 +192,6 @@ class DatabaseManager:
                 ON members(guild_id, join_date)
             """)
 
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_members_left_date
-                ON members(guild_id, left_date)
-                WHERE left_date IS NOT NULL
-            """)
-
             # Indexes for role_changes table
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_role_changes_guild_user
@@ -299,6 +299,13 @@ class DatabaseManager:
             if 'left_date' not in member_columns:
                 cursor.execute("ALTER TABLE members ADD COLUMN left_date INTEGER")
                 logger.info("Added left_date column to members table")
+
+            # Index for departed-member queries (created after the column exists)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_members_left_date
+                ON members(guild_id, left_date)
+                WHERE left_date IS NOT NULL
+            """)
 
             # Create message_activity_hourly table for hour-of-day tracking
             cursor.execute("""
@@ -931,6 +938,19 @@ class DatabaseManager:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Failed to set member {user_id} active in guild {guild_id}: {e}")
+            return False
+
+    def set_member_left_date(self, guild_id: int, user_id: int, timestamp: Optional[int]) -> bool:
+        """Set (or clear, when timestamp is None) the date a member left the guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE members SET left_date = ? WHERE guild_id = ? AND user_id = ?
+                """, (timestamp, guild_id, user_id))
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to set left_date for {user_id} in guild {guild_id}: {e}")
             return False
 
     def get_member(self, guild_id: int, user_id: int) -> Optional[Dict[str, Any]]:

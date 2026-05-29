@@ -46,6 +46,8 @@ CLAUDE.md
 
 # Bot data files
 *.db
+*.db-wal
+*.db-shm
 
 # Logs directory
 Logs/

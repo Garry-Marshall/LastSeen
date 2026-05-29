@@ -488,6 +488,7 @@ class TrackingCog(commands.Cog):
             # Update existing record
             nickname = member.display_name if member.display_name != str(member) else None
             self.db.set_member_active(guild_id, user_id)
+            self.db.set_member_left_date(guild_id, user_id, None)  # Clear prior departure
             self.db.update_member_username(guild_id, user_id, str(member))
             self.db.update_member_nickname(guild_id, user_id, nickname)
             self.db.update_member_roles(guild_id, user_id, roles)
@@ -542,10 +543,13 @@ class TrackingCog(commands.Cog):
 
         # Mark member as inactive
         self.db.set_member_inactive(guild_id, user_id)
-        
+
         # Update last_seen to now (current time when they left)
         current_time = int(datetime.now(timezone.utc).timestamp())
         self.db.update_last_seen(guild_id, user_id, current_time)
+
+        # Record when they left so departure reports can find them
+        self.db.set_member_left_date(guild_id, user_id, current_time)
 
         # Get guild config for notification channel
         guild_config = self.db.get_guild_config(guild_id)
@@ -764,27 +768,27 @@ class TrackingCog(commands.Cog):
         if after.bot:
             return
 
+        # Presence updates fire very frequently (activity/Spotify changes, not just
+        # online/offline). Only touch the database when the actual status changed.
+        if before.status == after.status:
+            return
+
         guild_id = after.guild.id
         user_id = after.id
 
-        # Ensure member exists in database
+        # Ensure member exists in database (safety net for members who joined
+        # while the bot was offline)
         self._ensure_member_exists(after)
 
-        # Track status changes
-        if before.status != after.status:
-            # Log status change to console
-            #print(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
-            #logger.debug(f"{after} ({after.guild}) changed status from {before.status} to {after.status}")
-
-            if after.status == discord.Status.offline:
-                # User went offline - record timestamp
-                timestamp = int(datetime.now(timezone.utc).timestamp())
-                self.db.update_last_seen(guild_id, user_id, timestamp)
-                logger.debug(f"User {after} went offline in {after.guild.name}")
-            else:
-                # User came online - set last_seen to 0 (currently active)
-                self.db.update_last_seen(guild_id, user_id, 0)
-                logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
+        if after.status == discord.Status.offline:
+            # User went offline - record timestamp
+            timestamp = int(datetime.now(timezone.utc).timestamp())
+            self.db.update_last_seen(guild_id, user_id, timestamp)
+            logger.debug(f"User {after} went offline in {after.guild.name}")
+        else:
+            # User came online - set last_seen to 0 (currently active)
+            self.db.update_last_seen(guild_id, user_id, 0)
+            logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
 
     @tasks.loop(seconds=30)
     async def flush_activity_buffer(self):
