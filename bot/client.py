@@ -9,6 +9,23 @@ from database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
+
+class LastSeenBot(commands.Bot):
+    """Bot subclass that closes the database connection pool on shutdown.
+
+    discord.py does not dispatch an 'on_close' event, so cleanup must be
+    done by overriding close() directly.
+    """
+
+    async def close(self):
+        await super().close()
+        logger.info("Bot is shutting down, closing database connection pool...")
+        try:
+            self.db.close_pool()
+        except Exception as e:
+            logger.error(f"Error closing database pool: {e}", exc_info=True)
+
+
 def create_bot(config) -> commands.Bot:
     """
     Create and configure the Discord bot.
@@ -26,7 +43,7 @@ def create_bot(config) -> commands.Bot:
     #intents.message_content = True  # Required for reading message content
 
     # Create bot instance
-    bot = commands.Bot(
+    bot = LastSeenBot(
         command_prefix='!',  # Prefix for legacy commands (not used for slash commands)
         intents=intents,
         help_command=None  # Disable default help command
@@ -78,15 +95,6 @@ def create_bot(config) -> commands.Bot:
             logger.error(f"Failed to sync commands: {e}", exc_info=True)
 
         logger.info("Bot is ready!")
-
-    @bot.event
-    async def on_close():
-        """Called when the bot is shutting down."""
-        logger.info("Bot is shutting down, closing database connection pool...")
-        try:
-            bot.db.close_pool()
-        except Exception as e:
-            logger.error(f"Error closing database pool: {e}", exc_info=True)
 
     @bot.event
     async def on_error(event: str, *args, **kwargs):

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 FLUSH_INTERVAL = 30  # How often to flush activity buffers
 CLEANUP_INTERVAL_HOURS = 24  # How often to run data cleanup
 REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
-WAL_CHECKPOINT_INTERVAL_MINUTES = 2  # How often to truncate the SQLite WAL file
+WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to truncate the SQLite WAL file
 
 
 class TrackingCog(commands.Cog):

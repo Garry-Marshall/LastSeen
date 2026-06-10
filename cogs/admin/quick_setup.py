@@ -58,8 +58,8 @@ class QuickSetupView(discord.ui.View):
         # Configure button - hide on summary page
         self.configure_button.disabled = (self.current_step == self.max_steps - 1)
         
-        # Skip button - only show on optional steps (3, 4)
-        self.skip_button.disabled = self.current_step not in [3, 4]
+        # Skip button - only show on optional steps: admin role (2) and timezone (3)
+        self.skip_button.disabled = self.current_step not in [2, 3]
 
     def _get_step_embed(self) -> discord.Embed:
         """Get embed for current step."""

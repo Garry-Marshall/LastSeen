@@ -39,9 +39,7 @@ class ConfigView(discord.ui.View):
             user_role_required = guild_config.get('user_role_required', 0)
             # Set button style based on state: green if enabled, red if disabled
             self.toggle_user_role_required.style = discord.ButtonStyle.success if user_role_required else discord.ButtonStyle.danger
-
-        enabled = bool(guild_config.get("user_role_required", 0))
-        self.toggle_user_role_required.label = (f"User Role Required = {'ON' if enabled else 'OFF'}")
+            self.toggle_user_role_required.label = f"User Role Required = {'ON' if user_role_required else 'OFF'}"
 
 
     @discord.ui.button(label="Set Notification Channel", style=discord.ButtonStyle.primary, emoji="📢", row=0)
@@ -116,22 +114,22 @@ class ConfigView(discord.ui.View):
 
         # Update database
         if self.db.set_user_role_required(self.guild_id, new_value, interaction.guild.name):
+            # Update the toggle button on the config panel itself. Responding to the
+            # component interaction with edit_message targets the panel message
+            # (works for ephemeral messages too).
+            button.label = f"User Role Required = {'ON' if new_value else 'OFF'}"
+            button.style = (discord.ButtonStyle.success if new_value else discord.ButtonStyle.danger)
+            await interaction.response.edit_message(view=self)
+
             status = "**enabled**" if new_value else "**disabled**"
             message = (
                 f"User role requirement has been {status}.\n\n"
                 f"{'Only users with the configured user role can now use bot commands.' if new_value else 'All users can now use bot commands.'}"
             )
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=create_success_embed(message),
                 ephemeral=True
             )
-            # Update button style dynamically for the current view instance - Note: Ephemeral messages can't be edited after sending
-            #button.style = discord.ButtonStyle.success if new_value else discord.ButtonStyle.danger
-            #await interaction.message.edit(view=self)
-            button.label = f"User Role Required = {'ON' if new_value else 'OFF'}"
-            button.style = (discord.ButtonStyle.success if new_value else discord.ButtonStyle.danger)
-
-            await interaction.edit_original_response(view=self) 
 
             logger.info(f"User role requirement toggled to {new_value} in guild {interaction.guild.name}")
         else:

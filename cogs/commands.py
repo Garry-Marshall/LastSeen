@@ -26,6 +26,19 @@ from bot.utils import (
 logger = logging.getLogger(__name__)
 
 
+def sanitize_csv_value(value) -> str:
+    """Sanitize a value for CSV export.
+
+    Strips newlines and neutralizes spreadsheet formula injection: cells
+    starting with =, +, -, @ or a tab are interpreted as formulas by Excel
+    and similar tools, so prefix them with a single quote.
+    """
+    value = str(value).replace('\n', ' ').replace('\r', ' ')
+    if value and value[0] in ('=', '+', '-', '@', '\t'):
+        value = "'" + value
+    return value
+
+
 class PaginationView(discord.ui.View):
     """Interactive pagination view for navigating through multiple pages."""
 
@@ -863,7 +876,9 @@ class CommandsCog(commands.Cog):
     ):
         """Advanced member search with filtering and export."""
         # Check admin permission
-        if not has_bot_admin_role(interaction.user, interaction.guild):
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
                 "❌ This command requires admin permissions.",
                 ephemeral=True
@@ -879,7 +894,6 @@ class CommandsCog(commands.Cog):
             return
 
         # Check channel restrictions
-        guild_config = self.db.get_guild_config(interaction.guild_id)
         allowed_channels_json = guild_config.get('allowed_channels') if guild_config else None
         channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
         
@@ -1465,10 +1479,10 @@ class CommandsCog(commands.Cog):
         
         writer.writeheader()
         for member in results:
-            # Sanitize strings to prevent CSV injection
-            username = str(member['username']).replace('\n', ' ').replace('\r', '')
-            display_name = str(member.get('display_name', '')).replace('\n', ' ').replace('\r', '')
-            roles = ', '.join(str(r).replace('\n', ' ').replace('\r', '') for r in member.get('roles', []))
+            # Sanitize strings to prevent CSV/formula injection
+            username = sanitize_csv_value(member['username'])
+            display_name = sanitize_csv_value(member.get('display_name', ''))
+            roles = sanitize_csv_value(', '.join(str(r) for r in member.get('roles', [])))
             
             writer.writerow({
                 'Username': username,
@@ -1683,10 +1697,10 @@ class SearchResultsView(discord.ui.View):
             
             writer.writeheader()
             for member in self.results:
-                # Sanitize strings to prevent CSV injection
-                username = str(member['username']).replace('\n', ' ').replace('\r', '')
-                display_name = str(member.get('display_name', '')).replace('\n', ' ').replace('\r', '')
-                roles = ', '.join(str(r).replace('\n', ' ').replace('\r', '') for r in member.get('roles', []))
+                # Sanitize strings to prevent CSV/formula injection
+                username = sanitize_csv_value(member['username'])
+                display_name = sanitize_csv_value(member.get('display_name', ''))
+                roles = sanitize_csv_value(', '.join(str(r) for r in member.get('roles', [])))
                 
                 writer.writerow({
                     'Username': username,

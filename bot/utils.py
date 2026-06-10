@@ -215,6 +215,10 @@ def is_channel_allowed(channel_id: int, guild_config: dict) -> bool:
     """
     import json
 
+    # No config row for this guild — default to allowing all channels
+    if not guild_config:
+        return True
+
     # Check if allowed_channels is configured
     allowed_channels_json = guild_config.get('allowed_channels')
     if not allowed_channels_json:
