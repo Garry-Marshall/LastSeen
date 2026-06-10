@@ -88,6 +88,32 @@ class DatabaseManager:
                 break
         logger.info("Closed all database connections in pool")
 
+    def checkpoint_wal(self) -> bool:
+        """Checkpoint the WAL into the main database and truncate it on disk.
+
+        Automatic (PASSIVE) checkpoints reuse WAL space but never shrink the
+        file. On a busy connection pool the WAL can grow to a large high-water
+        mark and stay there. Running a TRUNCATE checkpoint periodically merges
+        pending frames into the .db and resets the -wal file back to zero.
+
+        Returns:
+            bool: True if the checkpoint completed without being blocked.
+        """
+        conn = self._get_connection_from_pool()
+        try:
+            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            # row = (busy, log_frames, checkpointed_frames); busy=0 means it ran
+            busy = row[0] if row else 1
+            if busy:
+                logger.debug("WAL checkpoint was blocked by an active reader; will retry next cycle")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"WAL checkpoint failed: {e}")
+            return False
+        finally:
+            self._return_connection_to_pool(conn)
+
     @contextmanager
     def get_connection(self):
         """

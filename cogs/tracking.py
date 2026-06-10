@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 FLUSH_INTERVAL = 30  # How often to flush activity buffers
 CLEANUP_INTERVAL_HOURS = 24  # How often to run data cleanup
 REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
+WAL_CHECKPOINT_INTERVAL_MINUTES = 2  # How often to truncate the SQLite WAL file
 
 
 class TrackingCog(commands.Cog):
@@ -53,6 +54,7 @@ class TrackingCog(commands.Cog):
         self.cleanup_old_data.start()
         self.check_scheduled_reports.start()
         self.backup_database.start()
+        self.checkpoint_wal.start()
 
     async def _initialize_member_positions(self, guild: discord.Guild) -> bool:
         """
@@ -895,6 +897,24 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before starting the cleanup loop."""
         await self.bot.wait_until_ready()
 
+    @tasks.loop(minutes=WAL_CHECKPOINT_INTERVAL_MINUTES)
+    async def checkpoint_wal(self):
+        """Periodically truncate the SQLite WAL file so it doesn't grow unbounded.
+
+        On a busy connection pool automatic checkpoints reuse WAL space but
+        never shrink the file on disk. This runs a TRUNCATE checkpoint in a
+        thread to keep the -wal file size bounded.
+        """
+        try:
+            await asyncio.to_thread(self.db.checkpoint_wal)
+        except Exception as e:
+            logger.error(f"Error during WAL checkpoint: {e}", exc_info=True)
+
+    @checkpoint_wal.before_loop
+    async def before_checkpoint_wal(self):
+        """Wait for bot to be ready before starting the WAL checkpoint loop."""
+        await self.bot.wait_until_ready()
+
     @tasks.loop(hours=REPORT_CHECK_INTERVAL_HOURS)
     async def check_scheduled_reports(self):
         """
@@ -1102,6 +1122,7 @@ class TrackingCog(commands.Cog):
         self.cleanup_old_data.cancel()
         self.check_scheduled_reports.cancel()
         self.backup_database.cancel()
+        self.checkpoint_wal.cancel()
         
         # Schedule async flush task to run in the event loop
         # This avoids blocking the shutdown process
