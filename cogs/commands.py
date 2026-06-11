@@ -745,6 +745,102 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /chat-history for '{user}' in guild {interaction.guild.name}")
 
+    @app_commands.command(name="mystats", description="📊 View your own activity statistics")
+    @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
+    async def mystats(self, interaction: discord.Interaction):
+        """
+        Display the caller's own tracked statistics.
+        Output is always ephemeral - your stats are shown only to you.
+
+        Args:
+            interaction: Discord interaction
+        """
+        # Check permissions
+        can_proceed, error_embed, _ = await self._check_permissions(interaction)
+        if not can_proceed:
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
+        # Own stats are always ephemeral, regardless of channel restrictions
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        guild_id = interaction.guild_id
+        user_id = interaction.user.id
+
+        member_data = await asyncio.to_thread(self.db.get_member, guild_id, user_id)
+
+        if not member_data:
+            await interaction.followup.send(
+                embed=create_error_embed("You aren't currently tracked on this server."),
+                ephemeral=True
+            )
+            return
+
+        username = member_data['username'] if member_data['username'] else "Unknown"
+        embed = create_embed(f"📊 Your Stats - {username}", discord.Color.blue())
+        embed.description = ""
+
+        # ===== MEMBERSHIP SECTION =====
+        if member_data['join_date']:
+            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db)
+            join_position = member_data.get('join_position')
+            if join_position:
+                embed.description += f"📥 Joined Server: {join_str} (Member #{join_position})\n"
+            else:
+                embed.description += f"📥 Joined Server: {join_str}\n"
+
+        nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
+        embed.description += f"🏷️ Nickname: {nickname}\n"
+
+        # Own nickname history - it's the caller's data, so no admin gate
+        if member_data.get('nickname_history'):
+            try:
+                history = json.loads(member_data['nickname_history'])
+                previous_nicknames = [n for n in history if n != nickname]
+                if previous_nicknames:
+                    embed.description += f"     Previously known as: {', '.join(previous_nicknames)}\n"
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        embed.description += "\n"
+
+        # ===== STATUS SECTION =====
+        member = interaction.guild.get_member(user_id)
+        if member and member.status != discord.Status.offline:
+            embed.description += f"⏱️ Last Seen: Currently online\n"
+        elif member_data['last_seen'] and member_data['last_seen'] != 0:
+            embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R', guild_id, self.db)}\n"
+        else:
+            embed.description += f"⏱️ Last Seen: Not available\n"
+
+        embed.description += "\n"
+
+        # ===== ACTIVITY SECTION =====
+        activity_stats = await asyncio.to_thread(
+            self.db.get_message_activity_period, guild_id, user_id, 30
+        )
+        activity_trend = await asyncio.to_thread(
+            self.db.get_message_activity_trend, guild_id, user_id, 365
+        )
+
+        embed.description += "📊 Message Activity:\n"
+        embed.description += f"     • Today: {activity_stats['today']:,} messages\n"
+        embed.description += f"     • This week: {activity_stats['this_week']:,} messages\n"
+        embed.description += f"     • This month: {activity_stats['this_month']:,} messages\n"
+
+        if activity_trend:
+            total_365 = sum(r['message_count'] for r in activity_trend)
+            busiest = max(activity_trend, key=lambda r: r['message_count'])
+            busiest_str = format_timestamp(busiest['date'], 'D', guild_id, self.db)
+            embed.description += f"     • Last 365 days: {total_365:,} messages\n"
+            embed.description += f"     • Busiest day: {busiest['message_count']:,} messages on {busiest_str}\n"
+
+        embed.set_footer(text="Only you can see this message")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        logger.info(f"User {interaction.user} used /mystats in guild {interaction.guild.name}")
+
     @app_commands.command(name="about", description="ℹ️ About this bot")
     async def about(self, interaction: discord.Interaction):
         import psutil

@@ -119,6 +119,7 @@ class AdminCog(commands.Cog):
                 "`/inactive` - List members offline beyond threshold\n"
                 "`/inactive <days>` - List members offline for <days> days\n"
                 "`/chat-history <user>` - Show message posting stats for the last year\n"
+                "`/mystats` - View your own activity statistics (only visible to you)\n"
                 "`/user-stats` - Interactive statistics dashboard with analytics\n"
             ),
             inline=False
