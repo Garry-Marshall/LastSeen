@@ -16,6 +16,7 @@ from bot.utils import (
     parse_user_mention,
     create_embed,
     create_error_embed,
+    create_success_embed,
     format_timestamp,
     chunk_list,
     can_use_bot_commands,
@@ -98,6 +99,74 @@ class PaginationView(discord.ui.View):
             embed=self.embeds[self.current_page],
             view=self
         )
+
+
+class ForgetMeConfirmView(discord.ui.View):
+    """Confirmation view for the /forgetme privacy opt-out."""
+
+    def __init__(self, bot: commands.Bot, db: DatabaseManager, user_id: int):
+        super().__init__(timeout=60)
+        self.bot = bot
+        self.db = db
+        self.user_id = user_id
+
+    @discord.ui.button(label="Yes, delete my data", style=discord.ButtonStyle.danger, emoji="🗑️")
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Opt the user out, then purge their data everywhere."""
+        await interaction.response.defer()
+
+        # Opt out FIRST so no event re-creates rows while the purge runs
+        self.bot.opted_out_users.add(self.user_id)
+        if not await asyncio.to_thread(self.db.add_opted_out_user, self.user_id):
+            self.bot.opted_out_users.discard(self.user_id)
+            await interaction.edit_original_response(
+                embed=create_error_embed(
+                    "Failed to save your opt-out. No data was deleted — please try again later."
+                ),
+                view=None
+            )
+            self.stop()
+            return
+
+        # Drop any buffered activity entries before they reach the database
+        tracking_cog = self.bot.get_cog('TrackingCog')
+        if tracking_cog:
+            tracking_cog.purge_user_from_buffers(self.user_id)
+
+        counts = await asyncio.to_thread(self.db.purge_user_data, self.user_id)
+        if counts is None:
+            await interaction.edit_original_response(
+                embed=create_error_embed(
+                    "You are now opted out of future tracking, but deleting your stored data "
+                    "failed. Please run `/forgetme` again to retry the deletion."
+                ),
+                view=None
+            )
+            self.stop()
+            return
+
+        activity_total = counts['message_activity'] + counts['message_activity_hourly']
+        await interaction.edit_original_response(
+            embed=create_success_embed(
+                "Your data has been deleted and tracking is now disabled for your account "
+                "in all servers using this bot.\n\n"
+                f"**Removed:** {counts['members']} member record(s), "
+                f"{counts['role_changes']} role change(s), "
+                f"{activity_total} activity record(s).\n\n"
+                "Use `/optin` if you ever want to re-enable tracking."
+            ),
+            view=None
+        )
+        logger.info(f"User {self.user_id} opted out of tracking and purged their data")
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="❌")
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Cancel the opt-out."""
+        embed = create_embed("Cancelled", discord.Color.blue())
+        embed.description = "No data was deleted and tracking remains unchanged."
+        await interaction.response.edit_message(embed=embed, view=None)
+        self.stop()
 
 
 class CommandsCog(commands.Cog):
@@ -841,6 +910,82 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"User {interaction.user} used /mystats in guild {interaction.guild.name}")
 
+    @app_commands.command(name="forgetme", description="🗑️ Delete your tracked data and opt out of tracking")
+    @app_commands.checks.cooldown(1, 60.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
+    async def forgetme(self, interaction: discord.Interaction):
+        """
+        Privacy opt-out: deletes the caller's data in all guilds and stops tracking.
+
+        Deliberately skips the user-role permission gate — a server cannot block
+        someone from a privacy action. Idempotent: running it while already
+        opted out simply retries the purge (deleting nothing if nothing exists).
+
+        Args:
+            interaction: Discord interaction
+        """
+        embed = create_embed("⚠️ Confirm Data Deletion", discord.Color.orange())
+        embed.description = (
+            "This will **delete your tracked data in all servers** using this bot "
+            "(last seen, join info, nicknames, role history, and message activity counts) "
+            "and **stop all future tracking** of your account.\n\n"
+            "**This cannot be undone.** You can re-enable tracking later with `/optin`, "
+            "but deleted data is not restored."
+        )
+        view = ForgetMeConfirmView(self.bot, self.db, interaction.user.id)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @app_commands.command(name="optin", description="✅ Re-enable activity tracking for your account")
+    @app_commands.checks.cooldown(1, 60.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
+    async def optin(self, interaction: discord.Interaction):
+        """
+        Re-enable tracking after a /forgetme opt-out. Tracking starts fresh —
+        previously deleted data is not restored.
+
+        Args:
+            interaction: Discord interaction
+        """
+        user_id = interaction.user.id
+
+        if user_id not in self.bot.opted_out_users:
+            await interaction.response.send_message(
+                embed=create_error_embed("You are not opted out — your activity is already being tracked."),
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        if not await asyncio.to_thread(self.db.remove_opted_out_user, user_id):
+            await interaction.followup.send(
+                embed=create_error_embed("Failed to update your tracking preference. Please try again later."),
+                ephemeral=True
+            )
+            return
+
+        self.bot.opted_out_users.discard(user_id)
+
+        # Re-create the member record in every mutual guild right away.
+        # Message tracking only counts members that already exist in the
+        # database, so without this the user would stay untracked until
+        # their next presence or profile update.
+        tracking_cog = self.bot.get_cog('TrackingCog')
+        if tracking_cog:
+            for guild in self.bot.guilds:
+                member = guild.get_member(user_id)
+                if member:
+                    await asyncio.to_thread(tracking_cog._ensure_member_exists, member)
+
+        await interaction.followup.send(
+            embed=create_success_embed(
+                "Tracking re-enabled. Your stats start fresh from now — "
+                "previously deleted data is not restored."
+            ),
+            ephemeral=True
+        )
+        logger.info(f"User {interaction.user} ({user_id}) opted back in to tracking")
+
     @app_commands.command(name="about", description="ℹ️ About this bot")
     async def about(self, interaction: discord.Interaction):
         import psutil
@@ -934,6 +1079,7 @@ class CommandsCog(commands.Cog):
             name="🔐 Privacy",
             value="This bot does **not** store or read message content. "
                 "Only metadata required for activity tracking is recorded.\n"
+                "Use `/forgetme` to delete your data and opt out of tracking.\n"
                 "[Privacy Policy](https://lastseen.bot.nu/privacy-policy/)",
             inline=False
         )

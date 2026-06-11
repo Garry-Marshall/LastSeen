@@ -52,6 +52,10 @@ def create_bot(config) -> commands.Bot:
     # Attach configuration and database to bot
     bot.config = config
     bot.db = DatabaseManager(config.db_file)
+    # Global privacy opt-out list (/forgetme). Initialized here so it exists
+    # whenever bot.db does; kept in memory because it is checked on hot event
+    # paths (presence updates, messages).
+    bot.opted_out_users = bot.db.get_opted_out_user_ids()
     bot.start_time = None  # Will be set in on_ready
 
     @bot.event

@@ -121,6 +121,8 @@ class AdminCog(commands.Cog):
                 "`/chat-history <user>` - Show message posting stats for the last year\n"
                 "`/mystats` - View your own activity statistics (only visible to you)\n"
                 "`/user-stats` - Interactive statistics dashboard with analytics\n"
+                "`/forgetme` - Delete your data and opt out of tracking\n"
+                "`/optin` - Re-enable tracking after opting out\n"
             ),
             inline=False
         )

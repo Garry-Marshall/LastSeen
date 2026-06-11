@@ -359,6 +359,15 @@ class DatabaseManager:
                 ON message_activity_hourly(guild_id, user_id, timestamp DESC)
             """)
 
+            # Privacy opt-out list. Global (per-user, not per-guild) and has no
+            # FK to guilds so it survives guild removal.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS opted_out_users (
+                    user_id INTEGER PRIMARY KEY,
+                    opted_out_at INTEGER NOT NULL
+                )
+            """)
+
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
 
@@ -1152,6 +1161,24 @@ class DatabaseManager:
                 return cursor.fetchone() is not None
         except Exception as e:
             logger.error(f"Failed to check if member {user_id} exists in guild {guild_id}: {e}")
+            return False
+
+    def member_is_missing(self, guild_id: int, user_id: int) -> bool:
+        """Check that a member is confirmed absent from the database.
+
+        Unlike member_exists(), a query failure returns False here, so True
+        means "the row is definitely gone" — callers can drop work for the
+        member without losing data to transient DB errors.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT 1 FROM members WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id))
+                return cursor.fetchone() is None
+        except Exception as e:
+            logger.error(f"Failed to check if member {user_id} is missing in guild {guild_id}: {e}")
             return False
 
     def get_database_health(self) -> Dict[str, Any]:
@@ -2367,6 +2394,81 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to run global cleanup: {e}", exc_info=True)
             return {'daily_deleted': 0, 'hourly_deleted': 0, 'guilds_processed': 0}
+
+    # ==================== Privacy / Opt-Out Operations ====================
+
+    def add_opted_out_user(self, user_id: int) -> bool:
+        """Add a user to the global tracking opt-out list."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR IGNORE INTO opted_out_users (user_id, opted_out_at)
+                    VALUES (?, ?)
+                """, (user_id, int(datetime.now(timezone.utc).timestamp())))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to add opted-out user {user_id}: {e}")
+            return False
+
+    def remove_opted_out_user(self, user_id: int) -> bool:
+        """Remove a user from the global tracking opt-out list."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM opted_out_users WHERE user_id = ?", (user_id,))
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to remove opted-out user {user_id}: {e}")
+            return False
+
+    def get_opted_out_user_ids(self) -> set:
+        """Get the set of all opted-out user IDs."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id FROM opted_out_users")
+                return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Failed to get opted-out users: {e}")
+            return set()
+
+    def purge_user_data(self, user_id: int) -> Optional[Dict[str, int]]:
+        """
+        Delete all tracked data for a user across all guilds.
+
+        Deleting the member rows cascades to role_changes, message_activity,
+        and message_activity_hourly via their foreign keys.
+
+        Args:
+            user_id: Discord user ID
+
+        Returns:
+            Dict with per-table deletion counts, or None on failure.
+        """
+        counts = {'members': 0, 'role_changes': 0, 'message_activity': 0, 'message_activity_hourly': 0}
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Count records before deletion for reporting
+                for table in counts:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE user_id = ?", (user_id,))
+                    counts[table] = cursor.fetchone()[0]
+
+                # Deleting the member rows cascades to the dependent tables
+                cursor.execute("DELETE FROM members WHERE user_id = ?", (user_id,))
+
+                logger.info(
+                    f"Purged user {user_id}: {counts['members']} member records, "
+                    f"{counts['role_changes']} role changes, "
+                    f"{counts['message_activity']} daily and "
+                    f"{counts['message_activity_hourly']} hourly activity records"
+                )
+                return counts
+        except Exception as e:
+            logger.error(f"Failed to purge data for user {user_id}: {e}")
+            return None
 
     # ==================== Database Backup Operations ====================
 

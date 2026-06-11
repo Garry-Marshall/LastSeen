@@ -48,6 +48,10 @@ async def update_all_members(
             if member.bot:
                 continue
 
+            # Respect the global privacy opt-out
+            if member.id in interaction.client.opted_out_users:
+                continue
+
             roles = get_member_roles(member)
             join_date = int(member.joined_at.timestamp()) if member.joined_at else int(datetime.now(timezone.utc).timestamp())
             nickname = member.display_name if member.display_name != str(member) else None

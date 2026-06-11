@@ -48,7 +48,7 @@ class TrackingCog(commands.Cog):
 
         # Flush when buffer reaches this size to cap memory usage between flush intervals
         self.MAX_BUFFER_SIZE = 10000
-        
+
         # Start background tasks
         self.flush_activity_buffer.start()
         self.cleanup_old_data.start()
@@ -141,6 +141,9 @@ class TrackingCog(commands.Cog):
                         if member.bot:
                             continue  # Skip bots
 
+                        if member.id in self.bot.opted_out_users:
+                            continue  # Respect the global privacy opt-out
+
                         try:
                             roles = get_member_roles(member)
                             join_date = int(member.joined_at.timestamp()) if member.joined_at else 0
@@ -185,6 +188,16 @@ class TrackingCog(commands.Cog):
 
         except Exception as e:
             logger.error(f"Failed to process members for guild {guild.name}: {e}", exc_info=True)
+
+    def purge_user_from_buffers(self, user_id: int) -> None:
+        """Discard buffered activity entries for a user (used by /forgetme).
+
+        Buffer keys are (guild_id, user_id, ...) tuples, so user_id is index 1.
+        """
+        for buffer in (self.daily_activity_buffer, self.hourly_activity_buffer,
+                       self.failed_daily_writes, self.failed_hourly_writes):
+            for key in [k for k in buffer if k[1] == user_id]:
+                del buffer[key]
 
     async def _vacuum_database_background(self):
         """
@@ -303,6 +316,10 @@ class TrackingCog(commands.Cog):
         Returns:
             bool: True if member was added, False if already existed
         """
+        # Respect the global privacy opt-out
+        if member.id in self.bot.opted_out_users:
+            return False
+
         # Check if member should be tracked based on role filter
         if not self._should_track_member(member):
             return False
@@ -475,6 +492,10 @@ class TrackingCog(commands.Cog):
             member: The member who joined
         """
         if member.bot:
+            return
+
+        # Respect the global privacy opt-out
+        if member.id in self.bot.opted_out_users:
             return
 
         logger.info(f"Member joined: {member} in guild {member.guild.name}")
@@ -723,7 +744,11 @@ class TrackingCog(commands.Cog):
         # Skip if message is a DM (no guild)
         if message.guild is None:
             return
-        
+
+        # Respect the global privacy opt-out (avoids a DB lookup per message)
+        if message.author.id in self.bot.opted_out_users:
+            return
+
         guild_id = message.guild.id
         user_id = message.author.id
         
@@ -773,6 +798,10 @@ class TrackingCog(commands.Cog):
         # Presence updates fire very frequently (activity/Spotify changes, not just
         # online/offline). Only touch the database when the actual status changed.
         if before.status == after.status:
+            return
+
+        # Respect the global privacy opt-out (avoids a DB write per status change)
+        if after.id in self.bot.opted_out_users:
             return
 
         guild_id = after.guild.id
@@ -831,15 +860,23 @@ class TrackingCog(commands.Cog):
             def flush_daily():
                 failed = {}
                 success = 0
+                dropped = 0
                 for (gid, uid, date), count in daily_to_flush.items():
                     if self.db.increment_message_activity(gid, uid, date, count):
                         success += 1
+                    elif self.db.member_is_missing(gid, uid):
+                        # Member row is confirmed gone (left + purged, or
+                        # /forgetme) — drop the entry instead of retrying it
+                        # forever. Transient DB errors fall through to retry.
+                        dropped += 1
                     else:
                         failed[(gid, uid, date)] = count
-                return success, failed
+                return success, failed, dropped
 
-            daily_success, daily_failed = await asyncio.to_thread(flush_daily)
+            daily_success, daily_failed, daily_dropped = await asyncio.to_thread(flush_daily)
             self.failed_daily_writes.update(daily_failed)
+            if daily_dropped:
+                logger.info(f"Dropped {daily_dropped} daily activity entries for members no longer in the database")
             if daily_failed:
                 logger.warning(f"Failed to flush {len(daily_failed)}/{daily_count} daily entries, will retry")
             logger.debug(f"Flushed {daily_success}/{daily_count} daily activity entries")
@@ -848,15 +885,23 @@ class TrackingCog(commands.Cog):
             def flush_hourly():
                 failed = {}
                 success = 0
+                dropped = 0
                 for (gid, uid, timestamp, hour), count in hourly_to_flush.items():
                     if self.db.increment_message_activity_hourly(gid, uid, timestamp, hour, count):
                         success += 1
+                    elif self.db.member_is_missing(gid, uid):
+                        # Member row is confirmed gone (left + purged, or
+                        # /forgetme) — drop the entry instead of retrying it
+                        # forever. Transient DB errors fall through to retry.
+                        dropped += 1
                     else:
                         failed[(gid, uid, timestamp, hour)] = count
-                return success, failed
+                return success, failed, dropped
 
-            hourly_success, hourly_failed = await asyncio.to_thread(flush_hourly)
+            hourly_success, hourly_failed, hourly_dropped = await asyncio.to_thread(flush_hourly)
             self.failed_hourly_writes.update(hourly_failed)
+            if hourly_dropped:
+                logger.info(f"Dropped {hourly_dropped} hourly activity entries for members no longer in the database")
             if hourly_failed:
                 logger.warning(f"Failed to flush {len(hourly_failed)}/{hourly_count} hourly entries, will retry")
             logger.debug(f"Flushed {hourly_success}/{hourly_count} hourly activity entries")
