@@ -290,7 +290,7 @@ class CommandsCog(commands.Cog):
 
         if not member_data:
             await interaction.followup.send(
-                embed=create_error_embed("User not found in the database."),
+                embed=create_error_embed("This user isn't in the database yet. A last seen time can only be reported after the bot has observed the member going offline while it's online in this server."),
                 ephemeral=not channels_restricted
             )
             return
@@ -376,7 +376,7 @@ class CommandsCog(commands.Cog):
             elif member_data['last_seen'] and member_data['last_seen'] != 0:
                 embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R', guild_id, self.db)}\n"
             else:
-                embed.description += f"⏱️ Last Seen: Not available\n"
+                embed.description += f"⏱️ Last Seen: Not available yet (no offline event recorded)\n"
         else:
             embed.description += f"⚫ Status: Left server\n"
         
@@ -430,7 +430,7 @@ class CommandsCog(commands.Cog):
 
         if not member_data:
             await interaction.followup.send(
-                embed=create_error_embed("User not found in the database."),
+                embed=create_error_embed("This user isn't in the database yet. A last seen time can only be reported after the bot has observed the member going offline while it's online in this server."),
                 ephemeral=not channels_restricted
             )
             return
@@ -468,7 +468,7 @@ class CommandsCog(commands.Cog):
                     inline=False
                 )
             else:
-                embed.add_field(name="Last Seen", value="Not available", inline=False)
+                embed.add_field(name="Last Seen", value="Not available yet — a last seen time is recorded only after the bot observes this member going offline.", inline=False)
 
         # Add status if inactive
         if member_data['is_active'] == 0:
@@ -881,7 +881,7 @@ class CommandsCog(commands.Cog):
         elif member_data['last_seen'] and member_data['last_seen'] != 0:
             embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R', guild_id, self.db)}\n"
         else:
-            embed.description += f"⏱️ Last Seen: Not available\n"
+            embed.description += f"⏱️ Last Seen: Not available yet (no offline event recorded)\n"
 
         embed.description += "\n"
 

@@ -848,7 +848,7 @@ class TrackingCog(commands.Cog):
             if daily_count == 0 and hourly_count == 0:
                 return  # Nothing to flush
             
-            logger.info(f"Flushing activity buffers: {daily_count} daily entries, {hourly_count} hourly entries")
+            logger.debug(f"Flushing activity buffers: {daily_count} daily entries, {hourly_count} hourly entries")
             
             # Copy and clear buffers (atomic swap to avoid missing messages during flush)
             daily_to_flush = dict(self.daily_activity_buffer)
