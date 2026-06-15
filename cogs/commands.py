@@ -1102,6 +1102,7 @@ class CommandsCog(commands.Cog):
         inactive="Days since last seen - use >30 (more than), <7 (less than), or =14 (exactly)",
         activity="Messages in last 30 days - examples: >100, <10, =50",
         joined="Join date filter - format: >2024-01-01, <2023-06-01, =2025-01-15",
+        departed="Left-date filter (lists members who left) - format: >2024-01-01, <2023-06-01, =2025-01-15",
         username="Search username (partial match, case-insensitive)",
         export="Export results as file: csv, txt, or none"
     )
@@ -1113,6 +1114,7 @@ class CommandsCog(commands.Cog):
         inactive: str = None,
         activity: str = None,
         joined: str = None,
+        departed: str = None,
         username: str = None,
         export: str = "none"
     ):
@@ -1165,6 +1167,7 @@ class CommandsCog(commands.Cog):
                 inactive=inactive,
                 activity=activity,
                 joined=joined,
+                departed=departed,
                 username=username,
                 guild=guild
             )
@@ -1172,8 +1175,9 @@ class CommandsCog(commands.Cog):
             await interaction.followup.send(f"❌ Invalid filter syntax: {e}", ephemeral=True)
             return
 
-        # Get all members from database
-        db_members = self.db.get_guild_members(guild_id, include_left=False)
+        # Get all members from database. A departed filter targets members who
+        # have left, so those rows must be included in the fetch.
+        db_members = self.db.get_guild_members(guild_id, include_left='departed' in filters)
 
         # Get Discord members from cache (pre-chunked in on_ready)
         discord_members = {m.id: m for m in guild.members}
@@ -1199,8 +1203,9 @@ class CommandsCog(commands.Cog):
                 if self._matches_all_filters(member_data, discord_member, filters):
                     filtered.append(self._enrich_member_data(member_data, discord_member))
 
-        # Log cache misses
-        if cache_misses > 0:
+        # Log cache misses. A departed search always misses (left members are
+        # never in the Discord cache), so the warning is only noise there.
+        if cache_misses > 0 and 'departed' not in filters:
             logger.warning(f"Search had {cache_misses} cache misses in guild {guild_id}")
 
         # Check if no results
@@ -1381,7 +1386,7 @@ class CommandsCog(commands.Cog):
         embed.set_footer(text="Click buttons below to view detailed reports")
         return embed
 
-    def _parse_search_filters(self, roles, status, inactive, activity, joined, username, guild) -> dict:
+    def _parse_search_filters(self, roles, status, inactive, activity, joined, departed, username, guild) -> dict:
         """Parse and validate all filter parameters."""
         filters = {}
 
@@ -1452,6 +1457,10 @@ class CommandsCog(commands.Cog):
         # Parse joined date
         if joined:
             filters['joined'] = self._parse_date_filter(joined)
+
+        # Parse departed (left) date
+        if departed:
+            filters['departed'] = self._parse_date_filter(departed)
 
         # Parse username
         if username:
@@ -1549,6 +1558,17 @@ class CommandsCog(commands.Cog):
             else:
                 # No join date data - exclude from filter
                 logger.debug(f"Member {member_data.get('user_id')} has no join_date, excluding from joined filter")
+                return False
+
+        # Departed filter (members who have left, matched by the date they left).
+        # left_date is only populated for departures recorded since that column
+        # was added, so fall back to last_seen - which on_member_remove also sets
+        # to the departure time - to match older departures too.
+        if filters.get('departed'):
+            if member_data.get('is_active', 1) != 0:
+                return False  # still a member, not a departure
+            departure_ts = member_data.get('left_date') or member_data.get('last_seen')
+            if not departure_ts or not self._compare(departure_ts, filters['departed']):
                 return False
 
         return True
@@ -1795,6 +1815,12 @@ class CommandsCog(commands.Cog):
                 lines.append(f"  • Joined: {filters['joined']['operator']}{date_str}")
             except (ValueError, OSError, OverflowError):
                 lines.append(f"  • Joined: {filters['joined']['operator']}[Invalid Date]")
+        if filters.get('departed'):
+            try:
+                date_str = datetime.fromtimestamp(filters['departed']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
+                lines.append(f"  • Departed: {filters['departed']['operator']}{date_str}")
+            except (ValueError, OSError, OverflowError):
+                lines.append(f"  • Departed: {filters['departed']['operator']}[Invalid Date]")
         if filters.get('username'):
             lines.append(f"  • Username contains: '{filters['username']}'")
         return '\n'.join(lines) if lines else None
@@ -1906,6 +1932,12 @@ class SearchResultsView(discord.ui.View):
                 lines.append(f"• **Joined:** {self.filters['joined']['operator']}{date_str}")
             except (ValueError, OSError, OverflowError):
                 lines.append(f"• **Joined:** {self.filters['joined']['operator']}[Invalid Date]")
+        if self.filters.get('departed'):
+            try:
+                date_str = datetime.fromtimestamp(self.filters['departed']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
+                lines.append(f"• **Departed:** {self.filters['departed']['operator']}{date_str}")
+            except (ValueError, OSError, OverflowError):
+                lines.append(f"• **Departed:** {self.filters['departed']['operator']}[Invalid Date]")
         if self.filters.get('username'):
             lines.append(f"• **Username:** contains '{self.filters['username']}'")
         return '\n'.join(lines) if lines else "No filters applied"
@@ -1992,6 +2024,9 @@ class SearchResultsView(discord.ui.View):
             if self.filters.get('joined'):
                 date_str = datetime.fromtimestamp(self.filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
                 filter_lines.append(f"  • Joined: {self.filters['joined']['operator']}{date_str}")
+            if self.filters.get('departed'):
+                date_str = datetime.fromtimestamp(self.filters['departed']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
+                filter_lines.append(f"  • Departed: {self.filters['departed']['operator']}{date_str}")
             if self.filters.get('username'):
                 filter_lines.append(f"  • Username contains: '{self.filters['username']}'")
             

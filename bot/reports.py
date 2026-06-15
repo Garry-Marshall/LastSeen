@@ -4,9 +4,9 @@ import discord
 import logging
 import asyncio
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict
+from typing import Dict
 from database import DatabaseManager
-from bot.utils import create_embed, format_timestamp
+from bot.utils import create_embed
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +28,16 @@ def purge_guild_state(guild_id: int) -> None:
     _last_report_send.pop(guild_id, None)
 
 
-async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: int) -> discord.Embed:
+async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: int, report_types: list) -> discord.Embed:
     """
     Generate activity summary report.
-    
+
     Args:
         guild: Discord guild
         db: Database manager
         days: Period to report (7 for weekly, 30 for monthly)
-        
+        report_types: Enabled report types; controls the Member Changes section
+
     Returns:
         Discord embed with activity summary
     """
@@ -81,7 +82,23 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         embed.description += f"• Peak Day: **{peak_day[0]}** with **{peak_day[1]:,}** messages\n"
     
     embed.description += "\n"
-    
+
+    # Member changes - only show the counts whose report type is enabled
+    show_joined = 'members' in report_types
+    show_left = 'departures' in report_types
+    if show_joined or show_left:
+        embed.description += "**👥 Member Changes**\n"
+        joined = left = None
+        if show_joined:
+            joined = len(db.get_new_members_period(guild_id, days))
+            embed.description += f"• Joined: **{joined:,}**\n"
+        if show_left:
+            left = len(db.get_departed_members_period(guild_id, days))
+            embed.description += f"• Left: **{left:,}**\n"
+        if show_joined and show_left:
+            embed.description += f"• Net: **{joined - left:+,}**\n"
+        embed.description += "\n"
+
     # Top contributors
     if top_users:
         embed.description += "**🏆 Top Contributors**\n"
@@ -94,115 +111,6 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         embed.description += "**🏆 Top Contributors**\nNo activity recorded\n"
     
     return embed
-
-
-async def generate_members_report(guild: discord.Guild, db: DatabaseManager, days: int) -> Optional[discord.Embed]:
-    """
-    Generate new members report.
-    
-    Args:
-        guild: Discord guild
-        db: Database manager
-        days: Period to report (7 for weekly, 30 for monthly)
-        
-    Returns:
-        Discord embed with new members, or None if no new members
-    """
-    guild_id = int(guild.id)
-    period_name = "Weekly" if days == 7 else "Monthly"
-    
-    # Get new members
-    new_members = db.get_new_members_period(guild_id, days)
-    
-    if not new_members:
-        return None
-    
-    # Create embed
-    embed = create_embed(f"👋 {period_name} New Members - {guild.name}", discord.Color.green())
-    embed.timestamp = datetime.now(timezone.utc)
-    
-    embed.description = f"**{len(new_members)} new member(s) joined in the last {days} days**\n\n"
-    
-    # List new members (limit to 25 to avoid embed limits)
-    for member in new_members[:25]:
-        username = member['username'] or "Unknown"
-        nickname = member['nickname']
-        display = f"{nickname} ({username})" if nickname else username
-        join_date_str = format_timestamp(member['join_date'], 'R', guild_id, db)
-        position = member.get('join_position', '?')
-        
-        embed.description += f"• **{display}** - {join_date_str} (#{position})\n"
-    
-    if len(new_members) > 25:
-        embed.description += f"\n*...and {len(new_members) - 25} more*"
-    
-    return embed
-
-
-async def generate_departed_report(guild: discord.Guild, db, days: int) -> Optional[List[discord.Embed]]:
-    """
-    Generate departed members report with pagination support.
-    
-    Args:
-        guild: Discord guild
-        db: Database manager
-        days: Period to report (7 for weekly, 30 for monthly)
-        
-    Returns:
-        List of Discord embeds with departed members (paginated if >25), or None if no departures
-    """
-    guild_id = int(guild.id)
-    period_name = "Weekly" if days == 7 else "Monthly"
-    
-    # Get departed members
-    departed = db.get_departed_members_period(guild_id, days)
-    
-    if not departed:
-        return None
-    
-    # Create embed(s) - paginate if more than 25 members
-    embeds = []
-    page_size = 25
-    total_pages = (len(departed) + page_size - 1) // page_size  # Ceiling division
-    
-    for page in range(total_pages):
-        start_idx = page * page_size
-        end_idx = min(start_idx + page_size, len(departed))
-        page_members = departed[start_idx:end_idx]
-        
-        # Create embed for this page
-        page_title = f"👋 {period_name} Departures - {guild.name}"
-        if total_pages > 1:
-            page_title += f" (Page {page + 1}/{total_pages})"
-        
-        embed = create_embed(page_title, discord.Color.orange())
-        embed.timestamp = datetime.now(timezone.utc)
-        
-        if page == 0:
-            embed.description = f"**{len(departed)} member(s) left in the last {days} days**\n\n"
-        else:
-            embed.description = ""
-        
-        # List departed members for this page
-        for member in page_members:
-            username = member['username'] or "Unknown"
-            nickname = member['nickname']
-            display = f"{nickname} ({username})" if nickname else username
-
-            if member['left_date']:
-                left_date_str = format_timestamp(member['left_date'], 'R', guild_id, db)
-            else:
-                left_date_str = "Unknown"
-
-            if member['last_seen'] and member['last_seen'] > 0:
-                last_seen_str = format_timestamp(member['last_seen'], 'R', guild_id, db)
-                embed.description += f"• **{display}** - Left {left_date_str} (Last seen: {last_seen_str})\n"
-            else:
-                embed.description += f"• **{display}** - Left {left_date_str}\n"
-
-        embeds.append(embed)
-
-    return embeds
 
 
 async def send_scheduled_report(guild: discord.Guild, channel_id: int, db: DatabaseManager, 
@@ -237,33 +145,17 @@ async def send_scheduled_report(guild: discord.Guild, channel_id: int, db: Datab
                     logger.error(f"Report channel {channel_id} not found or not a text channel in guild {guild.name}")
                     return False
 
-                embeds = []
-
-                # Generate requested reports
-                if 'activity' in report_types:
-                    activity_embed = await generate_activity_report(guild, db, days)
-                    embeds.append(activity_embed)
-
-                if 'members' in report_types:
-                    members_embed = await generate_members_report(guild, db, days)
-                    if members_embed:
-                        embeds.append(members_embed)
-
-                if 'departures' in report_types:
-                    departures_embeds = await generate_departed_report(guild, db, days)
-                    if departures_embeds:
-                        # departures_embeds is a list, add all of them
-                        embeds.extend(departures_embeds)
-
-                # Send embeds (Discord allows up to 10 embeds per message)
-                if embeds:
-                    await channel.send(embeds=embeds[:10])
-                    _last_report_send[guild.id] = datetime.now(timezone.utc).timestamp()
-                    logger.info(f"Sent scheduled report to {channel.name} in guild {guild.name}")
-                    return True
-                else:
+                # The activity report is the only embed; member join/leave counts
+                # are folded into it, so there is no report content without it.
+                if 'activity' not in report_types:
                     logger.info(f"No report content to send for guild {guild.name}")
                     return True
+
+                embed = await generate_activity_report(guild, db, days, report_types)
+                await channel.send(embed=embed)
+                _last_report_send[guild.id] = datetime.now(timezone.utc).timestamp()
+                logger.info(f"Sent scheduled report to {channel.name} in guild {guild.name}")
+                return True
 
             except discord.Forbidden:
                 logger.error(f"Missing permissions to send report in channel {channel_id} in guild {guild.name}")
