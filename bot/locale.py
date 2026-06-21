@@ -97,7 +97,9 @@ def t(key: str, lang: str = DEFAULT_LANGUAGE, **kwargs) -> str:
 
     Falls back to the default language if the key is missing for ``lang``, then
     to the raw key if it is missing everywhere. Remaining ``kwargs`` fill named
-    placeholders via :meth:`str.format`.
+    placeholders via :meth:`str.format`. If a translated template fails to format
+    (e.g. a placeholder was dropped or renamed), falls back to the English
+    template so the user never sees raw ``{placeholder}`` braces.
     """
     template = _catalogs.get(lang, {}).get(key)
     if template is None:
@@ -110,4 +112,13 @@ def t(key: str, lang: str = DEFAULT_LANGUAGE, **kwargs) -> str:
         return template.format(**kwargs)
     except (KeyError, IndexError, ValueError) as e:
         logger.error(f"Failed to format translation key {key!r} ({lang}): {e}")
+        # The chosen template is broken (e.g. a translator dropped or renamed a
+        # placeholder). Fall back to the English template so the user sees
+        # readable text rather than the raw {placeholder} braces.
+        en_template = _catalogs.get(DEFAULT_LANGUAGE, {}).get(key)
+        if en_template is not None and en_template != template:
+            try:
+                return en_template.format(**kwargs)
+            except (KeyError, IndexError, ValueError):
+                return en_template
         return template
