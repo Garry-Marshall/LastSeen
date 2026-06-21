@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict
 from database import DatabaseManager
 from bot.utils import create_embed
+from bot.locale import t, guild_language, weekday_name
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,8 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         Discord embed with activity summary
     """
     guild_id = int(guild.id)
-    period_name = "Weekly" if days == 7 else "Monthly"
-    
+    lang = guild_language(db.get_guild_config(guild_id))
+
     # Get guild-wide message activity stats
     activity_stats = db.get_guild_message_activity_stats(guild_id, days)
     
@@ -59,7 +60,8 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         peak_day = (None, 0)
     
     # Create embed
-    embed = create_embed(f"📊 {period_name} Activity Report - {guild.name}", discord.Color.blue())
+    title_key = 'report.title.weekly' if days == 7 else 'report.title.monthly'
+    embed = create_embed(t(title_key, lang, guild=guild.name), discord.Color.blue())
     embed.timestamp = datetime.now(timezone.utc)
     
     # Overall statistics - use appropriate key based on period
@@ -73,43 +75,43 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         total_messages = activity_stats.get('total_365d', 0)
     avg_per_day = activity_stats.get('avg_per_day', 0)
     
-    embed.description = f"**📈 Message Activity ({days} days)**\n"
-    embed.description += f"• Total Messages: **{total_messages:,}**\n"
-    embed.description += f"• Daily Average: **{avg_per_day:,}**\n"
-    
+    embed.description = t('report.activity_header', lang, days=days)
+    embed.description += t('report.total_messages', lang, total=total_messages)
+    embed.description += t('report.daily_average', lang, avg=avg_per_day)
+
     if peak_day[0]:
         # peak_day[0] is a day name (e.g., 'Monday'), not a timestamp
-        embed.description += f"• Peak Day: **{peak_day[0]}** with **{peak_day[1]:,}** messages\n"
-    
+        embed.description += t('report.peak_day', lang, day=weekday_name(peak_day[0], lang), count=peak_day[1])
+
     embed.description += "\n"
 
     # Member changes - only show the counts whose report type is enabled
     show_joined = 'members' in report_types
     show_left = 'departures' in report_types
     if show_joined or show_left:
-        embed.description += "**👥 Member Changes**\n"
+        embed.description += t('report.member_changes_header', lang)
         joined = left = None
         if show_joined:
             joined = len(db.get_new_members_period(guild_id, days))
-            embed.description += f"• Joined: **{joined:,}**\n"
+            embed.description += t('report.joined', lang, count=joined)
         if show_left:
             left = len(db.get_departed_members_period(guild_id, days))
-            embed.description += f"• Left: **{left:,}**\n"
+            embed.description += t('report.left', lang, count=left)
         if show_joined and show_left:
-            embed.description += f"• Net: **{joined - left:+,}**\n"
+            embed.description += t('report.net', lang, count=joined - left)
         embed.description += "\n"
 
     # Top contributors
     if top_users:
-        embed.description += "**🏆 Top Contributors**\n"
+        embed.description += t('report.top_contributors_header', lang)
         for i, user in enumerate(top_users, 1):
-            username = user['username'] or "Unknown"
+            username = user['username'] or t('common.unknown', lang)
             nickname = user['nickname']
             display = f"{nickname} ({username})" if nickname else username
-            embed.description += f"{i}. {display}: **{user['total_messages']:,}** messages\n"
+            embed.description += t('report.contributor_line', lang, rank=i, display=display, count=user['total_messages'])
     else:
-        embed.description += "**🏆 Top Contributors**\nNo activity recorded\n"
-    
+        embed.description += t('report.top_contributors_header', lang) + t('report.no_activity', lang)
+
     return embed
 
 

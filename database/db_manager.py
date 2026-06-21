@@ -298,6 +298,10 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE guilds ADD COLUMN report_time_hour INTEGER DEFAULT 9")
                 logger.info("Added report_time_hour column to guilds table")
 
+            if 'language' not in columns:
+                cursor.execute("ALTER TABLE guilds ADD COLUMN language TEXT DEFAULT 'en'")
+                logger.info("Added language column to guilds table")
+
             # Refresh column list after migrations to ensure all columns exist
             cursor.execute("PRAGMA table_info(guilds)")
             columns = [row[1] for row in cursor.fetchall()]
@@ -502,7 +506,30 @@ class DatabaseManager:
             logger.error(f"Failed to set timezone for guild {guild_id}: {e}")
             return False
 
-    def set_report_config(self, guild_id: int, channel_id: int, frequency: str, report_types: list, 
+    def set_guild_language(self, guild_id: int, language: str, guild_name: str = 'Unknown') -> bool:
+        """Set the language for a guild."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # First ensure guild exists (in case it wasn't added via on_guild_join)
+                cursor.execute("""
+                    INSERT OR IGNORE INTO guilds (guild_id, guild_name, inactive_days, added_at)
+                    VALUES (?, ?, 10, ?)
+                """, (guild_id, guild_name, int(datetime.now(timezone.utc).timestamp())))
+
+                # Now update the language and guild name if needed
+                cursor.execute("""
+                    UPDATE guilds
+                    SET language = ?,
+                        guild_name = CASE WHEN guild_name = 'Unknown' THEN ? ELSE guild_name END
+                    WHERE guild_id = ?
+                """, (language, guild_name, guild_id))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to set language for guild {guild_id}: {e}")
+            return False
+
+    def set_report_config(self, guild_id: int, channel_id: int, frequency: str, report_types: list,
                          day_weekly: int = 0, day_monthly: int = 1, time_hour: int = 9, guild_name: str = 'Unknown') -> bool:
         """Set the scheduled report configuration for a guild.
         

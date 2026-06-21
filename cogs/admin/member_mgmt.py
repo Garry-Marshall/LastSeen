@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from database import DatabaseManager
 from bot.utils import get_member_roles, create_success_embed, create_error_embed
+from bot.locale import t, guild_language
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ async def update_all_members(
         db: Database manager
     """
     guild = interaction.guild
+    lang = guild_language(db.get_guild_config(guild.id))
     added_count = 0
     updated_count = 0
     total_members = len([m for m in guild.members if not m.bot])
@@ -37,7 +39,7 @@ async def update_all_members(
         # Send progress message for large servers
         if total_members > 100:
             await interaction.followup.send(
-                f"⏳ Scanning {total_members:,} members... This may take a moment.",
+                t("admin.update_members.scanning", lang, count=total_members),
                 ephemeral=True
             )
         
@@ -75,9 +77,8 @@ async def update_all_members(
                 added_count += 1
 
         embed = create_success_embed(
-            f"Successfully updated member database!\n\n"
-            f"**Added:** {added_count} new members\n"
-            f"**Updated:** {updated_count} existing members"
+            t("admin.update_members.success", lang, added=added_count, updated=updated_count),
+            lang
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"Updated members in guild {guild.name}: {added_count} added, {updated_count} updated")
@@ -85,6 +86,6 @@ async def update_all_members(
     except Exception as e:
         logger.error(f"Failed to update members: {e}")
         await interaction.followup.send(
-            embed=create_error_embed(f"Failed to update members: {str(e)}"),
+            embed=create_error_embed(t("admin.update_members.failed", lang, error=str(e)), lang),
             ephemeral=True
         )

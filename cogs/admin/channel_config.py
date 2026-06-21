@@ -6,19 +6,13 @@ import pytz
 
 from database import DatabaseManager
 from bot.utils import create_error_embed, create_success_embed
+from bot.locale import t, guild_language, weekday_name
 
 logger = logging.getLogger(__name__)
 
 
-class RetentionDaysModal(discord.ui.Modal, title="Set Message Retention Days"):
+class RetentionDaysModal(discord.ui.Modal):
     """Modal for setting message activity retention period."""
-
-    days_input = discord.ui.TextInput(
-        label="Days to Retain Message Activity",
-        placeholder="e.g., 365 (default), 180, 730",
-        required=True,
-        max_length=4
-    )
 
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
@@ -28,62 +22,63 @@ class RetentionDaysModal(discord.ui.Modal, title="Set Message Retention Days"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
-        
-        # Pre-fill with current value
         guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
+        lang = self.lang
+        super().__init__(title=t("channel_config.retention.modal_title", lang))
+
+        self.days_input = discord.ui.TextInput(
+            label=t("channel_config.retention.input_label", lang),
+            placeholder=t("channel_config.retention.input_placeholder", lang),
+            required=True,
+            max_length=4
+        )
+        self.add_item(self.days_input)
+
+        # Pre-fill with current value
         if guild_config and guild_config.get('message_retention_days'):
             self.days_input.default = str(guild_config['message_retention_days'])
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         try:
             days = int(self.days_input.value.strip())
-            
+
             if days < 30:
                 await interaction.response.send_message(
-                    embed=create_error_embed("Retention period must be at least 30 days."),
+                    embed=create_error_embed(t("channel_config.retention.min", lang), lang),
                     ephemeral=True
                 )
                 return
-            
+
             if days > 3650:  # 10 years
                 await interaction.response.send_message(
-                    embed=create_error_embed("Retention period cannot exceed 3650 days (10 years)."),
+                    embed=create_error_embed(t("channel_config.retention.max", lang), lang),
                     ephemeral=True
                 )
                 return
-            
+
             # Update database
             self.db.set_message_retention_days(self.guild_id, days, interaction.guild.name)
-            
+
             await interaction.response.send_message(
-                embed=create_success_embed(
-                    f"✅ Message retention period set to **{days} days**.\n\n"
-                    f"Message activity older than {days} days will be automatically deleted during daily cleanup."
-                ),
+                embed=create_success_embed(t("channel_config.retention.set", lang, days=days), lang),
                 ephemeral=True
             )
             logger.info(f"Message retention set to {days} days for guild {self.guild_id}")
-            
+
         except ValueError:
             await interaction.response.send_message(
-                embed=create_error_embed("Invalid number. Please enter a valid number of days."),
+                embed=create_error_embed(t("channel_config.retention.invalid", lang), lang),
                 ephemeral=True
             )
 
 
-class TimezoneModal(discord.ui.Modal, title="Set Server Timezone"):
+class TimezoneModal(discord.ui.Modal):
     """Modal for setting the server timezone."""
-
-    timezone_input = discord.ui.TextInput(
-        label="Timezone (e.g. Europe/London)",
-        placeholder="Examples: America/New_York, Asia/Tokyo, Australia/Sydney",
-        required=True,
-        max_length=50
-    )
 
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
@@ -93,98 +88,69 @@ class TimezoneModal(discord.ui.Modal, title="Set Server Timezone"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
-        
-        # Pre-fill with current value
         guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
+        lang = self.lang
+        super().__init__(title=t("channel_config.timezone.modal_title", lang))
+
+        self.timezone_input = discord.ui.TextInput(
+            label=t("channel_config.timezone.input_label", lang),
+            placeholder=t("channel_config.timezone.input_placeholder", lang),
+            required=True,
+            max_length=50
+        )
+        self.add_item(self.timezone_input)
+
+        # Pre-fill with current value
         if guild_config and guild_config.get('timezone'):
             self.timezone_input.default = guild_config['timezone']
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         try:
             timezone_str = self.timezone_input.value.strip()
-            
+
             # Validate timezone
             if timezone_str not in pytz.all_timezones:
                 # Try to find close matches
                 timezone_lower = timezone_str.lower()
                 suggestions = [tz for tz in pytz.all_timezones if timezone_lower in tz.lower()][:5]
-                
-                error_msg = f"Invalid timezone: `{timezone_str}`"
+
+                error_msg = t("channel_config.timezone.invalid", lang, tz=timezone_str)
                 if suggestions:
-                    error_msg += f"\n\nDid you mean one of these?\n" + "\n".join(f"• `{tz}`" for tz in suggestions)
+                    suggestions_str = "\n".join(t("channel_config.timezone.suggestion_line", lang, tz=tz) for tz in suggestions)
+                    error_msg += t("channel_config.timezone.did_you_mean", lang, suggestions=suggestions_str)
                 else:
-                    error_msg += "\n\nPlease use IANA timezone format (e.g., `America/New_York`, `Europe/London`, `Asia/Tokyo`)."
-                    error_msg += "\n\nSee full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
-                
+                    error_msg += t("channel_config.timezone.no_suggestions", lang)
+
                 await interaction.response.send_message(
-                    embed=create_error_embed(error_msg),
+                    embed=create_error_embed(error_msg, lang),
                     ephemeral=True
                 )
                 return
-            
+
             # Update database
             self.db.set_timezone(self.guild_id, timezone_str, interaction.guild.name)
-            
+
             await interaction.response.send_message(
-                embed=create_success_embed(
-                    f"✅ Server timezone set to **{timezone_str}**.\n\n"
-                    f"All timestamps will now be displayed in this timezone."
-                ),
+                embed=create_success_embed(t("channel_config.timezone.set", lang, tz=timezone_str), lang),
                 ephemeral=True
             )
             logger.info(f"Timezone set to {timezone_str} for guild {self.guild_id}")
-            
+
         except Exception as e:
             await interaction.response.send_message(
-                embed=create_error_embed(f"Error setting timezone: {str(e)}"),
+                embed=create_error_embed(t("channel_config.timezone.error", lang, error=str(e)), lang),
                 ephemeral=True
             )
             logger.error(f"Failed to set timezone for guild {self.guild_id}: {e}")
 
 
-class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
+class ReportsConfigModal(discord.ui.Modal):
     """Modal for configuring scheduled reports."""
-
-    channel_input = discord.ui.TextInput(
-        label="Report Channel (name, ID, or mention)",
-        placeholder="e.g., reports, #reports, or channel ID",
-        required=True,
-        max_length=100
-    )
-
-    frequency_input = discord.ui.TextInput(
-        label="Frequency (weekly, monthly, or both)",
-        placeholder="weekly, monthly, or both",
-        required=True,
-        max_length=10
-    )
-
-    report_types_input = discord.ui.TextInput(
-        label="Report Types (comma-separated)",
-        placeholder="activity, members, departures",
-        required=True,
-        max_length=50,
-        default="activity,members,departures"
-    )
-
-    days_input = discord.ui.TextInput(
-        label="Days: weekly,monthly (e.g., 1,15)",
-        placeholder="Weekly(1-7): 1=Mon,7=Sun | Monthly(1-28)",
-        required=False,
-        max_length=10
-    )
-
-    hour_input = discord.ui.TextInput(
-        label="Hour (server timezone)",
-        placeholder="0-23 (e.g., 9 for 9 AM, 14 for 2 PM)",
-        required=False,
-        default="9",
-        max_length=2
-    )
 
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
@@ -194,12 +160,49 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
-        
-        # Pre-fill with current values if configured
         guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
+        lang = self.lang
+        super().__init__(title=t("channel_config.reports.modal_title", lang))
+
+        self.channel_input = discord.ui.TextInput(
+            label=t("channel_config.reports.channel_label", lang),
+            placeholder=t("channel_config.reports.channel_placeholder", lang),
+            required=True,
+            max_length=100
+        )
+        self.frequency_input = discord.ui.TextInput(
+            label=t("channel_config.reports.frequency_label", lang),
+            placeholder=t("channel_config.reports.frequency_placeholder", lang),
+            required=True,
+            max_length=10
+        )
+        self.report_types_input = discord.ui.TextInput(
+            label=t("channel_config.reports.types_label", lang),
+            placeholder=t("channel_config.reports.types_placeholder", lang),
+            required=True,
+            max_length=50,
+            default="activity,members,departures"
+        )
+        self.days_input = discord.ui.TextInput(
+            label=t("channel_config.reports.days_label", lang),
+            placeholder=t("channel_config.reports.days_placeholder", lang),
+            required=False,
+            max_length=10
+        )
+        self.hour_input = discord.ui.TextInput(
+            label=t("channel_config.reports.hour_label", lang),
+            placeholder=t("channel_config.reports.hour_placeholder", lang),
+            required=False,
+            default="9",
+            max_length=2
+        )
+        for item in (self.channel_input, self.frequency_input, self.report_types_input, self.days_input, self.hour_input):
+            self.add_item(item)
+
+        # Pre-fill with current values if configured
         if guild_config:
             if guild_config.get('report_channel_id'):
                 self.channel_input.default = str(guild_config['report_channel_id'])
@@ -224,6 +227,7 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         try:
             # Parse channel
             channel_str = self.channel_input.value.strip()
@@ -250,7 +254,7 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
 
             if not channel or not isinstance(channel, discord.TextChannel):
                 await interaction.response.send_message(
-                    embed=create_error_embed(f"Channel '{channel_str}' not found or is not a text channel."),
+                    embed=create_error_embed(t("channel_config.reports.channel_not_found", lang, channel=channel_str), lang),
                     ephemeral=True
                 )
                 return
@@ -259,7 +263,7 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
             frequency = self.frequency_input.value.strip().lower()
             if frequency not in ['weekly', 'monthly', 'both']:
                 await interaction.response.send_message(
-                    embed=create_error_embed("Frequency must be 'weekly', 'monthly', or 'both'."),
+                    embed=create_error_embed(t("channel_config.reports.invalid_frequency", lang), lang),
                     ephemeral=True
                 )
                 return
@@ -272,7 +276,7 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
 
             if not report_types:
                 await interaction.response.send_message(
-                    embed=create_error_embed("At least one valid report type required: activity, members, departures"),
+                    embed=create_error_embed(t("channel_config.reports.invalid_types", lang), lang),
                     ephemeral=True
                 )
                 return
@@ -293,11 +297,7 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                         day_weekly = int(parts[0])
                         if not 1 <= day_weekly <= 7:
                             await interaction.response.send_message(
-                                embed=create_error_embed(
-                                    "Weekly day must be 1-7\n"
-                                    "• 1=Monday, 2=Tuesday, 3=Wednesday\n"
-                                    "• 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday"
-                                ),
+                                embed=create_error_embed(t("channel_config.reports.weekly_day_range", lang), lang),
                                 ephemeral=True
                             )
                             return
@@ -305,24 +305,24 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                         day_weekly = day_weekly - 1
                     except ValueError:
                         await interaction.response.send_message(
-                            embed=create_error_embed("First value (weekly day) must be a number 1-7"),
+                            embed=create_error_embed(t("channel_config.reports.weekly_day_nan", lang), lang),
                             ephemeral=True
                         )
                         return
-                
+
                 # Parse monthly day (second value)
                 if len(parts) >= 2 and parts[1]:
                     try:
                         day_monthly = int(parts[1])
                         if not 1 <= day_monthly <= 28:
                             await interaction.response.send_message(
-                                embed=create_error_embed("Monthly day must be 1-28"),
+                                embed=create_error_embed(t("channel_config.reports.monthly_day_range", lang), lang),
                                 ephemeral=True
                             )
                             return
                     except ValueError:
                         await interaction.response.send_message(
-                            embed=create_error_embed("Second value (monthly day) must be a number 1-28"),
+                            embed=create_error_embed(t("channel_config.reports.monthly_day_nan", lang), lang),
                             ephemeral=True
                         )
                         return
@@ -334,16 +334,13 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                     time_hour = int(hour_str)
                     if not 0 <= time_hour <= 23:
                         await interaction.response.send_message(
-                            embed=create_error_embed(
-                                "Hour must be 0-23\n"
-                                "Examples: 0=midnight, 9=9 AM, 14=2 PM, 23=11 PM"
-                            ),
+                            embed=create_error_embed(t("channel_config.reports.hour_range", lang), lang),
                             ephemeral=True
                         )
                         return
                 except ValueError:
                     await interaction.response.send_message(
-                        embed=create_error_embed("Hour must be a number 0-23"),
+                        embed=create_error_embed(t("channel_config.reports.hour_nan", lang), lang),
                         ephemeral=True
                     )
                     return
@@ -368,46 +365,40 @@ class ReportsConfigModal(discord.ui.Modal, title="Configure Scheduled Reports"):
                 day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
                 schedule_info = ""
                 if frequency == 'weekly':
-                    schedule_info = f"\n• Sends every **{day_names[day_weekly]}** (day {day_weekly + 1}) at **{time_hour:02d}:00 {guild_tz_str}**"
+                    schedule_info = t("channel_config.reports.schedule_weekly", lang, day=weekday_name(day_names[day_weekly], lang), daynum=day_weekly + 1, hour=time_hour, tz=guild_tz_str)
                 elif frequency == 'monthly':
-                    schedule_info = f"\n• Sends on day **{day_monthly}** of each month at **{time_hour:02d}:00 {guild_tz_str}**"
+                    schedule_info = t("channel_config.reports.schedule_monthly", lang, day=day_monthly, hour=time_hour, tz=guild_tz_str)
                 else:  # both
-                    schedule_info = f"\n• Weekly: every **{day_names[day_weekly]}** (day {day_weekly + 1}) at **{time_hour:02d}:00 {guild_tz_str}**\n• Monthly: day **{day_monthly}** of each month at **{time_hour:02d}:00 {guild_tz_str}**"
+                    schedule_info = t("channel_config.reports.schedule_both", lang, day=weekday_name(day_names[day_weekly], lang), daynum=day_weekly + 1, monthday=day_monthly, hour=time_hour, tz=guild_tz_str)
 
                 await interaction.response.send_message(
                     embed=create_success_embed(
-                        f"✅ Scheduled reports configured!\n\n"
-                        f"**Channel:** {channel.mention}\n"
-                        f"**Frequency:** {frequency.title()}\n"
-                        f"**Report Types:** {', '.join(report_types)}"
-                        f"{schedule_info}"
+                        t("channel_config.reports.success", lang,
+                          channel=channel.mention,
+                          frequency=frequency.title(),
+                          types=', '.join(report_types),
+                          schedule=schedule_info),
+                        lang
                     ),
                     ephemeral=True
                 )
                 logger.info(f"Reports configured for guild {self.guild_id}: {frequency} to {channel.name} at {time_hour:02d}:00 {guild_tz_str}")
             else:
                 await interaction.response.send_message(
-                    embed=create_error_embed("Failed to save report configuration."),
+                    embed=create_error_embed(t("channel_config.reports.save_failed", lang), lang),
                     ephemeral=True
                 )
 
         except Exception as e:
             await interaction.response.send_message(
-                embed=create_error_embed(f"Error configuring reports: {str(e)}"),
+                embed=create_error_embed(t("channel_config.reports.error", lang, error=str(e)), lang),
                 ephemeral=True
             )
             logger.error(f"Failed to configure reports for guild {self.guild_id}: {e}")
 
 
-class ChannelModal(discord.ui.Modal, title="Set Notification Channel"):
+class ChannelModal(discord.ui.Modal):
     """Modal for setting the notification channel."""
-
-    channel_input = discord.ui.TextInput(
-        label="Channel Name, ID, or Mention",
-        placeholder="e.g., general, #general, or 1234567890",
-        required=True,
-        max_length=100
-    )
 
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
@@ -417,12 +408,22 @@ class ChannelModal(discord.ui.Modal, title="Set Notification Channel"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
+        self.lang = guild_language(db.get_guild_config(guild_id))
+        super().__init__(title=t("channel_config.channel.modal_title", self.lang))
+
+        self.channel_input = discord.ui.TextInput(
+            label=t("channel_config.channel.input_label", self.lang),
+            placeholder=t("channel_config.channel.input_placeholder", self.lang),
+            required=True,
+            max_length=100
+        )
+        self.add_item(self.channel_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         channel_str = self.channel_input.value.strip()
         channel = None
 
@@ -454,10 +455,7 @@ class ChannelModal(discord.ui.Modal, title="Set Notification Channel"):
         # If still not found, return error
         if not channel:
             await interaction.response.send_message(
-                embed=create_error_embed(
-                    f"Channel '{channel_str}' not found. Please use channel name (e.g., 'general'), "
-                    f"mention (e.g., '#general'), or ID."
-                ),
+                embed=create_error_embed(t("channel_config.channel.not_found", lang, channel=channel_str), lang),
                 ephemeral=True
             )
             return
@@ -466,10 +464,7 @@ class ChannelModal(discord.ui.Modal, title="Set Notification Channel"):
         if not isinstance(channel, discord.TextChannel):
             channel_type = type(channel).__name__
             await interaction.response.send_message(
-                embed=create_error_embed(
-                    f"Invalid channel type. '{channel.name}' is a {channel_type}, "
-                    f"but notification channels must be text channels."
-                ),
+                embed=create_error_embed(t("channel_config.channel.invalid_type", lang, channel=channel.name, type=channel_type), lang),
                 ephemeral=True
             )
             return
@@ -477,26 +472,19 @@ class ChannelModal(discord.ui.Modal, title="Set Notification Channel"):
         # Update database
         if self.db.set_notification_channel(self.guild_id, channel.id, interaction.guild.name):
             await interaction.response.send_message(
-                embed=create_success_embed(f"Notification channel set to {channel.mention}"),
+                embed=create_success_embed(t("channel_config.channel.set", lang, channel=channel.mention), lang),
                 ephemeral=True
             )
             logger.info(f"Notification channel set to {channel.name} in guild {interaction.guild.name}")
         else:
             await interaction.response.send_message(
-                embed=create_error_embed("Failed to update notification channel."),
+                embed=create_error_embed(t("channel_config.channel.update_failed", lang), lang),
                 ephemeral=True
             )
 
 
-class InactiveDaysModal(discord.ui.Modal, title="Set Inactive Days Threshold"):
+class InactiveDaysModal(discord.ui.Modal):
     """Modal for setting the inactive days threshold."""
-
-    days_input = discord.ui.TextInput(
-        label="Number of Days",
-        placeholder="Enter number of days (e.g., 10)",
-        required=True,
-        max_length=3
-    )
 
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
@@ -506,22 +494,35 @@ class InactiveDaysModal(discord.ui.Modal, title="Set Inactive Days Threshold"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
+        self.lang = guild_language(db.get_guild_config(guild_id))
+        super().__init__(title=t("channel_config.inactive_days.modal_title", self.lang))
+
+        self.days_input = discord.ui.TextInput(
+            label=t("channel_config.inactive_days.input_label", self.lang),
+            placeholder=t("channel_config.inactive_days.input_placeholder", self.lang),
+            required=True,
+            max_length=3
+        )
+        self.add_item(self.days_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         days_str = self.days_input.value.strip()
 
         try:
             days = int(days_str)
             if days < 1 or days > 365:
-                raise ValueError("Days must be between 1 and 365")
+                raise ValueError("out_of_range")
         except ValueError as e:
-            error_msg = str(e) if "between" in str(e) else "Please enter a valid number between 1 and 365."
+            if str(e) == "out_of_range":
+                error_msg = t("channel_config.inactive_days.range", lang)
+            else:
+                error_msg = t("channel_config.inactive_days.invalid", lang)
             await interaction.response.send_message(
-                embed=create_error_embed(error_msg),
+                embed=create_error_embed(error_msg, lang),
                 ephemeral=True
             )
             return
@@ -529,12 +530,12 @@ class InactiveDaysModal(discord.ui.Modal, title="Set Inactive Days Threshold"):
         # Update database
         if self.db.set_inactive_days(self.guild_id, days, interaction.guild.name):
             await interaction.response.send_message(
-                embed=create_success_embed(f"Inactive days threshold set to {days} days"),
+                embed=create_success_embed(t("channel_config.inactive_days.set", lang, days=days), lang),
                 ephemeral=True
             )
             logger.info(f"Inactive days threshold set to {days} in guild {interaction.guild.name}")
         else:
             await interaction.response.send_message(
-                embed=create_error_embed("Failed to update inactive days threshold."),
+                embed=create_error_embed(t("channel_config.inactive_days.update_failed", lang), lang),
                 ephemeral=True
             )

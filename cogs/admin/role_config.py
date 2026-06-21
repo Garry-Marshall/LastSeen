@@ -6,11 +6,12 @@ import json
 
 from database import DatabaseManager
 from bot.utils import create_error_embed, create_success_embed
+from bot.locale import t, guild_language
 
 logger = logging.getLogger(__name__)
 
 
-class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
+class BotAdminRoleModal(discord.ui.Modal):
     """Modal for setting the bot admin role name."""
 
     def __init__(self, db: DatabaseManager, guild_id: int):
@@ -21,18 +22,20 @@ class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
-        
+
         # Get current role name from database
         guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
+        lang = self.lang
+        super().__init__(title=t("admin.role.bot_admin_modal_title", lang))
         current_role = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
-        
+
         # Create text input with current value
         self.role_input = discord.ui.TextInput(
-            label="Bot Admin Role Name",
-            placeholder="e.g., LastSeen Admin, Moderator, Admin",
+            label=t("admin.role.bot_admin_input_label", lang),
+            placeholder=t("admin.role.bot_admin_input_placeholder", lang),
             default=current_role,
             required=True,
             max_length=100
@@ -41,19 +44,20 @@ class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         role_name = self.role_input.value.strip()
 
         # Validate role name
         if not role_name:
             await interaction.response.send_message(
-                embed=create_error_embed("Role name cannot be empty."),
+                embed=create_error_embed(t("admin.role.name_empty", lang), lang),
                 ephemeral=True
             )
             return
 
         if len(role_name) > 100:
             await interaction.response.send_message(
-                embed=create_error_embed("Role name is too long (maximum 100 characters)."),
+                embed=create_error_embed(t("admin.role.name_too_long", lang), lang),
                 ephemeral=True
             )
             return
@@ -62,10 +66,7 @@ class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
         role = discord.utils.get(interaction.guild.roles, name=role_name)
         if not role:
             await interaction.response.send_message(
-                embed=create_error_embed(
-                    f"⚠️ Warning: Role '{role_name}' does not exist in this server.\n\n"
-                    f"The setting has been saved, but you should create this role for it to work properly."
-                ),
+                embed=create_error_embed(t("admin.role.not_exist_warning", lang, role=role_name), lang),
                 ephemeral=True
             )
             # Still update the database
@@ -76,21 +77,18 @@ class BotAdminRoleModal(discord.ui.Modal, title="Set Bot Admin Role"):
         # Update database
         if self.db.set_bot_admin_role(self.guild_id, role_name, interaction.guild.name):
             await interaction.response.send_message(
-                embed=create_success_embed(f"Bot admin role set to **{role_name}**"),
+                embed=create_success_embed(t("admin.role.bot_admin_set", lang, role=role_name), lang),
                 ephemeral=True
             )
             logger.info(f"Bot admin role set to '{role_name}' in guild {interaction.guild.name}")
         else:
             await interaction.response.send_message(
-                embed=create_error_embed(
-                    "Failed to update bot admin role. "
-                    "Database error occurred. Please try again or contact support."
-                ),
+                embed=create_error_embed(t("admin.role.bot_admin_update_failed", lang), lang),
                 ephemeral=True
             )
 
 
-class UserRoleModal(discord.ui.Modal, title="Set User Role"):
+class UserRoleModal(discord.ui.Modal):
     """Modal for setting the user role name."""
 
     def __init__(self, db: DatabaseManager, guild_id: int):
@@ -101,18 +99,20 @@ class UserRoleModal(discord.ui.Modal, title="Set User Role"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
-        
+
         # Get current role name from database
         guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
+        lang = self.lang
+        super().__init__(title=t("admin.role.user_modal_title", lang))
         current_role = guild_config.get('user_role_name', 'LastSeen User') if guild_config else 'LastSeen User'
-        
+
         # Create text input with current value
         self.role_input = discord.ui.TextInput(
-            label="User Role Name",
-            placeholder="e.g., LastSeen User, Member, Verified",
+            label=t("admin.role.user_input_label", lang),
+            placeholder=t("admin.role.user_input_placeholder", lang),
             default=current_role,
             required=True,
             max_length=100
@@ -121,19 +121,20 @@ class UserRoleModal(discord.ui.Modal, title="Set User Role"):
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         role_name = self.role_input.value.strip()
 
         # Validate role name
         if not role_name:
             await interaction.response.send_message(
-                embed=create_error_embed("Role name cannot be empty."),
+                embed=create_error_embed(t("admin.role.name_empty", lang), lang),
                 ephemeral=True
             )
             return
 
         if len(role_name) > 100:
             await interaction.response.send_message(
-                embed=create_error_embed("Role name is too long (maximum 100 characters)."),
+                embed=create_error_embed(t("admin.role.name_too_long", lang), lang),
                 ephemeral=True
             )
             return
@@ -142,10 +143,7 @@ class UserRoleModal(discord.ui.Modal, title="Set User Role"):
         role = discord.utils.get(interaction.guild.roles, name=role_name)
         if not role:
             await interaction.response.send_message(
-                embed=create_error_embed(
-                    f"⚠️ Warning: Role '{role_name}' does not exist in this server.\n\n"
-                    f"The setting has been saved, but you should create this role for it to work properly."
-                ),
+                embed=create_error_embed(t("admin.role.not_exist_warning", lang, role=role_name), lang),
                 ephemeral=True
             )
             # Still update the database
@@ -156,30 +154,19 @@ class UserRoleModal(discord.ui.Modal, title="Set User Role"):
         # Update database
         if self.db.set_user_role_name(self.guild_id, role_name, interaction.guild.name):
             await interaction.response.send_message(
-                embed=create_success_embed(f"User role set to **{role_name}**"),
+                embed=create_success_embed(t("admin.role.user_set", lang, role=role_name), lang),
                 ephemeral=True
             )
             logger.info(f"User role set to '{role_name}' in guild {interaction.guild.name}")
         else:
             await interaction.response.send_message(
-                embed=create_error_embed(
-                    "Failed to update user role. "
-                    "Database error occurred. Please try again or contact support."
-                ),
+                embed=create_error_embed(t("admin.role.user_update_failed", lang), lang),
                 ephemeral=True
             )
 
 
-class TrackOnlyRolesModal(discord.ui.Modal, title="Set Track Only Roles"):
+class TrackOnlyRolesModal(discord.ui.Modal):
     """Modal for setting which roles to track (optional)."""
-
-    roles_input = discord.ui.TextInput(
-        label="Role Names (comma-separated)",
-        placeholder="e.g., Member, Verified, VIP (leave empty for all roles)",
-        required=False,
-        style=discord.TextStyle.paragraph,
-        max_length=500
-    )
 
     def __init__(self, db: DatabaseManager, guild_id: int):
         """
@@ -189,25 +176,36 @@ class TrackOnlyRolesModal(discord.ui.Modal, title="Set Track Only Roles"):
             db: Database manager
             guild_id: Discord guild ID
         """
-        super().__init__()
         self.db = db
         self.guild_id = guild_id
+        self.lang = guild_language(db.get_guild_config(guild_id))
+        super().__init__(title=t("admin.track_roles.modal_title", self.lang))
+
+        self.roles_input = discord.ui.TextInput(
+            label=t("admin.track_roles.input_label", self.lang),
+            placeholder=t("admin.track_roles.input_placeholder", self.lang),
+            required=False,
+            style=discord.TextStyle.paragraph,
+            max_length=500
+        )
+        self.add_item(self.roles_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
+        lang = self.lang
         roles_str = self.roles_input.value.strip()
 
         # If empty, track all roles
         if not roles_str:
             if self.db.set_track_only_roles(self.guild_id, [], interaction.guild.name):
                 await interaction.response.send_message(
-                    embed=create_success_embed("Now tracking all roles (no filter applied)"),
+                    embed=create_success_embed(t("admin.track_roles.cleared", lang), lang),
                     ephemeral=True
                 )
                 logger.info(f"Track only roles cleared in guild {interaction.guild.name}")
             else:
                 await interaction.response.send_message(
-                    embed=create_error_embed("Failed to update track only roles."),
+                    embed=create_error_embed(t("admin.track_roles.update_failed", lang), lang),
                     ephemeral=True
                 )
             return
@@ -217,7 +215,7 @@ class TrackOnlyRolesModal(discord.ui.Modal, title="Set Track Only Roles"):
 
         if not role_names:
             await interaction.response.send_message(
-                embed=create_error_embed("No valid role names provided."),
+                embed=create_error_embed(t("admin.track_roles.no_names", lang), lang),
                 ephemeral=True
             )
             return
@@ -231,17 +229,17 @@ class TrackOnlyRolesModal(discord.ui.Modal, title="Set Track Only Roles"):
 
         # Update database
         if self.db.set_track_only_roles(self.guild_id, role_names, interaction.guild.name):
-            message = f"Now tracking only members with these roles: **{', '.join(role_names)}**"
+            message = t("admin.track_roles.set", lang, roles=', '.join(role_names))
             if missing_roles:
-                message += f"\n\n⚠️ Warning: These roles don't exist yet: {', '.join(missing_roles)}"
+                message += t("admin.track_roles.set_warning", lang, roles=', '.join(missing_roles))
 
             await interaction.response.send_message(
-                embed=create_success_embed(message),
+                embed=create_success_embed(message, lang),
                 ephemeral=True
             )
             logger.info(f"Track only roles set to {role_names} in guild {interaction.guild.name}")
         else:
             await interaction.response.send_message(
-                embed=create_error_embed("Failed to update track only roles."),
+                embed=create_error_embed(t("admin.track_roles.update_failed", lang), lang),
                 ephemeral=True
             )

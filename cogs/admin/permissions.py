@@ -6,6 +6,7 @@ from typing import Optional
 
 from database import DatabaseManager
 from bot.utils import has_bot_admin_role, create_error_embed
+from bot.locale import t, guild_language
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,11 @@ async def check_admin_permission(
 
     # Check permissions
     if not has_bot_admin_role(interaction.user, bot_admin_role_name):
+        lang = guild_language(guild_config)
         await interaction.response.send_message(
             embed=create_error_embed(
-                f"You need the '{bot_admin_role_name}' role or Administrator permission to use this command."
+                t('errors.no_permission', lang, role=bot_admin_role_name),
+                lang
             ),
             ephemeral=True
         )

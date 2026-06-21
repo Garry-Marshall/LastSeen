@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from database import DatabaseManager
+from bot.locale import load_locales
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ def create_bot(config) -> commands.Bot:
     Returns:
         Configured bot instance
     """
+    # Load translation catalogs before anything user-facing can run
+    load_locales()
+
     # Set up intents
     intents = discord.Intents.default()
     intents.members = True  # Required for member events

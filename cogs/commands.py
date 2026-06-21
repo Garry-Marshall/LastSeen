@@ -23,6 +23,7 @@ from bot.utils import (
     is_channel_allowed,
     has_bot_admin_role
 )
+from bot.locale import t, guild_language, weekday_name
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +105,19 @@ class PaginationView(discord.ui.View):
 class ForgetMeConfirmView(discord.ui.View):
     """Confirmation view for the /forgetme privacy opt-out."""
 
-    def __init__(self, bot: commands.Bot, db: DatabaseManager, user_id: int):
+    def __init__(self, bot: commands.Bot, db: DatabaseManager, user_id: int, lang: str = 'en'):
         super().__init__(timeout=60)
         self.bot = bot
         self.db = db
         self.user_id = user_id
+        self.lang = lang
+        self.confirm_button.label = t("commands.forgetme.btn_confirm", lang)
+        self.cancel_button.label = t("common.cancel", lang)
 
     @discord.ui.button(label="Yes, delete my data", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Opt the user out, then purge their data everywhere."""
+        lang = self.lang
         await interaction.response.defer()
 
         # Opt out FIRST so no event re-creates rows while the purge runs
@@ -120,9 +125,7 @@ class ForgetMeConfirmView(discord.ui.View):
         if not await asyncio.to_thread(self.db.add_opted_out_user, self.user_id):
             self.bot.opted_out_users.discard(self.user_id)
             await interaction.edit_original_response(
-                embed=create_error_embed(
-                    "Failed to save your opt-out. No data was deleted — please try again later."
-                ),
+                embed=create_error_embed(t("commands.forgetme.save_failed", lang), lang),
                 view=None
             )
             self.stop()
@@ -136,10 +139,7 @@ class ForgetMeConfirmView(discord.ui.View):
         counts = await asyncio.to_thread(self.db.purge_user_data, self.user_id)
         if counts is None:
             await interaction.edit_original_response(
-                embed=create_error_embed(
-                    "You are now opted out of future tracking, but deleting your stored data "
-                    "failed. Please run `/forgetme` again to retry the deletion."
-                ),
+                embed=create_error_embed(t("commands.forgetme.delete_failed", lang), lang),
                 view=None
             )
             self.stop()
@@ -148,12 +148,11 @@ class ForgetMeConfirmView(discord.ui.View):
         activity_total = counts['message_activity'] + counts['message_activity_hourly']
         await interaction.edit_original_response(
             embed=create_success_embed(
-                "Your data has been deleted and tracking is now disabled for your account "
-                "in all servers using this bot.\n\n"
-                f"**Removed:** {counts['members']} member record(s), "
-                f"{counts['role_changes']} role change(s), "
-                f"{activity_total} activity record(s).\n\n"
-                "Use `/optin` if you ever want to re-enable tracking."
+                t("commands.forgetme.success", lang,
+                  members=counts['members'],
+                  roles=counts['role_changes'],
+                  activity=activity_total),
+                lang
             ),
             view=None
         )
@@ -163,8 +162,9 @@ class ForgetMeConfirmView(discord.ui.View):
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary, emoji="❌")
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Cancel the opt-out."""
-        embed = create_embed("Cancelled", discord.Color.blue())
-        embed.description = "No data was deleted and tracking remains unchanged."
+        lang = self.lang
+        embed = create_embed(t("common.cancelled", lang), discord.Color.blue())
+        embed.description = t("commands.forgetme.cancelled_desc", lang)
         await interaction.response.edit_message(embed=embed, view=None)
         self.stop()
 
@@ -185,7 +185,7 @@ class CommandsCog(commands.Cog):
         self.db = db
         self.config = config
 
-    async def _check_permissions(self, interaction: discord.Interaction) -> tuple[bool, discord.Embed | None, bool]:
+    async def _check_permissions(self, interaction: discord.Interaction) -> tuple[bool, discord.Embed | None, bool, str]:
         """
         Check if user has permission to use commands in this channel.
 
@@ -198,14 +198,15 @@ class CommandsCog(commands.Cog):
         """
         guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         channels_restricted = False
+        lang = guild_language(guild_config)
 
         # Check role permissions
         if guild_config and not can_use_bot_commands(interaction.user, guild_config):
             user_role_name = guild_config.get('user_role_name', 'LastSeen User')
             error = create_error_embed(
-                f"You need the '{user_role_name}' role or Administrator permission to use this command."
+                t("errors.no_permission", lang, role=user_role_name), lang
             )
-            return False, error, channels_restricted
+            return False, error, channels_restricted, lang
 
         # Check channel permissions and determine if channels are restricted
         if guild_config:
@@ -213,11 +214,11 @@ class CommandsCog(commands.Cog):
             channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
             if not is_channel_allowed(interaction.channel_id, guild_config):
                 error = create_error_embed(
-                    "Bot commands are not allowed in this channel. Please use an allowed channel."
+                    t("errors.channel_not_allowed", lang), lang
                 )
-                return False, error, channels_restricted
+                return False, error, channels_restricted, lang
 
-        return True, None, channels_restricted
+        return True, None, channels_restricted, lang
 
     async def user_autocomplete(
         self,
@@ -275,7 +276,7 @@ class CommandsCog(commands.Cog):
             user: Username, nickname, or user mention
         """
         # Check permissions
-        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted, lang = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
@@ -290,50 +291,50 @@ class CommandsCog(commands.Cog):
 
         if not member_data:
             await interaction.followup.send(
-                embed=create_error_embed("This user isn't in the database yet. A last seen time can only be reported after the bot has observed the member going offline while it's online in this server."),
+                embed=create_error_embed(t("commands.whois.not_found", lang), lang),
                 ephemeral=not channels_restricted
             )
             return
 
         # Get Discord member object for additional info (online status, boosting, etc.)
         member = interaction.guild.get_member(member_data['user_id'])
-        
+
         # Check if caller is admin - get bot admin role name from guild config
         guild_config = self.db.get_guild_config(guild_id)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
         is_admin = has_bot_admin_role(interaction.user, bot_admin_role_name)
-        
+
         # Create embed with new formatting
-        username = member_data['username'] if member_data['username'] else "Unknown"
-        embed = create_embed(f"👤 {username}", discord.Color.blue())
+        username = member_data['username'] if member_data['username'] else t("common.unknown", lang)
+        embed = create_embed(t("commands.whois.title", lang, username=username), discord.Color.blue())
         embed.description = ""
 
         # ===== USER IDENTITY SECTION =====
-        embed.description += f"🆔 User ID: `{member_data['user_id']}`\n"
-        
+        embed.description += t("commands.whois.user_id", lang, user_id=member_data['user_id'])
+
         # Account creation date - admin only
         if is_admin and member and hasattr(member, 'created_at'):
             try:
-                account_created = format_timestamp(int(member.created_at.timestamp()), 'F', guild_id, self.db)
-                embed.description += f"📅 Account Created: {account_created}\n"
+                account_created = format_timestamp(int(member.created_at.timestamp()), 'F', guild_id, self.db, lang)
+                embed.description += t("commands.whois.account_created", lang, date=account_created)
             except (AttributeError, ValueError, OSError):
                 pass
-        
+
         # Join info with position
         if member_data['join_date']:
-            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db)
+            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db, lang)
             join_position = member_data.get('join_position')
             if join_position:
-                embed.description += f"📥 Joined Server: {join_str} (Member #{join_position})\n"
+                embed.description += t("commands.whois.joined_with_position", lang, date=join_str, position=join_position)
             else:
-                embed.description += f"📥 Joined Server: {join_str}\n"
-        
+                embed.description += t("commands.whois.joined", lang, date=join_str)
+
         embed.description += "\n"
 
         # ===== NICKNAME & ROLES SECTION =====
-        nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
-        embed.description += f"🏷️ Nickname: {nickname}\n"
-        
+        nickname = member_data['nickname'] if member_data['nickname'] else t("common.not_set", lang)
+        embed.description += t("commands.whois.nickname", lang, nickname=nickname)
+
         # Nickname history - admin only (exclude current nickname)
         if is_admin and member_data.get('nickname_history'):
             try:
@@ -343,19 +344,19 @@ class CommandsCog(commands.Cog):
                     previous_nicknames = [n for n in history if n != nickname]
                     if previous_nicknames:
                         history_str = ", ".join(previous_nicknames)
-                        embed.description += f"     Previously known as: {history_str}\n"
+                        embed.description += t("commands.whois.previously_known", lang, names=history_str)
             except (json.JSONDecodeError, TypeError):
                 pass
-        
+
         # Highest role
         if member and hasattr(member, 'roles') and member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
             try:
                 highest_role = member.top_role
                 if highest_role and highest_role.name != "@everyone":
-                    embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
+                    embed.description += t("commands.whois.highest_role", lang, role=highest_role.mention)
             except (AttributeError, IndexError):
                 pass
-        
+
         embed.description += "\n"
 
         # ===== STATUS SECTION =====
@@ -367,40 +368,40 @@ class CommandsCog(commands.Cog):
                 discord.Status.dnd: "🔴",
                 discord.Status.offline: "⚫"
             }.get(member.status, "⚫")
-            
-            embed.description += f"{status_emoji} Status: {str(member.status).capitalize()}\n"
-            
+
+            embed.description += t("commands.whois.status", lang, emoji=status_emoji, status=str(member.status).capitalize())
+
             # Last seen
             if hasattr(member, 'status') and member.status != discord.Status.offline:
-                embed.description += f"⏱️ Last Seen: Currently online\n"
+                embed.description += t("commands.whois.last_seen_online", lang)
             elif member_data['last_seen'] and member_data['last_seen'] != 0:
-                embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R', guild_id, self.db)}\n"
+                embed.description += t("commands.whois.last_seen", lang, date=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang))
             else:
-                embed.description += f"⏱️ Last Seen: Not available yet (no offline event recorded)\n"
+                embed.description += t("commands.whois.last_seen_unavailable", lang)
         else:
-            embed.description += f"⚫ Status: Left server\n"
-        
+            embed.description += t("commands.whois.status_left", lang)
+
         # Boosting status
         if member and hasattr(member, 'premium_since') and member.premium_since:
             try:
-                boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F', guild_id, self.db)
-                embed.description += f"💎 Boosting: Yes (since {boost_date})\n"
+                boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F', guild_id, self.db, lang)
+                embed.description += t("commands.whois.boosting_yes", lang, date=boost_date)
             except (AttributeError, ValueError, OSError):
                 pass
         else:
-            embed.description += f"💎 Boosting: No\n"
+            embed.description += t("commands.whois.boosting_no", lang)
 
         embed.description += "\n"
 
         # ===== MESSAGE ACTIVITY SECTION =====
         activity_stats = self.db.get_message_activity_period(guild_id, member_data['user_id'], days=30)
         if activity_stats and (activity_stats['total'] > 0 or activity_stats['today'] >= 0):
-            embed.description += f"📊 Activity:\n"
-            embed.description += f"     • Today: {activity_stats['today']:,} messages\n"
-            embed.description += f"     • This week: {activity_stats['this_week']:,} messages\n"
-            embed.description += f"     • This month: {activity_stats['this_month']:,} messages\n"
+            embed.description += t("commands.whois.activity_header", lang)
+            embed.description += t("commands.whois.activity_today", lang, count=activity_stats['today'])
+            embed.description += t("commands.whois.activity_week", lang, count=activity_stats['this_week'])
+            embed.description += t("commands.whois.activity_month", lang, count=activity_stats['this_month'])
             if activity_stats['avg_per_day'] > 0:
-                embed.description += f"     • Avg/day (7d): {activity_stats['avg_per_day']} messages\n"
+                embed.description += t("commands.whois.activity_avg", lang, avg=activity_stats['avg_per_day'])
 
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
@@ -415,7 +416,7 @@ class CommandsCog(commands.Cog):
             command_name: Name of command that called this (for logging)
         """
         # Check permissions
-        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted, lang = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
@@ -430,49 +431,49 @@ class CommandsCog(commands.Cog):
 
         if not member_data:
             await interaction.followup.send(
-                embed=create_error_embed("This user isn't in the database yet. A last seen time can only be reported after the bot has observed the member going offline while it's online in this server."),
+                embed=create_error_embed(t("commands.whois.not_found", lang), lang),
                 ephemeral=not channels_restricted
             )
             return
 
         # Create embed
-        embed = create_embed("Last Seen Information", discord.Color.green())
+        embed = create_embed(t("commands.lastseen.title", lang), discord.Color.green())
 
         embed.add_field(
-            name="Username",
-            value=member_data['username'] if member_data['username'] else "Not set",
+            name=t("commands.lastseen.field_username", lang),
+            value=member_data['username'] if member_data['username'] else t("common.not_set", lang),
             inline=False
         )
         embed.add_field(
-            name="Nickname",
-            value=member_data['nickname'] if member_data['nickname'] else "Not set",
+            name=t("commands.lastseen.field_nickname", lang),
+            value=member_data['nickname'] if member_data['nickname'] else t("common.not_set", lang),
             inline=False
         )
 
         # Check if user is currently online
         member = interaction.guild.get_member(member_data['user_id'])
         if member and member.status != discord.Status.offline:
-            embed.add_field(name="Status", value="Currently online", inline=False)
-            embed.add_field(name="Last Seen", value="Right meow! 🐱", inline=False)
+            embed.add_field(name=t("commands.lastseen.field_status", lang), value=t("commands.lastseen.currently_online", lang), inline=False)
+            embed.add_field(name=t("commands.lastseen.field_last_seen", lang), value=t("commands.lastseen.right_meow", lang), inline=False)
         else:
-            embed.add_field(name="Status", value="Offline", inline=False)
+            embed.add_field(name=t("commands.lastseen.field_status", lang), value=t("commands.lastseen.offline", lang), inline=False)
             if member_data['last_seen'] and member_data['last_seen'] != 0:
                 embed.add_field(
-                    name="Last Seen",
-                    value=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db),
+                    name=t("commands.lastseen.field_last_seen", lang),
+                    value=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang),
                     inline=False
                 )
                 embed.add_field(
-                    name="Exact Time",
-                    value=format_timestamp(member_data['last_seen'], 'F', guild_id, self.db),
+                    name=t("commands.lastseen.field_exact_time", lang),
+                    value=format_timestamp(member_data['last_seen'], 'F', guild_id, self.db, lang),
                     inline=False
                 )
             else:
-                embed.add_field(name="Last Seen", value="Not available yet — a last seen time is recorded only after the bot observes this member going offline.", inline=False)
+                embed.add_field(name=t("commands.lastseen.field_last_seen", lang), value=t("commands.lastseen.not_available", lang), inline=False)
 
         # Add status if inactive
         if member_data['is_active'] == 0:
-            embed.add_field(name="Note", value="User has left the server", inline=False)
+            embed.add_field(name=t("commands.lastseen.field_note", lang), value=t("commands.lastseen.left_server", lang), inline=False)
 
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /{command_name} for '{user}' in guild {interaction.guild.name}")
@@ -521,7 +522,7 @@ class CommandsCog(commands.Cog):
             user: Username, nickname, or user mention
         """
         # Check permissions
-        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted, lang = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
@@ -532,7 +533,7 @@ class CommandsCog(commands.Cog):
         
         if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
-                embed=create_error_embed(f"You need the '{bot_admin_role_name}' role or Administrator permission to use this command."),
+                embed=create_error_embed(t("errors.no_permission", lang, role=bot_admin_role_name), lang),
                 ephemeral=True
             )
             return
@@ -547,7 +548,7 @@ class CommandsCog(commands.Cog):
 
         if not member_data:
             await interaction.followup.send(
-                embed=create_error_embed("User not found in the database."),
+                embed=create_error_embed(t("commands.role_history.not_found", lang), lang),
                 ephemeral=not channels_restricted
             )
             return
@@ -556,35 +557,35 @@ class CommandsCog(commands.Cog):
         role_changes = self.db.get_role_history(guild_id, member_data['user_id'], limit=20)
 
         if not role_changes:
-            embed = create_embed(f"🎭 Role History - {member_data['username']}", discord.Color.blue())
-            embed.description = "No role changes recorded for this member."
+            embed = create_embed(t("commands.role_history.title", lang, username=member_data['username']), discord.Color.blue())
+            embed.description = t("commands.role_history.no_changes", lang)
             await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             return
 
         # Create embed with role history
-        username = member_data['username'] if member_data['username'] else "Unknown"
-        embed = create_embed(f"🎭 Role History - {username}", discord.Color.blue())
-        embed.description = f"**Last 20 role changes:**\n\n"
+        username = member_data['username'] if member_data['username'] else t("common.unknown", lang)
+        embed = create_embed(t("commands.role_history.title", lang, username=username), discord.Color.blue())
+        embed.description = t("commands.role_history.header", lang)
 
         for change in role_changes:
             role_name = change.get('role_name', 'Unknown')
             action = change.get('action', 'unknown')
             timestamp = change.get('timestamp', 0)
-            
+
             # Validate action value
             if action not in ("added", "removed"):
                 logger.warning(f"Invalid action '{action}' in role_changes for {member_data['user_id']}")
                 continue
-            
+
             # Escape markdown in role name (avoid embed formatting issues)
             escaped_role_name = discord.utils.escape_markdown(role_name) if role_name else "Unknown"
-            
+
             # Format action with emoji
             action_emoji = "➕" if action == "added" else "➖"
-            action_text = "Added" if action == "added" else "Removed"
-            time_str = format_timestamp(timestamp, 'R', guild_id, self.db)
-            
-            embed.description += f"{action_emoji} {action_text}: **{escaped_role_name}** ({time_str})\n"
+            action_text = t("commands.role_history.added", lang) if action == "added" else t("commands.role_history.removed", lang)
+            time_str = format_timestamp(timestamp, 'R', guild_id, self.db, lang)
+
+            embed.description += t("commands.role_history.line", lang, emoji=action_emoji, action=action_text, role=escaped_role_name, time=time_str)
 
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /role-history for '{user}' in guild {interaction.guild.name}")
@@ -602,7 +603,7 @@ class CommandsCog(commands.Cog):
             days: Optional override for inactive days threshold
         """
         # Check permissions
-        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted, lang = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
@@ -611,7 +612,7 @@ class CommandsCog(commands.Cog):
         if days is not None:
             if not (1 <= days <= 365):
                 await interaction.response.send_message(
-                    embed=create_error_embed("Please provide a value between 1 and 365 days."),
+                    embed=create_error_embed(t("commands.inactive.validate_range", lang), lang),
                     ephemeral=True
                 )
                 return
@@ -623,7 +624,7 @@ class CommandsCog(commands.Cog):
         guild_config = await asyncio.to_thread(self.db.get_guild_config, guild_id)
         if not guild_config:
             await interaction.followup.send(
-                embed=create_error_embed("Guild configuration not found. Please contact an administrator."),
+                embed=create_error_embed(t("commands.inactive.no_guild_config", lang), lang),
                 ephemeral=True
             )
             return
@@ -635,13 +636,8 @@ class CommandsCog(commands.Cog):
         inactive_members = self.db.get_inactive_members(guild_id, inactive_days)
 
         if not inactive_members:
-            embed = create_embed("Inactive Members", discord.Color.blue())
-            embed.description = (
-                f"No members have been inactive for more than {inactive_days} days.\n\n"
-                f"**Note:** The bot can only track a member's last seen time after observing "
-                f"them go offline at least once. Members who were already offline when the bot "
-                f"joined, and haven't gone online since, will not appear here yet."
-            )
+            embed = create_embed(t("commands.inactive.empty_title", lang), discord.Color.blue())
+            embed.description = t("commands.inactive.empty_desc", lang, days=inactive_days)
             await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             return
 
@@ -651,17 +647,17 @@ class CommandsCog(commands.Cog):
 
         for i, chunk in enumerate(chunks):
             embed = create_embed(
-                f"Inactive Members (>{inactive_days} days) - Page {i + 1}/{len(chunks)}",
+                t("commands.inactive.page_title", lang, days=inactive_days, page=i + 1, total=len(chunks)),
                 discord.Color.blue()
             )
 
             for member_data in chunk:
                 # Create a field for each member
-                username = member_data['username'] if member_data['username'] else "Unknown"
-                nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
-                last_seen = format_timestamp(member_data['last_seen'], 'R', guild_id, self.db) if member_data['last_seen'] else "Never"
+                username = member_data['username'] if member_data['username'] else t("common.unknown", lang)
+                nickname = member_data['nickname'] if member_data['nickname'] else t("common.not_set", lang)
+                last_seen = format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang) if member_data['last_seen'] else t("common.never", lang)
 
-                member_info = f"**Nickname:** {nickname}\n**Last Seen:** {last_seen}"
+                member_info = t("commands.inactive.member_info", lang, nickname=nickname, last_seen=last_seen)
                 embed.add_field(name=username, value=member_info, inline=False)
 
             embeds.append(embed)
@@ -688,7 +684,7 @@ class CommandsCog(commands.Cog):
             user: Username, nickname, or user mention (optional)
         """
         # Check permissions
-        can_proceed, error_embed, channels_restricted = await self._check_permissions(interaction)
+        can_proceed, error_embed, channels_restricted, lang = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
@@ -702,45 +698,45 @@ class CommandsCog(commands.Cog):
             stats = self.db.get_guild_message_activity_stats(guild_id, days=365)
             
             if stats['total_365d'] == 0:
-                embed = create_embed(f"📊 Server Chat History - {interaction.guild.name}", discord.Color.blue())
-                embed.description = "No message activity recorded in the last 365 days."
+                embed = create_embed(t("commands.chat_history.server_title", lang, guild=interaction.guild.name), discord.Color.blue())
+                embed.description = t("commands.chat_history.no_activity", lang)
                 await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
                 return
-            
+
             # Create guild-wide stats embed
-            embed = create_embed(f"📊 Server Chat History - {interaction.guild.name}", discord.Color.blue())
-            
-            embed.description = "**📈 Long-Term Statistics (last 365 days)**\n"
-            embed.description += f"• Total Messages: **{stats['total_365d']:,}**\n"
-            embed.description += f"• Average/Day: **{stats['avg_per_day']:,}**\n"
-            
+            embed = create_embed(t("commands.chat_history.server_title", lang, guild=interaction.guild.name), discord.Color.blue())
+
+            embed.description = t("commands.chat_history.longterm_header", lang)
+            embed.description += t("commands.chat_history.total_messages", lang, count=stats['total_365d'])
+            embed.description += t("commands.chat_history.avg_day", lang, avg=stats['avg_per_day'])
+
             if stats['busiest_day']:
-                busiest_str = format_timestamp(stats['busiest_day']['date'], 'D', guild_id, self.db)
-                embed.description += f"• Busiest Day: **{stats['busiest_day']['count']:,}** on {busiest_str}\n"
-            
+                busiest_str = format_timestamp(stats['busiest_day']['date'], 'D', guild_id, self.db, lang)
+                embed.description += t("commands.chat_history.busiest_day", lang, count=stats['busiest_day']['count'], date=busiest_str)
+
             if stats['quietest_day']:
-                quietest_str = format_timestamp(stats['quietest_day']['date'], 'D', guild_id, self.db)
-                embed.description += f"• Quietest Day: **{stats['quietest_day']['count']:,}** on {quietest_str}\n"
-            
-            embed.description += "\n**📊 Activity by Period**\n"
-            embed.description += f"• Last 30 days: **{stats['total_30d']:,}** messages\n"
-            embed.description += f"• Last 90 days: **{stats['total_90d']:,}** messages\n"
-            embed.description += f"• Last 365 days: **{stats['total_365d']:,}** messages\n\n"
-            
-            embed.description += "**📅 Recent Activity**\n"
-            embed.description += f"• Today: **{stats['today']:,}** messages\n"
-            embed.description += f"• This week: **{stats['total_7d']:,}** messages\n"
-            embed.description += f"• This month: **{stats['total_30d']:,}** messages\n\n"
-            
+                quietest_str = format_timestamp(stats['quietest_day']['date'], 'D', guild_id, self.db, lang)
+                embed.description += t("commands.chat_history.quietest_day", lang, count=stats['quietest_day']['count'], date=quietest_str)
+
+            embed.description += "\n" + t("commands.chat_history.period_header", lang)
+            embed.description += t("commands.chat_history.period_30", lang, count=stats['total_30d'])
+            embed.description += t("commands.chat_history.period_90", lang, count=stats['total_90d'])
+            embed.description += t("commands.chat_history.period_365", lang, count=stats['total_365d'])
+
+            embed.description += t("commands.chat_history.recent_header", lang)
+            embed.description += t("commands.chat_history.recent_today", lang, count=stats['today'])
+            embed.description += t("commands.chat_history.recent_week", lang, count=stats['total_7d'])
+            embed.description += t("commands.chat_history.recent_month", lang, count=stats['total_30d'])
+
             # Get total member count for comparison
             total_members = len([m for m in interaction.guild.members if not m.bot])
-            
-            embed.description += "**👥 Member Stats**\n"
-            embed.description += f"• Active members (30d): **{stats['active_members_30d']:,}** / {total_members:,}\n"
+
+            embed.description += t("commands.chat_history.member_stats_header", lang)
+            embed.description += t("commands.chat_history.active_members", lang, active=stats['active_members_30d'], total=total_members)
             if stats['avg_per_member'] > 0:
-                embed.description += f"• Messages per active member: **{stats['avg_per_member']:,}**\n"
-            
-            embed.set_footer(text="Activity data spans the last 365 days • Use /chat-history @user for individual stats")
+                embed.description += t("commands.chat_history.per_member", lang, count=stats['avg_per_member'])
+
+            embed.set_footer(text=t("commands.chat_history.footer_guild", lang))
             
             await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             logger.info(f"User {interaction.user} used /chat-history (guild-wide) in guild {interaction.guild.name}")
@@ -754,20 +750,20 @@ class CommandsCog(commands.Cog):
 
         if not member_data:
             await interaction.followup.send(
-                embed=create_error_embed("User not found in the database."),
+                embed=create_error_embed(t("commands.role_history.not_found", lang), lang),
                 ephemeral=not channels_restricted
             )
             return
 
         user_id = member_data['user_id']
-        username = member_data['username'] if member_data['username'] else "Unknown"
+        username = member_data['username'] if member_data['username'] else t("common.unknown", lang)
 
         # Get 365 days of message activity
         activity_trend = self.db.get_message_activity_trend(guild_id, user_id, days=365)
 
         if not activity_trend:
-            embed = create_embed(f"📊 Chat History - {username}", discord.Color.blue())
-            embed.description = "No message activity recorded in the last 365 days."
+            embed = create_embed(t("commands.chat_history.user_title", lang, username=username), discord.Color.blue())
+            embed.description = t("commands.chat_history.no_activity", lang)
             await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             return
 
@@ -776,40 +772,40 @@ class CommandsCog(commands.Cog):
         avg_per_day = round(total_messages / 365, 1)
         max_day = max(activity_trend, key=lambda r: r['message_count'])
         min_day = min(activity_trend, key=lambda r: r['message_count'])
-        max_day_str = format_timestamp(max_day['date'], 'D', guild_id, self.db)
-        min_day_str = format_timestamp(min_day['date'], 'D', guild_id, self.db)
+        max_day_str = format_timestamp(max_day['date'], 'D', guild_id, self.db, lang)
+        min_day_str = format_timestamp(min_day['date'], 'D', guild_id, self.db, lang)
 
         # Get summary statistics
         activity_stats_30 = self.db.get_message_activity_period(guild_id, user_id, days=30)
         activity_stats_90 = self.db.get_message_activity_period(guild_id, user_id, days=90)
 
         # Create main embed with statistics
-        embed = create_embed(f"📊 Chat History - {username}", discord.Color.blue())
-        
-        embed.description = "**📈 Long-Term Statistics (last 365 days)**\n"
-        embed.description += f"• Total Messages: **{total_messages:,}**\n"
-        embed.description += f"• Average/Day: **{avg_per_day}**\n"
-        embed.description += f"• Busiest Day: **{max_day['message_count']:,}** on {max_day_str}\n"
-        embed.description += f"• Quietest Day: **{min_day['message_count']:,}** on {min_day_str}\n\n"
-        
-        embed.description += "**📊 Activity by Period**\n"
-        embed.description += f"• Last 30 days: **{activity_stats_30['this_month']:,}** messages\n"
-        embed.description += f"• Last 90 days: **{activity_stats_90['this_month']:,}** messages\n"
-        embed.description += f"• Last 365 days: **{total_messages:,}** messages\n\n"
-        
+        embed = create_embed(t("commands.chat_history.user_title", lang, username=username), discord.Color.blue())
+
+        embed.description = t("commands.chat_history.longterm_header", lang)
+        embed.description += t("commands.chat_history.total_messages", lang, count=total_messages)
+        embed.description += t("commands.chat_history.avg_day_user", lang, avg=avg_per_day)
+        embed.description += t("commands.chat_history.busiest_day", lang, count=max_day['message_count'], date=max_day_str)
+        embed.description += t("commands.chat_history.quietest_day_user", lang, count=min_day['message_count'], date=min_day_str)
+
+        embed.description += t("commands.chat_history.period_header", lang)
+        embed.description += t("commands.chat_history.period_30", lang, count=activity_stats_30['this_month'])
+        embed.description += t("commands.chat_history.period_90", lang, count=activity_stats_90['this_month'])
+        embed.description += t("commands.chat_history.period_365", lang, count=total_messages)
+
         # Calculate monthly breakdown for last 90 days
         if activity_trend:
             now = datetime.now()
-            current_month_count = sum(r['message_count'] for r in activity_trend 
-                                     if (now.year == datetime.fromtimestamp(r['date']).year and 
+            current_month_count = sum(r['message_count'] for r in activity_trend
+                                     if (now.year == datetime.fromtimestamp(r['date']).year and
                                          now.month == datetime.fromtimestamp(r['date']).month))
-            
-            embed.description += "**📅 Recent Activity**\n"
-            embed.description += f"• This month: **{current_month_count:,}** messages\n"
-            embed.description += f"• This week: **{activity_stats_30['this_week']:,}** messages\n"
-            embed.description += f"• Today: **{activity_stats_30['today']:,}** messages\n"
 
-        embed.set_footer(text="Activity data spans the last 365 days. Data before account join is unavailable.")
+            embed.description += t("commands.chat_history.recent_header", lang)
+            embed.description += t("commands.chat_history.recent_month_user", lang, count=current_month_count)
+            embed.description += t("commands.chat_history.recent_week", lang, count=activity_stats_30['this_week'])
+            embed.description += t("commands.chat_history.recent_today", lang, count=activity_stats_30['today'])
+
+        embed.set_footer(text=t("commands.chat_history.footer_user", lang))
 
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /chat-history for '{user}' in guild {interaction.guild.name}")
@@ -826,7 +822,7 @@ class CommandsCog(commands.Cog):
             interaction: Discord interaction
         """
         # Check permissions
-        can_proceed, error_embed, _ = await self._check_permissions(interaction)
+        can_proceed, error_embed, _, lang = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
@@ -841,26 +837,26 @@ class CommandsCog(commands.Cog):
 
         if not member_data:
             await interaction.followup.send(
-                embed=create_error_embed("You aren't currently tracked on this server."),
+                embed=create_error_embed(t("commands.mystats.not_tracked", lang), lang),
                 ephemeral=True
             )
             return
 
-        username = member_data['username'] if member_data['username'] else "Unknown"
-        embed = create_embed(f"📊 Your Stats - {username}", discord.Color.blue())
+        username = member_data['username'] if member_data['username'] else t("common.unknown", lang)
+        embed = create_embed(t("commands.mystats.title", lang, username=username), discord.Color.blue())
         embed.description = ""
 
         # ===== MEMBERSHIP SECTION =====
         if member_data['join_date']:
-            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db)
+            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db, lang)
             join_position = member_data.get('join_position')
             if join_position:
-                embed.description += f"📥 Joined Server: {join_str} (Member #{join_position})\n"
+                embed.description += t("commands.whois.joined_with_position", lang, date=join_str, position=join_position)
             else:
-                embed.description += f"📥 Joined Server: {join_str}\n"
+                embed.description += t("commands.whois.joined", lang, date=join_str)
 
-        nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
-        embed.description += f"🏷️ Nickname: {nickname}\n"
+        nickname = member_data['nickname'] if member_data['nickname'] else t("common.not_set", lang)
+        embed.description += t("commands.whois.nickname", lang, nickname=nickname)
 
         # Own nickname history - it's the caller's data, so no admin gate
         if member_data.get('nickname_history'):
@@ -868,7 +864,7 @@ class CommandsCog(commands.Cog):
                 history = json.loads(member_data['nickname_history'])
                 previous_nicknames = [n for n in history if n != nickname]
                 if previous_nicknames:
-                    embed.description += f"     Previously known as: {', '.join(previous_nicknames)}\n"
+                    embed.description += t("commands.whois.previously_known", lang, names=', '.join(previous_nicknames))
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -877,11 +873,11 @@ class CommandsCog(commands.Cog):
         # ===== STATUS SECTION =====
         member = interaction.guild.get_member(user_id)
         if member and member.status != discord.Status.offline:
-            embed.description += f"⏱️ Last Seen: Currently online\n"
+            embed.description += t("commands.whois.last_seen_online", lang)
         elif member_data['last_seen'] and member_data['last_seen'] != 0:
-            embed.description += f"⏱️ Last Seen: {format_timestamp(member_data['last_seen'], 'R', guild_id, self.db)}\n"
+            embed.description += t("commands.whois.last_seen", lang, date=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang))
         else:
-            embed.description += f"⏱️ Last Seen: Not available yet (no offline event recorded)\n"
+            embed.description += t("commands.whois.last_seen_unavailable", lang)
 
         embed.description += "\n"
 
@@ -893,19 +889,19 @@ class CommandsCog(commands.Cog):
             self.db.get_message_activity_trend, guild_id, user_id, 365
         )
 
-        embed.description += "📊 Message Activity:\n"
-        embed.description += f"     • Today: {activity_stats['today']:,} messages\n"
-        embed.description += f"     • This week: {activity_stats['this_week']:,} messages\n"
-        embed.description += f"     • This month: {activity_stats['this_month']:,} messages\n"
+        embed.description += t("commands.mystats.activity_header", lang)
+        embed.description += t("commands.whois.activity_today", lang, count=activity_stats['today'])
+        embed.description += t("commands.whois.activity_week", lang, count=activity_stats['this_week'])
+        embed.description += t("commands.whois.activity_month", lang, count=activity_stats['this_month'])
 
         if activity_trend:
             total_365 = sum(r['message_count'] for r in activity_trend)
             busiest = max(activity_trend, key=lambda r: r['message_count'])
-            busiest_str = format_timestamp(busiest['date'], 'D', guild_id, self.db)
-            embed.description += f"     • Last 365 days: {total_365:,} messages\n"
-            embed.description += f"     • Busiest day: {busiest['message_count']:,} messages on {busiest_str}\n"
+            busiest_str = format_timestamp(busiest['date'], 'D', guild_id, self.db, lang)
+            embed.description += t("commands.mystats.activity_365", lang, count=total_365)
+            embed.description += t("commands.mystats.activity_busiest", lang, count=busiest['message_count'], date=busiest_str)
 
-        embed.set_footer(text="Only you can see this message")
+        embed.set_footer(text=t("commands.mystats.footer", lang))
 
         await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"User {interaction.user} used /mystats in guild {interaction.guild.name}")
@@ -924,15 +920,10 @@ class CommandsCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
-        embed = create_embed("⚠️ Confirm Data Deletion", discord.Color.orange())
-        embed.description = (
-            "This will **delete your tracked data in all servers** using this bot "
-            "(last seen, join info, nicknames, role history, and message activity counts) "
-            "and **stop all future tracking** of your account.\n\n"
-            "**This cannot be undone.** You can re-enable tracking later with `/optin`, "
-            "but deleted data is not restored."
-        )
-        view = ForgetMeConfirmView(self.bot, self.db, interaction.user.id)
+        lang = guild_language(self.db.get_guild_config(interaction.guild_id))
+        embed = create_embed(t("commands.forgetme.confirm_title", lang), discord.Color.orange())
+        embed.description = t("commands.forgetme.confirm_desc", lang)
+        view = ForgetMeConfirmView(self.bot, self.db, interaction.user.id, lang)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="optin", description="✅ Re-enable activity tracking for your account")
@@ -947,10 +938,11 @@ class CommandsCog(commands.Cog):
             interaction: Discord interaction
         """
         user_id = interaction.user.id
+        lang = guild_language(self.db.get_guild_config(interaction.guild_id))
 
         if user_id not in self.bot.opted_out_users:
             await interaction.response.send_message(
-                embed=create_error_embed("You are not opted out — your activity is already being tracked."),
+                embed=create_error_embed(t("commands.optin.not_opted_out", lang), lang),
                 ephemeral=True
             )
             return
@@ -959,7 +951,7 @@ class CommandsCog(commands.Cog):
 
         if not await asyncio.to_thread(self.db.remove_opted_out_user, user_id):
             await interaction.followup.send(
-                embed=create_error_embed("Failed to update your tracking preference. Please try again later."),
+                embed=create_error_embed(t("commands.optin.update_failed", lang), lang),
                 ephemeral=True
             )
             return
@@ -978,10 +970,7 @@ class CommandsCog(commands.Cog):
                     await asyncio.to_thread(tracking_cog._ensure_member_exists, member)
 
         await interaction.followup.send(
-            embed=create_success_embed(
-                "Tracking re-enabled. Your stats start fresh from now — "
-                "previously deleted data is not restored."
-            ),
+            embed=create_success_embed(t("commands.optin.success", lang), lang),
             ephemeral=True
         )
         logger.info(f"User {interaction.user} ({user_id}) opted back in to tracking")
@@ -991,32 +980,23 @@ class CommandsCog(commands.Cog):
         import psutil
         import os
         import sys
-        
-        embed = create_embed("📊 LastSeen", discord.Color.green())
 
-        embed.description = (
-            "**LastSeen** is a Discord bot for monitoring and tracking user activity "
-            "across guilds.\n\n"
-            "It tracks:\n"
-            "• User joins and leaves\n"
-            "• Nickname changes\n"
-            "• Role updates\n"
-            "• Presence and activity status\n\n"
-            "Designed for server moderators who want clear insight into member activity "
-            "without unnecessary noise."
-        )
+        lang = guild_language(self.db.get_guild_config(interaction.guild_id) if interaction.guild_id else None)
+        embed = create_embed(t("commands.about.title", lang), discord.Color.green())
+
+        embed.description = t("commands.about.description", lang)
 
         # Bot Statistics
         bot_stats = self.db.get_bot_statistics()
-        
+
         embed.add_field(
-            name="📡 Servers served:",
+            name=t("commands.about.servers_served", lang),
             value=f"{bot_stats['total_guilds']:,}",
             inline=True
         )
-        
+
         embed.add_field(
-            name="👥 Users counted:",
+            name=t("commands.about.users_counted", lang),
             value=f"{bot_stats['total_users']:,}",
             inline=True
         )
@@ -1070,27 +1050,24 @@ class CommandsCog(commands.Cog):
         )
         
         embed.add_field(
-            name="⚙️ System Resources",
+            name=t("commands.about.system_resources", lang),
             value=system_info,
             inline=False
         )
 
         embed.add_field(
-            name="🔐 Privacy",
-            value="This bot does **not** store or read message content. "
-                "Only metadata required for activity tracking is recorded.\n"
-                "Use `/forgetme` to delete your data and opt out of tracking.\n"
-                "[Privacy Policy](https://lastseen.bot.nu/privacy-policy/)",
+            name=t("commands.about.privacy_title", lang),
+            value=t("commands.about.privacy_value", lang),
             inline=False
         )
 
         embed.add_field(
-            name="🔗 Need Help / Have Suggestions?",
-            value="[Join Our Community Server](https://discord.gg/d3N5sd58fh)",
+            name=t("commands.about.help_title", lang),
+            value=t("commands.about.help_value", lang),
             inline=False
         )
 
-        embed.set_footer(text="Use /help to see available commands")
+        embed.set_footer(text=t("commands.about.footer", lang))
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -1121,10 +1098,11 @@ class CommandsCog(commands.Cog):
         """Advanced member search with filtering and export."""
         # Check admin permission
         guild_config = self.db.get_guild_config(interaction.guild_id)
+        lang = guild_language(guild_config)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
         if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
-                "❌ This command requires admin permissions.",
+                t("commands.search.admin_required", lang),
                 ephemeral=True
             )
             return
@@ -1132,7 +1110,7 @@ class CommandsCog(commands.Cog):
         # Validate export parameter
         if export and export.lower() not in ['none', 'csv', 'txt']:
             await interaction.response.send_message(
-                f"❌ Invalid export format: '{export}'. Use: csv, txt, or none",
+                t("commands.search.invalid_export", lang, export=export),
                 ephemeral=True
             )
             return
@@ -1140,11 +1118,11 @@ class CommandsCog(commands.Cog):
         # Check channel restrictions
         allowed_channels_json = guild_config.get('allowed_channels') if guild_config else None
         channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
-        
+
         # Check if command is allowed in current channel
         if not is_channel_allowed(interaction.channel_id, guild_config):
             await interaction.response.send_message(
-                "❌ Bot commands are not allowed in this channel. Please use an allowed channel.",
+                t("commands.search.channel_not_allowed", lang),
                 ephemeral=True
             )
             return
@@ -1154,9 +1132,9 @@ class CommandsCog(commands.Cog):
 
         guild = interaction.guild
         if not guild:
-            await interaction.followup.send("❌ This command can only be used in a server.", ephemeral=True)
+            await interaction.followup.send(t("commands.search.guild_only", lang), ephemeral=True)
             return
-        
+
         guild_id = guild.id
 
         try:
@@ -1169,10 +1147,11 @@ class CommandsCog(commands.Cog):
                 joined=joined,
                 departed=departed,
                 username=username,
-                guild=guild
+                guild=guild,
+                lang=lang
             )
         except ValueError as e:
-            await interaction.followup.send(f"❌ Invalid filter syntax: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.search.invalid_filter", lang, error=e), ephemeral=True)
             return
 
         # Get all members from database. A departed filter targets members who
@@ -1197,11 +1176,11 @@ class CommandsCog(commands.Cog):
                     continue
                 # Database-only filters still work
                 if self._matches_db_filters(member_data, filters):
-                    filtered.append(self._create_db_only_result(member_data))
+                    filtered.append(self._create_db_only_result(member_data, lang))
             else:
                 # Full Discord data available
                 if self._matches_all_filters(member_data, discord_member, filters):
-                    filtered.append(self._enrich_member_data(member_data, discord_member))
+                    filtered.append(self._enrich_member_data(member_data, discord_member, lang))
 
         # Log cache misses. A departed search always misses (left members are
         # never in the Discord cache), so the warning is only noise there.
@@ -1211,7 +1190,7 @@ class CommandsCog(commands.Cog):
         # Check if no results
         if len(filtered) == 0:
             await interaction.followup.send(
-                "No members found matching your filters. Try adjusting your criteria.",
+                t("commands.search.no_results", lang),
                 ephemeral=not channels_restricted
             )
             return
@@ -1220,8 +1199,7 @@ class CommandsCog(commands.Cog):
         MAX_RESULTS = 1000
         if len(filtered) > MAX_RESULTS:
             await interaction.followup.send(
-                f"⚠️ Found {len(filtered)} members. Showing first {MAX_RESULTS}. "
-                f"Consider adding more filters to narrow results.",
+                t("commands.search.too_many", lang, count=len(filtered), max=MAX_RESULTS),
                 ephemeral=not channels_restricted
             )
             filtered = filtered[:MAX_RESULTS]
@@ -1231,9 +1209,9 @@ class CommandsCog(commands.Cog):
 
         # Handle export or display
         if export.lower() in ["csv", "txt"]:
-            await self._export_search_results(interaction, filtered, export.lower(), filters, channels_restricted)
+            await self._export_search_results(interaction, filtered, export.lower(), filters, channels_restricted, lang)
         else:
-            await self._display_search_results(interaction, filtered, filters, channels_restricted)
+            await self._display_search_results(interaction, filtered, filters, channels_restricted, lang)
 
     @app_commands.command(name="user-stats", description="📊 View server statistics and analytics")
     @app_commands.guild_only()
@@ -1247,7 +1225,8 @@ class CommandsCog(commands.Cog):
         """
         # Check if user has permission (admin or user role)
         guild_config = self.db.get_guild_config(interaction.guild_id)
-        
+        lang = guild_language(guild_config)
+
         if guild_config and not has_bot_admin_role(interaction.user, guild_config.get('bot_admin_role_name', 'LastSeen Admin')):
             # Not admin, check for user role
             user_role_required = guild_config.get('user_role_required', 0)
@@ -1255,96 +1234,97 @@ class CommandsCog(commands.Cog):
                 user_role_name = guild_config.get('user_role_name', 'LastSeen User')
                 if not discord.utils.get(interaction.user.roles, name=user_role_name):
                     await interaction.response.send_message(
-                        f"❌ You need the '{user_role_name}' role or admin permissions to use this command.",
+                        t("commands.user_stats.no_permission", lang, role=user_role_name),
                         ephemeral=True
                     )
                     return
-        
+
         # Check channel restrictions
         allowed_channels_json = guild_config.get('allowed_channels') if guild_config else None
         channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
-        
+
         # Check if command is allowed in current channel
         if not is_channel_allowed(interaction.channel_id, guild_config):
             await interaction.response.send_message(
-                "❌ Bot commands are not allowed in this channel. Please use an allowed channel.",
+                t("commands.search.channel_not_allowed", lang),
                 ephemeral=True
             )
             return
-        
+
         await interaction.response.defer(ephemeral=not channels_restricted)
-        
+
         try:
             # Get overview statistics
             stats = self.db.get_server_snapshot_stats(interaction.guild_id)
-            
+
             if not stats:
                 await interaction.followup.send(
-                    "❌ Failed to retrieve server statistics. Please try again.",
+                    t("commands.user_stats.stats_failed", lang),
                     ephemeral=not channels_restricted
                 )
                 return
-            
+
             # Get previous month stats for comparison
             prev_stats = self.db.get_member_growth_stats(interaction.guild_id, days=60)
             growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-            
+
             # Add guild_id to stats for distribution chart
             stats['guild_id'] = interaction.guild_id
-            
+
             # Create overview embed
-            embed = self._create_stats_overview_embed(stats, growth_rate)
-            
+            embed = self._create_stats_overview_embed(stats, growth_rate, lang)
+
             # Create interactive view
-            view = UserStatsView(interaction.guild_id, self.db)
-            
+            view = UserStatsView(interaction.guild_id, self.db, lang)
+
             await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
             logger.info(f"User {interaction.user} viewed user-stats in guild {interaction.guild.name}")
-            
+
         except Exception as e:
             logger.error(f"Failed to display user stats: {e}", exc_info=True)
             await interaction.followup.send(
-                f"❌ An error occurred while retrieving statistics: {e}",
+                t("commands.user_stats.error", lang, error=e),
                 ephemeral=not channels_restricted
             )
 
-    def _create_stats_overview_embed(self, stats: dict, growth_rate: float) -> discord.Embed:
+    def _create_stats_overview_embed(self, stats: dict, growth_rate: float, lang: str = 'en') -> discord.Embed:
         """Create the main overview embed for user stats."""
-        embed = create_embed("📊 User Statistics Overview", discord.Color.blue())
-        
+        embed = create_embed(t("commands.user_stats.overview_title", lang), discord.Color.blue())
+
         # Format growth indicator
         growth_indicator = "📈" if growth_rate > 0 else "📉" if growth_rate < 0 else "➡️"
-        growth_text = f"{growth_indicator} {abs(growth_rate):.1f}% vs last month" if growth_rate != 0 else "No change"
-        
+        growth_text = t("commands.user_stats.vs_last_month", lang, indicator=growth_indicator, pct=abs(growth_rate)) if growth_rate != 0 else t("commands.user_stats.no_change", lang)
+
         # Member counts section
         active_pct = (stats['active_30d'] / stats['total_members'] * 100) if stats['total_members'] > 0 else 0
         inactive_pct = (stats['inactive_30d'] / stats['total_members'] * 100) if stats['total_members'] > 0 else 0
-        
-        embed.description = (
-            f"**👥 Total Members:** {stats['total_members']:,} ({growth_text})\n"
-            f"**✅ Active (30d):** {stats['active_30d']:,} ({active_pct:.1f}%)\n"
-            f"**💤 Inactive (30d):** {stats['inactive_30d']:,} ({inactive_pct:.1f}%)\n"
+
+        embed.description = t(
+            "commands.user_stats.overview_desc", lang,
+            total=stats['total_members'], growth=growth_text,
+            active=stats['active_30d'], active_pct=active_pct,
+            inactive=stats['inactive_30d'], inactive_pct=inactive_pct
         )
-        
+
         # This month section
         net_indicator = "🔼" if stats['net_growth'] > 0 else "🔽" if stats['net_growth'] < 0 else "➡️"
         embed.add_field(
-            name="📅 This Month",
-            value=(
-                f"• New joins: **{stats['joins_this_month']:,}**\n"
-                f"• Members left: **{stats['leaves_this_month']:,}**\n"
-                f"• Net growth: **{net_indicator} {stats['net_growth']:,}**"
+            name=t("commands.user_stats.this_month_title", lang),
+            value=t(
+                "commands.user_stats.this_month_value", lang,
+                joins=stats['joins_this_month'], leaves=stats['leaves_this_month'],
+                indicator=net_indicator, net=stats['net_growth']
             ),
             inline=False
         )
-        
+
         # Activity section
         embed.add_field(
-            name="💬 Activity (30 days)",
-            value=(
-                f"• Total messages: **{stats['total_messages_30d']:,}**\n"
-                f"• Avg per member: **{stats['avg_messages_per_member']:.1f}**\n"
-                f"• Most active: **{stats['most_active_user']}** ({stats['most_active_count']:,} msgs)"
+            name=t("commands.user_stats.activity_title", lang),
+            value=t(
+                "commands.user_stats.activity_value", lang,
+                total=stats['total_messages_30d'], avg=stats['avg_messages_per_member'],
+                user=stats['most_active_user'], count=stats['most_active_count']
             ),
             inline=False
         )
@@ -1378,15 +1358,15 @@ class CommandsCog(commands.Cog):
             )
 
             embed.add_field(
-                name="⏰ Last Seen Distribution",
+                name=t("commands.user_stats.distribution_title", lang),
                 value=chart,
                 inline=False
             )
-        
-        embed.set_footer(text="Click buttons below to view detailed reports")
+
+        embed.set_footer(text=t("commands.user_stats.overview_footer", lang))
         return embed
 
-    def _parse_search_filters(self, roles, status, inactive, activity, joined, departed, username, guild) -> dict:
+    def _parse_search_filters(self, roles, status, inactive, activity, joined, departed, username, guild, lang='en') -> dict:
         """Parse and validate all filter parameters."""
         filters = {}
 
@@ -1443,24 +1423,24 @@ class CommandsCog(commands.Cog):
         if status:
             status_lower = status.lower()
             if status_lower not in ['online', 'offline', 'idle', 'dnd', 'all']:
-                raise ValueError("Status must be: online, offline, idle, dnd, or all")
+                raise ValueError(t("commands.search.err_status", lang))
             filters['status'] = status_lower if status_lower != 'all' else None
 
         # Parse inactive (days)
         if inactive:
-            filters['inactive'] = self._parse_filter_value(inactive, 'days')
+            filters['inactive'] = self._parse_filter_value(inactive, 'days', lang)
 
         # Parse activity (message count)
         if activity:
-            filters['activity'] = self._parse_filter_value(activity, 'messages')
+            filters['activity'] = self._parse_filter_value(activity, 'messages', lang)
 
         # Parse joined date
         if joined:
-            filters['joined'] = self._parse_date_filter(joined)
+            filters['joined'] = self._parse_date_filter(joined, lang)
 
         # Parse departed (left) date
         if departed:
-            filters['departed'] = self._parse_date_filter(departed)
+            filters['departed'] = self._parse_date_filter(departed, lang)
 
         # Parse username
         if username:
@@ -1468,43 +1448,43 @@ class CommandsCog(commands.Cog):
 
         return filters
 
-    def _parse_filter_value(self, filter_str: str, unit: str) -> dict:
+    def _parse_filter_value(self, filter_str: str, unit: str, lang: str = 'en') -> dict:
         """Parse comparison filters like >30, <7, =14."""
         match = re.match(r'^([<>=]?)(\d+)$', filter_str.strip())
         if not match:
-            raise ValueError(f"Invalid {unit} filter format. Use: >30, <7, or =14")
-        
+            raise ValueError(t("commands.search.err_filter_format", lang, unit=unit))
+
         operator = match.group(1) or '='
         try:
             value = int(match.group(2))
         except ValueError:
-            raise ValueError(f"Invalid numeric value in {unit} filter")
-        
+            raise ValueError(t("commands.search.err_filter_nan", lang, unit=unit))
+
         # Bounds checking to prevent unreasonable values
         if unit == 'days' and (value < 0 or value > 36500):  # ~100 years
-            raise ValueError(f"Days value must be between 0 and 36500 (got {value})")
+            raise ValueError(t("commands.search.err_days_range", lang, value=value))
         elif unit == 'messages' and (value < 0 or value > 10000000):  # 10M messages
-            raise ValueError(f"Message count must be between 0 and 10,000,000 (got {value})")
-        
+            raise ValueError(t("commands.search.err_messages_range", lang, value=value))
+
         return {'operator': operator, 'value': value}
 
-    def _parse_date_filter(self, date_str: str) -> dict:
+    def _parse_date_filter(self, date_str: str, lang: str = 'en') -> dict:
         """Parse date filters like >2024-01-01."""
         match = re.match(r'^([<>=]?)(\d{4}-\d{2}-\d{2})$', date_str.strip())
         if not match:
-            raise ValueError("Invalid date format. Use: >2024-01-01 or <2023-12-31")
-        
+            raise ValueError(t("commands.search.err_date_format", lang))
+
         operator = match.group(1) or '='
         try:
             date = datetime.strptime(match.group(2), '%Y-%m-%d')
         except ValueError:
-            raise ValueError(f"Invalid date: {match.group(2)}")
-        
+            raise ValueError(t("commands.search.err_date_invalid", lang, date=match.group(2)))
+
         # Validate date is reasonable (Discord launched in 2015)
         if date.year < 2015:
-            raise ValueError("Date must be 2015 or later (Discord launch year)")
+            raise ValueError(t("commands.search.err_date_min", lang))
         if date.year > 2100:
-            raise ValueError("Date must be before year 2100")
+            raise ValueError(t("commands.search.err_date_max", lang))
         
         timestamp = int(date.replace(tzinfo=timezone.utc).timestamp())
         
@@ -1612,19 +1592,19 @@ class CommandsCog(commands.Cog):
 
         return True
 
-    def _create_db_only_result(self, member_data: dict) -> dict:
+    def _create_db_only_result(self, member_data: dict, lang: str = 'en') -> dict:
         """Create result dict from database data only (no Discord data)."""
         last_seen = member_data.get('last_seen')
         return {
             'username': member_data['username'],
             'display_name': member_data.get('display_name', ''),
             'user_id': member_data['user_id'],
-            'status': 'Unknown',
+            'status': t('common.unknown', lang),
             'last_seen': last_seen,
             'last_seen_ts': last_seen if last_seen is not None else 0,
-            'last_seen_str': self._format_relative_time(last_seen),
+            'last_seen_str': self._format_relative_time(last_seen, lang),
             'joined_at': member_data.get('join_date'),
-            'joined_at_str': self._format_relative_time(member_data.get('join_date')),
+            'joined_at_str': self._format_relative_time(member_data.get('join_date'), lang),
             'join_position': member_data.get('join_position', 'N/A'),
             'roles': [],
             'is_tracked': member_data.get('is_tracked', True),
@@ -1633,7 +1613,7 @@ class CommandsCog(commands.Cog):
             'activity_today': 0
         }
 
-    def _enrich_member_data(self, member_data: dict, discord_member: discord.Member) -> dict:
+    def _enrich_member_data(self, member_data: dict, discord_member: discord.Member, lang: str = 'en') -> dict:
         """Enrich database data with Discord member information."""
         last_seen = member_data.get('last_seen')
         
@@ -1662,9 +1642,9 @@ class CommandsCog(commands.Cog):
             'status': str(discord_member.status),
             'last_seen': last_seen,
             'last_seen_ts': last_seen if last_seen is not None else 0,
-            'last_seen_str': self._format_relative_time(last_seen),
+            'last_seen_str': self._format_relative_time(last_seen, lang),
             'joined_at': member_data.get('join_date'),
-            'joined_at_str': self._format_relative_time(member_data.get('join_date')),
+            'joined_at_str': self._format_relative_time(member_data.get('join_date'), lang),
             'join_position': member_data.get('join_position', 'N/A'),
             'roles': [r.name for r in discord_member.roles if r.name != '@everyone'],
             'is_tracked': member_data.get('is_tracked', True),
@@ -1673,61 +1653,61 @@ class CommandsCog(commands.Cog):
             'activity_today': activity_data.get('today', 0)
         }
 
-    def _format_relative_time(self, timestamp: int) -> str:
+    def _format_relative_time(self, timestamp: int, lang: str = 'en') -> str:
         """Format timestamp as relative time."""
         if timestamp is None:
-            return 'Never'
-        
+            return t('common.never', lang)
+
         if timestamp == 0:
-            return 'Online now'
-        
+            return t('commands.search.online_now', lang)
+
         # Validate timestamp is reasonable (not negative, not too far in future)
         if timestamp < 0:
-            return 'Invalid date'
-        
+            return t('common.invalid_date', lang)
+
         try:
             now = datetime.now(timezone.utc)
             dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         except (ValueError, OSError, OverflowError):
-            return 'Invalid date'
+            return t('common.invalid_date', lang)
         delta = now - dt
-        
-        if delta.days > 365:
-            return f"{delta.days // 365}y ago"
-        elif delta.days > 30:
-            return f"{delta.days // 30}mo ago"
-        elif delta.days > 0:
-            return f"{delta.days}d ago"
-        elif delta.seconds > 3600:
-            return f"{delta.seconds // 3600}h ago"
-        elif delta.seconds > 60:
-            return f"{delta.seconds // 60}m ago"
-        else:
-            return "Just now"
 
-    async def _display_search_results(self, interaction: discord.Interaction, results: list, filters: dict, channels_restricted: bool = False):
+        if delta.days > 365:
+            return t('commands.search.years_ago', lang, n=delta.days // 365)
+        elif delta.days > 30:
+            return t('commands.search.months_ago', lang, n=delta.days // 30)
+        elif delta.days > 0:
+            return t('commands.search.days_ago', lang, n=delta.days)
+        elif delta.seconds > 3600:
+            return t('commands.search.hours_ago', lang, n=delta.seconds // 3600)
+        elif delta.seconds > 60:
+            return t('commands.search.minutes_ago', lang, n=delta.seconds // 60)
+        else:
+            return t('commands.search.just_now', lang)
+
+    async def _display_search_results(self, interaction: discord.Interaction, results: list, filters: dict, channels_restricted: bool = False, lang: str = 'en'):
         """Display search results with pagination."""
         # Create SearchResultsView
-        view = SearchResultsView(results, filters, per_page=15)
+        view = SearchResultsView(results, filters, per_page=15, lang=lang)
         embed = view.create_embed()
         await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
 
-    async def _export_search_results(self, interaction: discord.Interaction, results: list, format: str, filters: dict, channels_restricted: bool = False):
+    async def _export_search_results(self, interaction: discord.Interaction, results: list, format: str, filters: dict, channels_restricted: bool = False, lang: str = 'en'):
         """Export search results to file."""
         try:
             if format == "csv":
                 file = self._generate_csv(results)
             else:  # txt
                 file = self._generate_txt(results, filters)
-            
+
             await interaction.followup.send(
-                f"✅ Exported {len(results)} members to {format.upper()}",
+                t("commands.search.export_success", lang, count=len(results), format=format.upper()),
                 file=file,
                 ephemeral=not channels_restricted
             )
         except Exception as e:
             logger.error(f"Failed to generate export: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Failed to generate export: {e}", ephemeral=not channels_restricted)
+            await interaction.followup.send(t("commands.search.export_failed", lang, error=e), ephemeral=not channels_restricted)
 
     def _generate_csv(self, results: list) -> discord.File:
         """Generate CSV export with all member data."""
@@ -1829,14 +1809,20 @@ class CommandsCog(commands.Cog):
 class SearchResultsView(discord.ui.View):
     """Interactive pagination view for search results."""
 
-    def __init__(self, results: list, filters: dict, per_page: int = 15):
+    def __init__(self, results: list, filters: dict, per_page: int = 15, lang: str = 'en'):
         super().__init__(timeout=300)  # 5 minute timeout
         self.results = results if results else []
         self.filters = filters
+        self.lang = lang
         self.per_page = max(1, per_page)  # Ensure at least 1 per page
         self.current_page = 0
         self.max_page = max(0, (len(self.results) - 1) // self.per_page) if self.results else 0
-        
+
+        self.prev_button.label = t("commands.search_view.btn_prev", lang)
+        self.next_button.label = t("commands.search_view.btn_next", lang)
+        self.export_csv_button.label = t("commands.search_view.btn_export_csv", lang)
+        self.export_txt_button.label = t("commands.search_view.btn_export_txt", lang)
+
         # Update button states
         self._update_buttons()
 
@@ -1852,35 +1838,36 @@ class SearchResultsView(discord.ui.View):
 
     def create_embed(self) -> discord.Embed:
         """Create embed for current page."""
+        lang = self.lang
         # Bounds check to prevent index errors
         if not self.results:
             return discord.Embed(
-                title="🔍 Member Search Results",
-                description="No results to display",
+                title=t("commands.search_view.title", lang),
+                description=t("commands.search_view.no_results_display", lang),
                 color=discord.Color.blue()
             )
-        
+
         # Ensure current_page is within bounds
         self.current_page = max(0, min(self.current_page, self.max_page))
-        
+
         start = self.current_page * self.per_page
         end = min(start + self.per_page, len(self.results))
         page_results = self.results[start:end]
-        
+
         embed = discord.Embed(
-            title="🔍 Member Search Results",
-            description=f"Found **{len(self.results)}** members",
+            title=t("commands.search_view.title", lang),
+            description=t("commands.search_view.found", lang, count=len(self.results)),
             color=discord.Color.blue()
         )
-        
+
         # Add filter summary
         filter_text = self._format_filters()
         if filter_text:
             # Discord embed field value limit is 1024 characters
             if len(filter_text) > 1024:
                 filter_text = filter_text[:1021] + "..."
-            embed.add_field(name="Filters Applied", value=filter_text, inline=False)
-        
+            embed.add_field(name=t("commands.search_view.filters_applied", lang), value=filter_text, inline=False)
+
         # Add results
         result_lines = []
         for i, member in enumerate(page_results, start=start+1):
@@ -1891,56 +1878,57 @@ class SearchResultsView(discord.ui.View):
                 'offline': '⚫',
                 'Unknown': '⚪'
             }.get(member.get('status', 'Unknown'), '⚪')
-            
+
             # Sanitize member data to prevent display issues
             username = str(member['username'])[:32]  # Discord max username length
             display_name = str(member.get('display_name', ''))[:32] if member.get('display_name') else None
-            
-            line = f"**{i}.** {status_emoji} {username}"
+
+            line = t("commands.search_view.result_line", lang, i=i, emoji=status_emoji, username=username)
             if display_name and display_name != username:
-                line += f" *({display_name})*"
-            line += f"\n   Last seen: {member['last_seen_str']}"
+                line += t("commands.search_view.result_display", lang, display=display_name)
+            line += t("commands.search_view.result_lastseen", lang, last_seen=member['last_seen_str'])
             if member.get('activity_30d', 0) > 0:
-                line += f" • {member['activity_30d']} msgs (30d)"
+                line += t("commands.search_view.result_activity", lang, count=member['activity_30d'])
             result_lines.append(line)
-        
+
         # Join results and check field value limit (1024 characters)
         result_text = '\n\n'.join(result_lines)
         if len(result_text) > 1024:
-            suffix = "\n\n... (truncated, use export for full list)"
+            suffix = t("commands.search_view.truncated", lang)
             result_text = result_text[:1024 - len(suffix)] + suffix
-        
-        embed.add_field(name="Members", value=result_text, inline=False)
-        
-        embed.set_footer(text=f"Page {self.current_page + 1}/{self.max_page + 1} • Use buttons to navigate or export")
+
+        embed.add_field(name=t("commands.search_view.members_field", lang), value=result_text, inline=False)
+
+        embed.set_footer(text=t("commands.search_view.footer", lang, page=self.current_page + 1, total=self.max_page + 1))
         return embed
 
     def _format_filters(self) -> str:
         """Format filters into readable string."""
+        lang = self.lang
         lines = []
         if self.filters.get('roles'):
-            lines.append(f"• **Roles:** {len(self.filters['roles'])} role(s)")
+            lines.append(t("commands.search_view.filter_roles", lang, count=len(self.filters['roles'])))
         if self.filters.get('status'):
-            lines.append(f"• **Status:** {self.filters['status']}")
+            lines.append(t("commands.search_view.filter_status", lang, status=self.filters['status']))
         if self.filters.get('inactive'):
-            lines.append(f"• **Inactive:** {self.filters['inactive']['operator']}{self.filters['inactive']['value']} days")
+            lines.append(t("commands.search_view.filter_inactive", lang, op=self.filters['inactive']['operator'], value=self.filters['inactive']['value']))
         if self.filters.get('activity'):
-            lines.append(f"• **Activity:** {self.filters['activity']['operator']}{self.filters['activity']['value']} msgs")
+            lines.append(t("commands.search_view.filter_activity", lang, op=self.filters['activity']['operator'], value=self.filters['activity']['value']))
         if self.filters.get('joined'):
             try:
                 date_str = datetime.fromtimestamp(self.filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
-                lines.append(f"• **Joined:** {self.filters['joined']['operator']}{date_str}")
+                lines.append(t("commands.search_view.filter_joined", lang, op=self.filters['joined']['operator'], date=date_str))
             except (ValueError, OSError, OverflowError):
-                lines.append(f"• **Joined:** {self.filters['joined']['operator']}[Invalid Date]")
+                lines.append(t("commands.search_view.filter_joined", lang, op=self.filters['joined']['operator'], date=t("commands.search_view.invalid_date_label", lang)))
         if self.filters.get('departed'):
             try:
                 date_str = datetime.fromtimestamp(self.filters['departed']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
-                lines.append(f"• **Departed:** {self.filters['departed']['operator']}{date_str}")
+                lines.append(t("commands.search_view.filter_departed", lang, op=self.filters['departed']['operator'], date=date_str))
             except (ValueError, OSError, OverflowError):
-                lines.append(f"• **Departed:** {self.filters['departed']['operator']}[Invalid Date]")
+                lines.append(t("commands.search_view.filter_departed", lang, op=self.filters['departed']['operator'], date=t("commands.search_view.invalid_date_label", lang)))
         if self.filters.get('username'):
-            lines.append(f"• **Username:** contains '{self.filters['username']}'")
-        return '\n'.join(lines) if lines else "No filters applied"
+            lines.append(t("commands.search_view.filter_username", lang, username=self.filters['username']))
+        return '\n'.join(lines) if lines else t("commands.search_view.no_filters", lang)
 
     @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.primary)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1995,12 +1983,12 @@ class SearchResultsView(discord.ui.View):
             filename = f"member_search_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
             file = discord.File(fp=StringIO(output.getvalue()), filename=filename)
             await interaction.followup.send(
-                f"✅ Exported {len(self.results)} members to CSV",
+                t("commands.search.export_success", self.lang, count=len(self.results), format="CSV"),
                 file=file,
                 ephemeral=True
             )
         except Exception as e:
-            await interaction.followup.send(f"❌ Export failed: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="📝 Export TXT", style=discord.ButtonStyle.green)
     async def export_txt_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2056,22 +2044,29 @@ class SearchResultsView(discord.ui.View):
             filename = f"member_search_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
             file = discord.File(fp=output, filename=filename)
             await interaction.followup.send(
-                f"✅ Exported {len(self.results)} members to TXT",
+                t("commands.search.export_success", self.lang, count=len(self.results), format="TXT"),
                 file=file,
                 ephemeral=True
             )
         except Exception as e:
-            await interaction.followup.send(f"❌ Export failed: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
 
 
 class UserStatsView(discord.ui.View):
     """Interactive view for user statistics dashboard."""
 
-    def __init__(self, guild_id: int, db: DatabaseManager):
+    def __init__(self, guild_id: int, db: DatabaseManager, lang: str = 'en'):
         super().__init__(timeout=300)  # 5 minute timeout
         self.guild_id = guild_id
         self.db = db
+        self.lang = lang
         self.current_view = 'overview'
+
+        self.retention_button.label = t("commands.stats_view.btn_retention", lang)
+        self.growth_button.label = t("commands.stats_view.btn_growth", lang)
+        self.leaderboard_button.label = t("commands.stats_view.btn_leaderboard", lang)
+        self.heatmap_button.label = t("commands.stats_view.btn_heatmap", lang)
+        self.export_button.label = t("commands.stats_view.btn_export", lang)
 
     @discord.ui.button(label="📊 Retention Report", style=discord.ButtonStyle.primary, row=0)
     async def retention_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2084,7 +2079,7 @@ class UserStatsView(discord.ui.View):
             
             # Create view with back button
             view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label="◀️ Back to Overview", style=discord.ButtonStyle.secondary)
+            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
             
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
@@ -2094,8 +2089,8 @@ class UserStatsView(discord.ui.View):
                 
                 # Get the parent cog to access _create_stats_overview_embed
                 cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
-                overview_view = UserStatsView(self.guild_id, self.db)
+                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
                 
                 await interaction.edit_original_response(embed=overview_embed, view=overview_view)
             
@@ -2106,7 +2101,7 @@ class UserStatsView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Failed to show retention report: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="📈 Server Growth", style=discord.ButtonStyle.primary, row=0)
     async def growth_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2123,7 +2118,7 @@ class UserStatsView(discord.ui.View):
             
             # Create view with back button
             view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label="◀️ Back to Overview", style=discord.ButtonStyle.secondary)
+            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
             
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
@@ -2132,8 +2127,8 @@ class UserStatsView(discord.ui.View):
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
                 
                 cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
-                overview_view = UserStatsView(self.guild_id, self.db)
+                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
                 
                 await interaction.edit_original_response(embed=overview_embed, view=overview_view)
             
@@ -2144,7 +2139,7 @@ class UserStatsView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Failed to show growth report: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, row=0)
     async def leaderboard_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2153,14 +2148,14 @@ class UserStatsView(discord.ui.View):
         
         try:
             # Show leaderboard view with period selector
-            view = LeaderboardView(self.guild_id, self.db)
+            view = LeaderboardView(self.guild_id, self.db, self.lang)
             embed = await view.create_leaderboard_embed(days=30)
             
             await interaction.edit_original_response(embed=embed, view=view)
             
         except Exception as e:
             logger.error(f"Failed to show leaderboard: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="🔥 Activity Heatmap", style=discord.ButtonStyle.primary, row=1)
     async def heatmap_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2174,7 +2169,7 @@ class UserStatsView(discord.ui.View):
             
             # Create view with back button
             view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label="◀️ Back to Overview", style=discord.ButtonStyle.secondary)
+            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
             
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
@@ -2183,8 +2178,8 @@ class UserStatsView(discord.ui.View):
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
                 
                 cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
-                overview_view = UserStatsView(self.guild_id, self.db)
+                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
                 
                 await interaction.edit_original_response(embed=overview_embed, view=overview_view)
             
@@ -2195,7 +2190,7 @@ class UserStatsView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Failed to show activity heatmap: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="📋 Export Report", style=discord.ButtonStyle.green, row=1)
     async def export_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -2253,106 +2248,111 @@ class UserStatsView(discord.ui.View):
             file = discord.File(fp=output, filename=filename)
             
             await interaction.followup.send(
-                f"✅ Exported server statistics report",
+                t("commands.stats_view.export_success", self.lang),
                 file=file,
                 ephemeral=True
             )
-            
+
         except Exception as e:
             logger.error(f"Failed to export stats: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Export failed: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
 
     def _create_retention_embed(self, cohorts: dict) -> discord.Embed:
         """Create retention report embed."""
-        embed = create_embed("📊 Member Retention Report", discord.Color.purple())
-        
-        embed.description = "Shows retention rates for members who joined in different time periods."
-        
+        lang = self.lang
+        embed = create_embed(t("commands.stats_view.retention_title", lang), discord.Color.purple())
+
+        embed.description = t("commands.stats_view.retention_desc", lang)
+
         for period, data in cohorts.items():
             if data['total_joined'] > 0:
                 period_name = {
-                    '30d': 'Last 30 Days',
-                    '60d': '31-60 Days Ago',
-                    '90d': '61-90 Days Ago'
+                    '30d': t("commands.stats_view.retention_period_30d", lang),
+                    '60d': t("commands.stats_view.retention_period_60d", lang),
+                    '90d': t("commands.stats_view.retention_period_90d", lang)
                 }.get(period, period)
-                
+
                 embed.add_field(
-                    name=f"📅 {period_name}",
-                    value=(
-                        f"• Joined: **{data['total_joined']:,}** members\n"
-                        f"• Still in server: **{data['still_active']:,}**\n"
-                        f"• Active recently: **{data['active_recently']:,}**\n"
-                        f"• Retention rate: **{data['retention_rate']:.1f}%**"
+                    name=t("commands.stats_view.period_field", lang, period=period_name),
+                    value=t(
+                        "commands.stats_view.retention_field_value", lang,
+                        joined=data['total_joined'], active=data['still_active'],
+                        recently=data['active_recently'], rate=data['retention_rate']
                     ),
                     inline=False
                 )
-        
+
         if not cohorts or all(c['total_joined'] == 0 for c in cohorts.values()):
-            embed.description = "Not enough data to calculate retention rates."
-        
+            embed.description = t("commands.stats_view.retention_no_data", lang)
+
         return embed
 
     def _create_growth_embed(self, growth_30d: dict, growth_90d: dict, growth_365d: dict) -> discord.Embed:
         """Create server growth embed."""
-        embed = create_embed("📈 Server Growth Trends", discord.Color.green())
-        
+        lang = self.lang
+        embed = create_embed(t("commands.stats_view.growth_title", lang), discord.Color.green())
+
         periods = [
-            ("Last 30 Days", growth_30d),
-            ("Last 90 Days", growth_90d),
-            ("Last 365 Days", growth_365d)
+            (t("commands.stats_view.growth_period_30", lang), growth_30d),
+            (t("commands.stats_view.growth_period_90", lang), growth_90d),
+            (t("commands.stats_view.growth_period_365", lang), growth_365d)
         ]
-        
+
         for period_name, data in periods:
             if data:
                 growth_indicator = "📈" if data['growth_rate'] > 0 else "📉" if data['growth_rate'] < 0 else "➡️"
-                
+
                 embed.add_field(
-                    name=f"📅 {period_name}",
-                    value=(
-                        f"• Joins: **{data['joins']:,}**\n"
-                        f"• Leaves: **{data['leaves']:,}**\n"
-                        f"• Net: **{data['net_growth']:+,}**\n"
-                        f"• Growth rate: **{growth_indicator} {abs(data['growth_rate']):.2f}%**"
+                    name=t("commands.stats_view.period_field", lang, period=period_name),
+                    value=t(
+                        "commands.stats_view.growth_field_value", lang,
+                        joins=data['joins'], leaves=data['leaves'],
+                        net=data['net_growth'], indicator=growth_indicator, rate=abs(data['growth_rate'])
                     ),
                     inline=True
                 )
-        
+
         return embed
 
     def _create_heatmap_embed(self, day_activity: dict, hour_activity: dict) -> discord.Embed:
         """Create activity heatmap embed."""
-        embed = create_embed("🔥 Activity Heatmap (Last 30 Days)", discord.Color.orange())
-        
+        lang = self.lang
+        embed = create_embed(t("commands.stats_view.heatmap_title", lang), discord.Color.orange())
+
         if not day_activity or sum(day_activity.values()) == 0:
-            embed.description = "Not enough activity data to generate heatmap."
+            embed.description = t("commands.stats_view.heatmap_no_data", lang)
             return embed
         
-        # Day of week breakdown
+        # Day of week breakdown. days_order stays English for the day_activity
+        # lookups; only the displayed name is localized. The column is padded to
+        # the widest localized name so the monospace chart stays aligned in any
+        # language (English's widest is "Wednesday" = 9, matching the old width).
         days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
         max_day_count = max(day_activity.values()) if day_activity.values() else 1
-        
+        localized_days = {day: weekday_name(day, lang) for day in days_order}
+        name_width = max(len(n) for n in localized_days.values())
+
         chart_lines = []
         for day in days_order:
             count = day_activity.get(day, 0)
             bar_length = int((count / max_day_count) * 20) if max_day_count > 0 else 0
             bar = "█" * bar_length + "░" * (20 - bar_length)
-            # Fixed width for day name (9 chars) and right-aligned count
-            chart_lines.append(f"{day:<9} {bar} {count:>6,}")
+            chart_lines.append(f"{localized_days[day]:<{name_width}} {bar} {count:>6,}")
         
         # Wrap in code block for monospaced alignment
         embed.add_field(
-            name="📊 Activity by Day of Week",
+            name=t("commands.stats_view.heatmap_day_title", lang),
             value="```\n" + "\n".join(chart_lines) + "\n```",
             inline=False
         )
-        
+
         # Peak day
         if day_activity:
             peak_day = max(day_activity, key=day_activity.get)
             peak_count = day_activity[peak_day]
             embed.add_field(
-                name="🎯 Peak Day",
-                value=f"**{peak_day}** with **{peak_count:,}** messages",
+                name=t("commands.stats_view.heatmap_peak_day_title", lang),
+                value=t("commands.stats_view.heatmap_peak_value", lang, label=weekday_name(peak_day, lang), count=peak_count),
                 inline=True
             )
         
@@ -2361,35 +2361,39 @@ class UserStatsView(discord.ui.View):
             max_hour_count = max(hour_activity.values())
             hour_lines = []
             
-            # Group hours into 6-hour blocks for better readability
+            # Group hours into 6-hour blocks for better readability. The hour
+            # ranges are fixed; only the displayed label is localized, padded to
+            # the widest label so the monospace chart stays aligned in any
+            # language (English's widest is "Afternoon" = 9, the old width).
             time_blocks = [
-                ("Night    ", range(0, 6)),
-                ("Morning  ", range(6, 12)),
-                ("Afternoon", range(12, 18)),
-                ("Evening  ", range(18, 24))
+                ("commands.stats_view.timeblock_night", range(0, 6)),
+                ("commands.stats_view.timeblock_morning", range(6, 12)),
+                ("commands.stats_view.timeblock_afternoon", range(12, 18)),
+                ("commands.stats_view.timeblock_evening", range(18, 24))
             ]
-            
-            for block_name, hour_range in time_blocks:
+            block_labels = [t(key, lang) for key, _ in time_blocks]
+            block_width = max(len(label) for label in block_labels)
+
+            for (key, hour_range), label in zip(time_blocks, block_labels):
                 block_total = sum(hour_activity.get(h, 0) for h in hour_range)
                 bar_length = int((block_total / (max_hour_count * 6)) * 15) if max_hour_count > 0 else 0
                 bar = "█" * bar_length + "░" * (15 - bar_length)
-                # Format with fixed width for count column
-                hour_lines.append(f"{block_name} {bar} {block_total:>5,}")
+                hour_lines.append(f"{label:<{block_width}} {bar} {block_total:>5,}")
             
             # Wrap in code block for monospaced alignment
             embed.add_field(
-                name="⏰ Activity by Time of Day",
+                name=t("commands.stats_view.heatmap_time_title", lang),
                 value="```\n" + "\n".join(hour_lines) + "\n```",
                 inline=False
             )
-            
+
             # Peak hour
             peak_hour = max(hour_activity, key=hour_activity.get)
             peak_hour_count = hour_activity[peak_hour]
             time_label = f"{peak_hour:02d}:00-{(peak_hour+1)%24:02d}:00"
             embed.add_field(
-                name="⏰ Peak Hour",
-                value=f"**{time_label}** with **{peak_hour_count:,}** messages",
+                name=t("commands.stats_view.heatmap_peak_hour_title", lang),
+                value=t("commands.stats_view.heatmap_peak_value", lang, label=time_label, count=peak_hour_count),
                 inline=True
             )
         
@@ -2399,42 +2403,63 @@ class UserStatsView(discord.ui.View):
 class LeaderboardView(discord.ui.View):
     """Interactive leaderboard view with period selection."""
 
-    def __init__(self, guild_id: int, db: DatabaseManager):
+    def __init__(self, guild_id: int, db: DatabaseManager, lang: str = 'en'):
         super().__init__(timeout=300)
         self.guild_id = guild_id
         self.db = db
+        self.lang = lang
         self.current_period = 30
+
+        self.back_button.label = t("commands.stats_view.btn_back", lang)
+        self.period_select.placeholder = t("commands.leaderboard.select_placeholder", lang)
+        option_keys = {
+            "7": "commands.leaderboard.period_7",
+            "30": "commands.leaderboard.period_30",
+            "90": "commands.leaderboard.period_90",
+            "0": "commands.leaderboard.period_all",
+        }
+        for option in self.period_select.options:
+            if option.value in option_keys:
+                option.label = t(option_keys[option.value], lang)
+
+    def _period_name(self, days: int) -> str:
+        """Localized name for a leaderboard period."""
+        keys = {
+            7: "commands.leaderboard.period_7",
+            30: "commands.leaderboard.period_30",
+            90: "commands.leaderboard.period_90",
+            0: "commands.leaderboard.period_all",
+        }
+        if days in keys:
+            return t(keys[days], self.lang)
+        return t("commands.leaderboard.period_other", self.lang, days=days)
 
     async def create_leaderboard_embed(self, days: int) -> discord.Embed:
         """Create leaderboard embed for specified period."""
+        lang = self.lang
         self.current_period = days
-        
-        period_name = {
-            7: "Last 7 Days",
-            30: "Last 30 Days",
-            90: "Last 90 Days",
-            0: "All Time"
-        }.get(days, f"Last {days} Days")
-        
-        embed = create_embed(f"🏆 Activity Leaderboard - {period_name}", discord.Color.gold())
-        
+
+        period_name = self._period_name(days)
+
+        embed = create_embed(t("commands.leaderboard.title", lang, period=period_name), discord.Color.gold())
+
         leaderboard = self.db.get_activity_leaderboard(self.guild_id, days=days, limit=10)
-        
+
         if not leaderboard:
-            embed.description = "No activity data available for this period."
+            embed.description = t("commands.leaderboard.no_data", lang)
             return embed
-        
+
         lines = []
         medals = ["🥇", "🥈", "🥉"]
         for i, member in enumerate(leaderboard, 1):
-            medal = medals[i-1] if i <= 3 else f"**{i}.**"
+            medal = medals[i-1] if i <= 3 else t("commands.leaderboard.rank", lang, i=i)
             lines.append(
-                f"{medal} **{member['display_name']}** - {member['total_messages']:,} messages"
+                t("commands.leaderboard.line", lang, medal=medal, name=member['display_name'], count=member['total_messages'])
             )
-        
+
         embed.description = "\n".join(lines)
-        embed.set_footer(text="Select a time period below to view different rankings")
-        
+        embed.set_footer(text=t("commands.leaderboard.footer", lang))
+
         return embed
 
     @discord.ui.select(
@@ -2474,7 +2499,7 @@ class LeaderboardView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Failed to return to overview: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

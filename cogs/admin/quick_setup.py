@@ -6,6 +6,7 @@ from typing import Optional
 
 from database import DatabaseManager
 from bot.utils import create_embed, create_success_embed
+from bot.locale import t, guild_language
 from .channel_config import ChannelModal, InactiveDaysModal, TimezoneModal
 from .role_config import BotAdminRoleModal
 
@@ -28,9 +29,10 @@ class QuickSetupView(discord.ui.View):
         self.db = db
         self.guild_id = guild_id
         self.config = config
+        self.lang = guild_language(db.get_guild_config(guild_id))
         self.current_step = 0
         self.max_steps = 5
-        
+
         # Track completed steps
         self.completed = {
             'channel': False,
@@ -39,20 +41,26 @@ class QuickSetupView(discord.ui.View):
             'timezone': False,
             'summary': False
         }
-        
+
+        # Localize static button labels (next_button label is set in _update_buttons)
+        self.prev_button.label = t("admin.quick_setup.btn_prev", self.lang)
+        self.skip_button.label = t("admin.quick_setup.btn_skip", self.lang)
+        self.configure_button.label = t("admin.quick_setup.btn_configure", self.lang)
+        self.cancel_button.label = t("admin.quick_setup.btn_cancel", self.lang)
+
         self._update_buttons()
 
     def _update_buttons(self):
         """Update button states based on current step."""
         # Previous button
         self.prev_button.disabled = (self.current_step == 0)
-        
+
         # Next button - show "Finish" on last step
         if self.current_step == self.max_steps - 1:
-            self.next_button.label = "Finish Setup"
+            self.next_button.label = t("admin.quick_setup.btn_finish", self.lang)
             self.next_button.style = discord.ButtonStyle.success
         else:
-            self.next_button.label = "Next ▶️"
+            self.next_button.label = t("admin.quick_setup.btn_next", self.lang)
             self.next_button.style = discord.ButtonStyle.primary
         
         # Configure button - hide on summary page
@@ -74,98 +82,50 @@ class QuickSetupView(discord.ui.View):
 
     def _step_1_notification_channel(self) -> discord.Embed:
         """Step 1: Set notification channel."""
-        embed = create_embed("🚀 Quick Setup - Step 1/5", discord.Color.blue())
-        embed.description = (
-            "**📢 Notification Channel**\n\n"
-            "Choose where the bot will post notifications when members leave your server.\n\n"
-            "**Why this matters:**\n"
-            "• Get alerts when members depart\n"
-            "• Track who left and when\n"
-            "• Keep admins informed of changes\n\n"
-            "**Recommendation:** Use a private admin channel or mod logs channel.\n\n"
-            f"**Current setting:** {self._get_current_channel()}"
-        )
-        embed.set_footer(text="Click 'Configure' to set this up, or 'Next' to skip for now")
+        embed = create_embed(t("admin.quick_setup.step1_title", self.lang), discord.Color.blue())
+        embed.description = t("admin.quick_setup.step1_desc", self.lang, channel=self._get_current_channel())
+        embed.set_footer(text=t("admin.quick_setup.step1_footer", self.lang))
         return embed
 
     def _step_2_inactive_days(self) -> discord.Embed:
         """Step 2: Set inactive days threshold."""
-        embed = create_embed("🚀 Quick Setup - Step 2/5", discord.Color.blue())
-        embed.description = (
-            "**📅 Inactive Days Threshold**\n\n"
-            "Set how many days a member must be offline before appearing in `/inactive` command.\n\n"
-            "**Why this matters:**\n"
-            "• Identify members who may have lost interest\n"
-            "• Plan engagement campaigns\n"
-            "• Clean up inactive roles\n\n"
-            "**Common values:**\n"
-            "• Small communities: 7-14 days\n"
-            "• Medium servers: 30 days\n"
-            "• Large servers: 60-90 days\n\n"
-            f"**Current setting:** {self._get_current_inactive_days()} days"
-        )
-        embed.set_footer(text="Click 'Configure' to change this value")
+        embed = create_embed(t("admin.quick_setup.step2_title", self.lang), discord.Color.blue())
+        embed.description = t("admin.quick_setup.step2_desc", self.lang, days=self._get_current_inactive_days())
+        embed.set_footer(text=t("admin.quick_setup.step2_footer", self.lang))
         return embed
 
     def _step_3_admin_role(self) -> discord.Embed:
         """Step 3: Set bot admin role."""
-        embed = create_embed("🚀 Quick Setup - Step 3/5", discord.Color.blue())
-        embed.description = (
-            "**👑 Bot Admin Role**\n\n"
-            "Choose which role can manage bot settings and access admin commands.\n\n"
-            "**Why this matters:**\n"
-            "• Controls who can configure the bot\n"
-            "• Restricts access to sensitive commands\n"
-            "• Doesn't require Discord Administrator permission\n\n"
-            "**Recommendation:** Use your existing 'Moderator' or 'Admin' role.\n\n"
-            f"**Current setting:** {self._get_current_admin_role()}"
-        )
-        embed.set_footer(text="Click 'Configure' to set this up, or 'Skip' to use default")
+        embed = create_embed(t("admin.quick_setup.step3_title", self.lang), discord.Color.blue())
+        embed.description = t("admin.quick_setup.step3_desc", self.lang, role=self._get_current_admin_role())
+        embed.set_footer(text=t("admin.quick_setup.step3_footer", self.lang))
         return embed
 
     def _step_4_timezone(self) -> discord.Embed:
         """Step 4: Set server timezone (optional)."""
-        embed = create_embed("🚀 Quick Setup - Step 4/5", discord.Color.gold())
-        embed.description = (
-            "**🌍 Server Timezone (Optional)**\n\n"
-            "Set your server's timezone for accurate timestamp display in all commands.\n\n"
-            "**Why this matters:**\n"
-            "• Shows times in your local timezone\n"
-            "• Makes activity reports more meaningful\n"
-            "• Improves readability for your community\n\n"
-            "**Examples:**\n"
-            "• US East Coast: `America/New_York`\n"
-            "• UK: `Europe/London`\n"
-            "• Japan: `Asia/Tokyo`\n"
-            "• Australia: `Australia/Sydney`\n\n"
-            f"**Current setting:** {self._get_current_timezone()}"
-        )
-        embed.set_footer(text="Optional: Configure timezone or Skip to use UTC")
+        embed = create_embed(t("admin.quick_setup.step4_title", self.lang), discord.Color.gold())
+        embed.description = t("admin.quick_setup.step4_desc", self.lang, timezone=self._get_current_timezone())
+        embed.set_footer(text=t("admin.quick_setup.step4_footer", self.lang))
         return embed
 
     def _step_5_summary(self) -> discord.Embed:
         """Step 5: Setup summary."""
-        embed = create_embed("✅ Quick Setup Complete!", discord.Color.green())
-        
+        embed = create_embed(t("admin.quick_setup.step5_title", self.lang), discord.Color.green())
+
         config = self.db.get_guild_config(self.guild_id)
         if config:
-            summary = (
-                "**Your configuration:**\n\n"
-                f"📢 **Notification Channel:** {self._get_current_channel()}\n"
-                f"📅 **Inactive Threshold:** {config['inactive_days']} days\n"
-                f"👑 **Bot Admin Role:** {config.get('bot_admin_role_name', 'LastSeen Admin')}\n"
-                f"🌍 **Timezone:** {config.get('timezone', 'UTC')}\n\n"
-                "**Next steps:**\n"
-                "• Test the bot with `/whois @user` or `/inactive`\n"
-                "• Use `/config` to access advanced settings\n"
-                "• Check `/help` for all available commands\n"
-                "• Set up scheduled reports (optional)\n"
+            summary = t(
+                "admin.quick_setup.step5_summary", self.lang,
+                channel=self._get_current_channel(),
+                days=config['inactive_days'],
+                role=config.get('bot_admin_role_name', 'LastSeen Admin'),
+                timezone=config.get('timezone', 'UTC')
             )
         else:
-            summary = "⚠️ Configuration not found. Please try setup again."
-        
+            summary = t("admin.quick_setup.step5_no_config", self.lang)
+
         embed.description = summary
-        embed.set_footer(text="Click 'Finish Setup' to close this wizard")
+        embed.set_footer(text=t("admin.quick_setup.step5_footer", self.lang))
         return embed
 
     def _get_current_channel(self) -> str:
@@ -173,7 +133,7 @@ class QuickSetupView(discord.ui.View):
         config = self.db.get_guild_config(self.guild_id)
         if config and config.get('notification_channel_id'):
             return f"<#{config['notification_channel_id']}>"
-        return "Not set"
+        return t("common.not_set", self.lang)
 
     def _get_current_inactive_days(self) -> int:
         """Get current inactive days setting."""
@@ -203,10 +163,7 @@ class QuickSetupView(discord.ui.View):
         """Go to next step or finish."""
         if self.current_step == self.max_steps - 1:
             # Finish setup
-            embed = create_success_embed(
-                "Setup wizard completed! Your bot is ready to use.\n\n"
-                "Use `/config` anytime to adjust settings or explore advanced features."
-            )
+            embed = create_success_embed(t("admin.quick_setup.finished", self.lang), self.lang)
             await interaction.response.edit_message(embed=embed, view=None)
             logger.info(f"Quick setup completed for guild {self.guild_id}")
         else:
@@ -248,7 +205,7 @@ class QuickSetupView(discord.ui.View):
     @discord.ui.button(label="❌ Cancel Setup", style=discord.ButtonStyle.danger, row=1)
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Cancel setup wizard."""
-        embed = create_embed("Setup Cancelled", discord.Color.red())
-        embed.description = "Quick setup was cancelled. You can use `/config` anytime to configure the bot."
+        embed = create_embed(t("admin.quick_setup.cancelled_title", self.lang), discord.Color.red())
+        embed.description = t("admin.quick_setup.cancelled_desc", self.lang)
         await interaction.response.edit_message(embed=embed, view=None)
         logger.info(f"Quick setup cancelled for guild {self.guild_id}")

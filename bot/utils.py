@@ -6,10 +6,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from bot.locale import t
+
 logger = logging.getLogger(__name__)
 
 
-def format_timestamp(timestamp: Optional[int], style: str = 'F', guild_id: Optional[int] = None, db = None) -> str:
+def format_timestamp(timestamp: Optional[int], style: str = 'F', guild_id: Optional[int] = None, db = None, lang: str = 'en') -> str:
     """
     Format a Unix timestamp into a Discord timestamp.
 
@@ -30,7 +32,7 @@ def format_timestamp(timestamp: Optional[int], style: str = 'F', guild_id: Optio
         Formatted Discord timestamp string
     """
     if not timestamp or timestamp == 0:
-        return "Never"
+        return t('common.never', lang)
 
     try:
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
@@ -51,10 +53,10 @@ def format_timestamp(timestamp: Optional[int], style: str = 'F', guild_id: Optio
         return discord.utils.format_dt(dt, style=style)
     except (ValueError, OSError, OverflowError) as e:
         logger.error(f"Error formatting timestamp {timestamp}: {e}")
-        return "Invalid date"
+        return t('common.invalid_date', lang)
 
 
-def format_relative_time(timestamp: Optional[int], guild_id: Optional[int] = None, db = None) -> str:
+def format_relative_time(timestamp: Optional[int], guild_id: Optional[int] = None, db = None, lang: str = 'en') -> str:
     """
     Format a timestamp as relative time (e.g., '2 hours ago').
 
@@ -66,7 +68,7 @@ def format_relative_time(timestamp: Optional[int], guild_id: Optional[int] = Non
     Returns:
         Relative time string
     """
-    return format_timestamp(timestamp, style='R', guild_id=guild_id, db=db)
+    return format_timestamp(timestamp, style='R', guild_id=guild_id, db=db, lang=lang)
 
 
 def get_member_roles(member: discord.Member, exclude_everyone: bool = True) -> list[str]:
@@ -122,32 +124,34 @@ def create_embed(title: str, color: discord.Color = discord.Color.blue()) -> dis
     return embed
 
 
-def create_error_embed(message: str) -> discord.Embed:
+def create_error_embed(message: str, lang: str = 'en') -> discord.Embed:
     """
     Create an error embed.
 
     Args:
         message: Error message
+        lang: Language code for the localized title
 
     Returns:
         Discord embed with error styling
     """
-    embed = discord.Embed(title="Error", description=message, color=discord.Color.red())
+    embed = discord.Embed(title=t('common.error_title', lang), description=message, color=discord.Color.red())
     embed.timestamp = datetime.now(timezone.utc)
     return embed
 
 
-def create_success_embed(message: str) -> discord.Embed:
+def create_success_embed(message: str, lang: str = 'en') -> discord.Embed:
     """
     Create a success embed.
 
     Args:
         message: Success message
+        lang: Language code for the localized title
 
     Returns:
         Discord embed with success styling
     """
-    embed = discord.Embed(title="Success", description=message, color=discord.Color.green())
+    embed = discord.Embed(title=t('common.success_title', lang), description=message, color=discord.Color.green())
     embed.timestamp = datetime.now(timezone.utc)
     return embed
 

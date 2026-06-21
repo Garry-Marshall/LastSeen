@@ -10,6 +10,7 @@ from collections import defaultdict
 
 from database import DatabaseManager
 from bot.utils import get_member_roles, create_embed
+from bot.locale import t, guild_language
 from bot.reports import purge_guild_state
 
 logger = logging.getLogger(__name__)
@@ -592,43 +593,44 @@ class TrackingCog(commands.Cog):
             return
 
         try:
-            embed = create_embed("Member Left", discord.Color.red())
+            lang = guild_language(guild_config)
+            embed = create_embed(t("tracking.member_left.title", lang), discord.Color.red())
             embed.description = ""
-            
+
             # User Identity
-            embed.description += f"🆔 User ID: `{member_data['user_id']}`\n"
-            embed.description += f"👤 Username: **{member_data['username']}**\n"
-            
+            embed.description += t("tracking.member_left.user_id", lang, user_id=member_data['user_id'])
+            embed.description += t("tracking.member_left.username", lang, username=member_data['username'])
+
             # Nickname
-            nickname = member_data['nickname'] if member_data['nickname'] else "Not set"
-            embed.description += f"🏷️ Nickname: {nickname}\n"
+            nickname = member_data['nickname'] if member_data['nickname'] else t("common.not_set", lang)
+            embed.description += t("tracking.member_left.nickname", lang, nickname=nickname)
             embed.description += "\n"
-            
+
             # Highest Role
             if member.roles and len(member.roles) > 1:  # > 1 because everyone has @everyone
                 highest_role = member.top_role
                 if highest_role.name != "@everyone":
-                    embed.description += f"⭐ Highest Role: {highest_role.mention}\n"
-            
+                    embed.description += t("tracking.member_left.highest_role", lang, role=highest_role.mention)
+
             embed.description += "\n"
-            
+
             # Membership duration
             if member_data['join_date']:
                 join_dt = datetime.fromtimestamp(member_data['join_date'], tz=timezone.utc)
                 join_str = discord.utils.format_dt(join_dt, 'F')
-                embed.description += f"📥 Joined: {join_str}\n"
-                
+                embed.description += t("tracking.member_left.joined", lang, date=join_str)
+
                 # Calculate duration
                 now = datetime.now(timezone.utc)
                 duration = now - join_dt
                 days = duration.days
                 if days > 0:
-                    embed.description += f"👥 Member for: {days} days\n"
-            
+                    embed.description += t("tracking.member_left.member_for", lang, days=days)
+
             # Last seen
             last_seen_dt = datetime.fromtimestamp(current_time, tz=timezone.utc)
             last_seen_str = discord.utils.format_dt(last_seen_dt, 'R')
-            embed.description += f"🚪 Left the Guild: {last_seen_str}\n"
+            embed.description += t("tracking.member_left.left_guild", lang, date=last_seen_str)
 
             await channel.send(embed=embed)
         except Exception as e:
@@ -678,7 +680,7 @@ class TrackingCog(commands.Cog):
         # Check for role changes
         if before.roles != after.roles:
             roles = get_member_roles(after)
-            logger.info(f"Roles changed for {after}: {roles}")
+            logger.debug(f"Roles changed for {after}: {roles}")
             self.db.update_member_roles(guild_id, user_id, roles)
             
             # Track individual role changes for history
