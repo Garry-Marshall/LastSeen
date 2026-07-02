@@ -44,18 +44,23 @@ def sanitize_csv_value(value) -> str:
 class PaginationView(discord.ui.View):
     """Interactive pagination view for navigating through multiple pages."""
 
-    def __init__(self, embeds: list[discord.Embed], timeout: int = 180):
+    def __init__(self, embeds: list[discord.Embed], timeout: int = 180,
+                 export_members: list[dict] = None, lang: str = 'en'):
         """
         Initialize pagination view.
 
         Args:
             embeds: List of embeds to paginate through
             timeout: Timeout in seconds (default 3 minutes)
+            export_members: Optional member dicts to enable a CSV export button
+            lang: Language code for the export button responses
         """
         super().__init__(timeout=timeout)
         self.embeds = embeds
         self.current_page = 0
         self.max_pages = len(embeds)
+        self.export_members = export_members
+        self.lang = lang
 
         # Disable buttons if only one page
         if self.max_pages == 1:
@@ -63,6 +68,10 @@ class PaginationView(discord.ui.View):
             self.prev_button.disabled = True
             self.next_button.disabled = True
             self.last_page_button.disabled = True
+
+        # Only show the export button when there is data to export
+        if not export_members:
+            self.remove_item(self.export_csv_button)
 
     @discord.ui.button(label="⏮️", style=discord.ButtonStyle.secondary)
     async def first_page_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -87,6 +96,38 @@ class PaginationView(discord.ui.View):
         """Go to last page."""
         self.current_page = self.max_pages - 1
         await self._update_message(interaction)
+
+    @discord.ui.button(label="📄 Export CSV", style=discord.ButtonStyle.green)
+    async def export_csv_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Export the members as a CSV file."""
+        await interaction.response.defer(ephemeral=True)
+        try:
+            output = StringIO()
+            writer = csv.DictWriter(output, fieldnames=[
+                'Username', 'Nickname', 'User ID', 'Last Seen', 'Joined', 'Roles'
+            ], quoting=csv.QUOTE_ALL)  # Quote all fields for safety
+            writer.writeheader()
+            for member in self.export_members:
+                last_seen = member.get('last_seen')
+                join_date = member.get('join_date')
+                writer.writerow({
+                    'Username': sanitize_csv_value(member.get('username') or ''),
+                    'Nickname': sanitize_csv_value(member.get('nickname') or ''),
+                    'User ID': member['user_id'],
+                    'Last Seen': datetime.fromtimestamp(last_seen, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC') if last_seen else '',
+                    'Joined': datetime.fromtimestamp(join_date, tz=timezone.utc).strftime('%Y-%m-%d') if join_date else '',
+                    'Roles': sanitize_csv_value(', '.join(str(r) for r in member.get('roles', []))),
+                })
+
+            filename = f"inactive_members_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv"
+            file = discord.File(fp=StringIO(output.getvalue()), filename=filename)
+            await interaction.followup.send(
+                t("commands.search.export_success", self.lang, count=len(self.export_members), format="CSV"),
+                file=file,
+                ephemeral=True
+            )
+        except Exception as e:
+            await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
 
     async def _update_message(self, interaction: discord.Interaction):
         """Update the message with current page and button states."""
@@ -663,7 +704,7 @@ class CommandsCog(commands.Cog):
             embeds.append(embed)
 
         # Send with pagination view
-        view = PaginationView(embeds)
+        view = PaginationView(embeds, export_members=inactive_members, lang=lang)
         await interaction.followup.send(embed=embeds[0], view=view, ephemeral=not channels_restricted)
 
         logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name} with threshold {inactive_days}")

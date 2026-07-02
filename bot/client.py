@@ -61,6 +61,7 @@ def create_bot(config) -> commands.Bot:
     # paths (presence updates, messages).
     bot.opted_out_users = bot.db.get_opted_out_user_ids()
     bot.start_time = None  # Will be set in on_ready
+    bot.commands_synced = False  # Guard: sync commands only once per process
 
     @bot.event
     async def on_ready():
@@ -95,12 +96,16 @@ def create_bot(config) -> commands.Bot:
             cache_status = "✓ Complete" if len(guild.members) == guild.member_count else f"⚠ Partial ({len(guild.members)}/{guild.member_count})"
             logger.info(f"  - {guild.name} (ID: {guild.id}): {cache_status}")
 
-        # Sync commands with Discord (must be done after bot is ready)
-        try:
-            synced = await bot.tree.sync()
-            logger.info(f"Synced {len(synced)} command(s) with Discord")
-        except Exception as e:
-            logger.error(f"Failed to sync commands: {e}", exc_info=True)
+        # Sync commands with Discord (must be done after bot is ready).
+        # on_ready re-fires on reconnects; only sync once per process to avoid
+        # wasting daily command sync rate limits.
+        if not bot.commands_synced:
+            try:
+                synced = await bot.tree.sync()
+                bot.commands_synced = True
+                logger.info(f"Synced {len(synced)} command(s) with Discord")
+            except Exception as e:
+                logger.error(f"Failed to sync commands: {e}", exc_info=True)
 
         logger.info("Bot is ready!")
 

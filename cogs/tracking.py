@@ -50,6 +50,11 @@ class TrackingCog(commands.Cog):
         # Flush when buffer reaches this size to cap memory usage between flush intervals
         self.MAX_BUFFER_SIZE = 10000
 
+        # Guard: run the stale-guild cleanup only on the first on_ready.
+        # on_ready re-fires on reconnects; re-running the cleanup then is
+        # wasteful DB churn and would trust READY payload completeness again.
+        self._stale_cleanup_done = False
+
         # Start background tasks
         self.flush_activity_buffer.start()
         self.cleanup_old_data.start()
@@ -363,26 +368,29 @@ class TrackingCog(commands.Cog):
         logger.info(f"Bot logged in as {self.bot.user}")
         logger.info(f"Connected to {len(self.bot.guilds)} guilds")
 
-        # Get current guild IDs from Discord
-        current_guild_ids = {guild.id for guild in self.bot.guilds}
+        if not self._stale_cleanup_done:
+            self._stale_cleanup_done = True
 
-        # Get all guild IDs from database
-        db_guild_ids = set(self.db.get_all_guild_ids())
+            # Get current guild IDs from Discord
+            current_guild_ids = {guild.id for guild in self.bot.guilds}
 
-        # Find stale guilds (in database but not connected)
-        stale_guild_ids = db_guild_ids - current_guild_ids
+            # Get all guild IDs from database
+            db_guild_ids = set(self.db.get_all_guild_ids())
 
-        if stale_guild_ids:
-            logger.info(f"Found {len(stale_guild_ids)} stale guild(s) in database, removing...")
-            for guild_id in stale_guild_ids:
-                if self.db.remove_guild_data(guild_id):
-                    logger.info(f"Removed stale guild {guild_id} from database")
-                else:
-                    logger.warning(f"Failed to remove stale guild {guild_id}")
+            # Find stale guilds (in database but not connected)
+            stale_guild_ids = db_guild_ids - current_guild_ids
 
-            # Run VACUUM in background to reclaim space after deletions
-            logger.info("Scheduling database VACUUM to reclaim space...")
-            asyncio.create_task(self._vacuum_database_background())
+            if stale_guild_ids:
+                logger.info(f"Found {len(stale_guild_ids)} stale guild(s) in database, removing...")
+                for guild_id in stale_guild_ids:
+                    if self.db.remove_guild_data(guild_id):
+                        logger.info(f"Removed stale guild {guild_id} from database")
+                    else:
+                        logger.warning(f"Failed to remove stale guild {guild_id}")
+
+                # Run VACUUM in background to reclaim space after deletions
+                logger.info("Scheduling database VACUUM to reclaim space...")
+                asyncio.create_task(self._vacuum_database_background())
 
         # Ensure all guilds exist in database (handles restart edge case)
         # This is necessary if the database was cleared or the bot restarted
