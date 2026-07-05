@@ -1199,7 +1199,8 @@ class CommandsCog(commands.Cog):
         # have left, so those rows must be included in the fetch.
         db_members = self.db.get_guild_members(guild_id, include_left='departed' in filters)
 
-        # Get Discord members from cache (pre-chunked in on_ready)
+        # Get Discord members from cache (chunked in background after on_ready,
+        # so this may be partial shortly after startup — misses are tolerated below)
         discord_members = {m.id: m for m in guild.members}
 
         # Apply filters

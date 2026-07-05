@@ -33,9 +33,17 @@ async def update_all_members(
     lang = guild_language(db.get_guild_config(guild.id))
     added_count = 0
     updated_count = 0
-    total_members = len([m for m in guild.members if not m.bot])
 
     try:
+        # With chunk_guilds_at_startup disabled the member cache may still be
+        # incomplete (background chunking not finished) — chunk first so the
+        # scan sees all members instead of silently processing a partial cache.
+        if not guild.chunked:
+            logger.info(f"Chunking {guild.name} before member scan...")
+            await guild.chunk()
+
+        total_members = len([m for m in guild.members if not m.bot])
+
         # Send progress message for large servers
         if total_members > 100:
             await interaction.followup.send(

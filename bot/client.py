@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 # discord.py's gateway ratelimiter throttles the actual sends per shard.
 CHUNK_CONCURRENCY = 4
 
+# Give up on a chunk request after this many seconds. Guild.chunk() waits on
+# a future with no timeout; if the request is lost during a disconnect the
+# task would otherwise hang forever and the done() guard in on_ready would
+# never allow another chunking pass.
+CHUNK_TIMEOUT = 120
+
 
 class LastSeenBot(commands.AutoShardedBot):
     """Bot subclass that closes the database connection pool on shutdown.
@@ -113,6 +119,26 @@ def create_bot(config) -> commands.Bot:
         logger.info(f"Shard {shard_id} is ready")
 
     @bot.event
+    async def on_guild_available(guild: discord.Guild):
+        """Chunk guilds that become available after startup (outage recovery).
+
+        With chunk_guilds_at_startup disabled, discord.py no longer chunks
+        these automatically, and presence updates for uncached members are
+        silently dropped. Skip during startup (chunk_task not yet created):
+        the background chunker launched in on_ready covers those guilds.
+        """
+        if bot.chunk_task is None or guild.chunked:
+            return
+        logger.info(f"Guild {guild.name} became available, chunking...")
+        try:
+            await asyncio.wait_for(guild.chunk(), timeout=CHUNK_TIMEOUT)
+            logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached")
+        except asyncio.TimeoutError:
+            logger.error(f"  ✗ Timed out chunking {guild.name} after {CHUNK_TIMEOUT}s")
+        except Exception as e:
+            logger.error(f"  ✗ Failed to chunk {guild.name}: {e}")
+
+    @bot.event
     async def on_error(event: str, *args, **kwargs):
         """Global error handler for events."""
         logger.error(f"Error in event {event}", exc_info=True)
@@ -183,8 +209,11 @@ async def _chunk_guilds_background(bot: commands.Bot):
         nonlocal failed
         async with semaphore:
             try:
-                await guild.chunk()
+                await asyncio.wait_for(guild.chunk(), timeout=CHUNK_TIMEOUT)
                 logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached")
+            except asyncio.TimeoutError:
+                failed += 1
+                logger.error(f"  ✗ Timed out chunking {guild.name} after {CHUNK_TIMEOUT}s")
             except Exception as e:
                 failed += 1
                 logger.error(f"  ✗ Failed to chunk {guild.name}: {e}")
