@@ -1,5 +1,6 @@
 """Bot client setup and initialization."""
 
+import asyncio
 import discord
 from discord.ext import commands
 import logging
@@ -11,8 +12,16 @@ from bot.locale import load_locales
 logger = logging.getLogger(__name__)
 
 
-class LastSeenBot(commands.Bot):
+# Max number of guilds to chunk concurrently in the background chunker.
+# discord.py's gateway ratelimiter throttles the actual sends per shard.
+CHUNK_CONCURRENCY = 4
+
+
+class LastSeenBot(commands.AutoShardedBot):
     """Bot subclass that closes the database connection pool on shutdown.
+
+    AutoShardedBot runs a single shard until Discord's recommended shard
+    count exceeds 1 (~1000 guilds), then scales up on the next restart.
 
     discord.py does not dispatch an 'on_close' event, so cleanup must be
     done by overriding close() directly.
@@ -50,7 +59,9 @@ def create_bot(config) -> commands.Bot:
     bot = LastSeenBot(
         command_prefix='!',  # Prefix for legacy commands (not used for slash commands)
         intents=intents,
-        help_command=None  # Disable default help command
+        help_command=None,  # Disable default help command
+        chunk_guilds_at_startup=False,  # Chunked in background after on_ready instead
+        shard_count=config.shard_count  # None = use Discord's recommended count
     )
 
     # Attach configuration and database to bot
@@ -62,6 +73,7 @@ def create_bot(config) -> commands.Bot:
     bot.opted_out_users = bot.db.get_opted_out_user_ids()
     bot.start_time = None  # Will be set in on_ready
     bot.commands_synced = False  # Guard: sync commands only once per process
+    bot.chunk_task = None  # Background guild-chunking task, started in on_ready
 
     @bot.event
     async def on_ready():
@@ -72,29 +84,15 @@ def create_bot(config) -> commands.Bot:
             bot.start_time = datetime.now(timezone.utc)
 
         logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
-        logger.info(f"Connected to {len(bot.guilds)} guilds")
+        logger.info(f"Connected to {len(bot.guilds)} guilds across {bot.shard_count} shard(s)")
 
-        # Chunk all guilds to populate complete member cache
-        # This is required for /search command to access all members
-        logger.info("Checking guild member cache status...")
-        for guild in bot.guilds:
-            if guild.chunked:
-                # Guild was auto-chunked by Discord (small servers <75k members)
-                logger.info(f"  ✓ {guild.name}: Already chunked ({len(guild.members)}/{guild.member_count} members cached)")
-            else:
-                # Need to manually chunk (large servers)
-                logger.info(f"  ⟳ {guild.name}: Chunking {guild.member_count} members...")
-                try:
-                    await guild.chunk()
-                    logger.info(f"    ✓ Loaded {len(guild.members)} members into cache")
-                except Exception as e:
-                    logger.error(f"    ✗ Failed to chunk: {e}")
-
-        # Summary
-        logger.info("Guild cache summary:")
-        for guild in bot.guilds:
-            cache_status = "✓ Complete" if len(guild.members) == guild.member_count else f"⚠ Partial ({len(guild.members)}/{guild.member_count})"
-            logger.info(f"  - {guild.name} (ID: {guild.id}): {cache_status}")
+        # Populate the member cache in the background so on_ready is not
+        # blocked by member downloads (chunk_guilds_at_startup is disabled).
+        # The complete cache is required for presence tracking and /search.
+        # Guard: on_ready re-fires on reconnects; don't launch a second task
+        # while one is still running.
+        if bot.chunk_task is None or bot.chunk_task.done():
+            bot.chunk_task = asyncio.create_task(_chunk_guilds_background(bot))
 
         # Sync commands with Discord (must be done after bot is ready).
         # on_ready re-fires on reconnects; only sync once per process to avoid
@@ -108,6 +106,11 @@ def create_bot(config) -> commands.Bot:
                 logger.error(f"Failed to sync commands: {e}", exc_info=True)
 
         logger.info("Bot is ready!")
+
+    @bot.event
+    async def on_shard_ready(shard_id: int):
+        """Called when an individual shard is ready."""
+        logger.info(f"Shard {shard_id} is ready")
 
     @bot.event
     async def on_error(event: str, *args, **kwargs):
@@ -157,6 +160,37 @@ def create_bot(config) -> commands.Bot:
             logger.error(f"Failed to send error message: {e}")
 
     return bot
+
+
+async def _chunk_guilds_background(bot: commands.Bot):
+    """Chunk all guilds to populate the complete member cache.
+
+    Runs as a background task after on_ready so startup is not blocked.
+    Presence tracking silently loses updates for uncached members, so this
+    should complete as soon as possible — but a few minutes of ramp-up on a
+    large bot beats blocking startup entirely.
+    """
+    to_chunk = [g for g in bot.guilds if not g.chunked]
+    if not to_chunk:
+        logger.info("All guild member caches already complete, no chunking needed")
+        return
+
+    logger.info(f"Chunking {len(to_chunk)} guild(s) in background...")
+    semaphore = asyncio.Semaphore(CHUNK_CONCURRENCY)
+    failed = 0
+
+    async def chunk_one(guild: discord.Guild):
+        nonlocal failed
+        async with semaphore:
+            try:
+                await guild.chunk()
+                logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached")
+            except Exception as e:
+                failed += 1
+                logger.error(f"  ✗ Failed to chunk {guild.name}: {e}")
+
+    await asyncio.gather(*(chunk_one(g) for g in to_chunk))
+    logger.info(f"Background chunking finished: {len(to_chunk) - failed}/{len(to_chunk)} guild(s) chunked")
 
 
 async def load_cogs(bot: commands.Bot):

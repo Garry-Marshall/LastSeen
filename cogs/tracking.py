@@ -126,6 +126,13 @@ class TrackingCog(commands.Cog):
             guild: The guild whose members should be processed
         """
         try:
+            # With chunk_guilds_at_startup disabled, a newly joined guild's
+            # member cache is not populated automatically — chunk it first so
+            # enumeration sees all members.
+            if not guild.chunked:
+                logger.info(f"Chunking {guild.name} before member enumeration...")
+                await guild.chunk()
+
             logger.info(f"Starting member enumeration for {guild.name} ({len(guild.members)} cached members)...")
 
             # Process members in chunks to avoid blocking the event loop

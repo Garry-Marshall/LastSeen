@@ -75,11 +75,26 @@ class Config:
             self.backup_retention_count = 5
             logger.warning("Invalid DB_BACKUP_RETENTION_COUNT, using 5")
 
+        # Sharding: optional fixed shard count. Leave unset to use Discord's
+        # recommended count (1 shard until ~1000 guilds). Set explicitly only
+        # for testing multi-shard behavior.
+        self.shard_count = None
+        shard_count_str = os.getenv('SHARD_COUNT', '').strip()
+        if shard_count_str:
+            try:
+                self.shard_count = int(shard_count_str)
+                if self.shard_count < 1:
+                    self.shard_count = None
+                    logger.warning("SHARD_COUNT must be at least 1, using Discord's recommended count")
+            except ValueError:
+                logger.warning("Invalid SHARD_COUNT, using Discord's recommended count")
+
         logger.info("Configuration loaded successfully")
         logger.info(f"Database file: {self.db_file}")
         logger.info(f"Log level: {logging.getLevelName(self.log_level)}")
         logger.info(f"Log retention: {self.logs_days_to_keep} days")
         logger.info(f"Database backup: every {self.backup_interval_hours} hours, keep {self.backup_retention_count} backups")
+        logger.info(f"Shard count: {self.shard_count if self.shard_count else 'auto (Discord recommended)'}")
 
     def _create_default_env(self):
         """Create a default .env file from template if it doesn't exist."""
@@ -107,6 +122,9 @@ DEBUG_LOGS_DAYS_TO_KEEP=5  # number of days to keep log files (older logs are de
 # Database Backup Settings
 DB_BACKUP_INTERVAL_HOURS=24  # how often to backup the database (in hours)
 DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups are deleted)
+
+# Sharding Settings
+# SHARD_COUNT=2  # uncomment to force a fixed shard count (testing only); unset = Discord's recommended count
 
 """
                 self.env_path.write_text(default_content)

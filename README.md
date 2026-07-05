@@ -179,6 +179,10 @@ DEBUG_LOGS_DAYS_TO_KEEP=5
 # Database backup settings
 DB_BACKUP_INTERVAL_HOURS=24  # How often to backup the database (default: 24)
 DB_BACKUP_RETENTION_COUNT=5  # Number of backup copies to keep (default: 5)
+
+# Sharding (optional): force a fixed shard count, e.g. for testing multi-shard behavior.
+# Leave unset to use Discord's recommended count (1 shard until ~1000 guilds).
+# SHARD_COUNT=2
 ```
 
 ### Per-Guild Configuration
