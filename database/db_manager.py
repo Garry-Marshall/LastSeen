@@ -858,10 +858,22 @@ class DatabaseManager:
             
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                # Upsert rather than INSERT OR REPLACE: REPLACE deletes the
+                # existing member row first, and with FK enforcement on that
+                # cascade-deletes role_changes, message_activity and
+                # message_activity_hourly. ON CONFLICT DO UPDATE mutates the row
+                # in place, so no cascade fires and historical columns
+                # (last_seen, is_active, join_date, nickname_history,
+                # join_position, left_date) are preserved. Only the current
+                # profile fields are refreshed on conflict.
                 cursor.execute("""
-                    INSERT OR REPLACE INTO members
+                    INSERT INTO members
                     (guild_id, user_id, username, nickname, join_date, last_seen, is_active, roles, nickname_history)
                     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                        username = excluded.username,
+                        nickname = excluded.nickname,
+                        roles = excluded.roles
                 """, (guild_id, user_id, username, nickname, join_date, None, roles_json, nickname_history))
                 return True
         except Exception as e:
@@ -1858,8 +1870,11 @@ class DatabaseManager:
                 """, (guild_id, month_cutoff))
                 active_members_30d = cursor.fetchone()[0]
                 
-                # Calculate average per day (365 days)
-                avg_per_day = round(total_365d / 365, 1) if total_365d > 0 else 0
+                # Average per day over the requested period. total_365d holds the
+                # sum over `days` days (cutoff_date uses `days`), so divide by
+                # `days`, not a fixed 365 — otherwise weekly/monthly reports show
+                # ~1/52 and ~1/12 of the true daily average.
+                avg_per_day = round(total_365d / days, 1) if total_365d > 0 else 0
                 
                 # Calculate messages per active member (30 days)
                 avg_per_member = round(total_30d / active_members_30d, 1) if active_members_30d > 0 else 0

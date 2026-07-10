@@ -267,4 +267,8 @@ def truncate_string(text: str, max_length: int, suffix: str = "...") -> str:
     """
     if len(text) <= max_length:
         return text
+    # Not enough room for the suffix: hard-truncate instead of slicing with a
+    # negative index, which would exceed max_length. Clamp negatives to empty.
+    if max_length < len(suffix):
+        return text[:max(max_length, 0)]
     return text[:max_length - len(suffix)] + suffix

@@ -55,6 +55,13 @@ class TrackingCog(commands.Cog):
         # wasteful DB churn and would trust READY payload completeness again.
         self._stale_cleanup_done = False
 
+        # Guilds whose member enumeration has been scheduled this process.
+        # on_ready re-fires on reconnects, so without this an empty guild (e.g.
+        # a role filter matching nobody) would be re-scanned on every reconnect,
+        # and a reconnect during a running import would spawn a duplicate task.
+        # Cleared per-guild on leave so a rejoin re-enumerates.
+        self._enumerating: set = set()
+
         # Start background tasks
         self.flush_activity_buffer.start()
         self.cleanup_old_data.start()
@@ -62,22 +69,26 @@ class TrackingCog(commands.Cog):
         self.backup_database.start()
         self.checkpoint_wal.start()
 
-    async def _initialize_member_positions(self, guild: discord.Guild) -> bool:
+    async def _initialize_member_positions(self, guild: discord.Guild, force: bool = False) -> bool:
         """
         Initialize member positions based on join order.
         Fetches all members sorted by join date and assigns position numbers.
-        
+
         Args:
             guild: The guild to initialize positions for
-            
+            force: Recompute even if the guild is already flagged initialized.
+                Used after a full member enumeration so a stale flag (e.g. a
+                guild wrongly marked initialized while its member table was
+                empty) does not skip ranking the freshly imported members.
+
         Returns:
             bool: True if successful, False otherwise
         """
         guild_id = guild.id
-        
+
         try:
             # Check if already initialized
-            if self.db.guild_positions_initialized(guild_id):
+            if not force and self.db.guild_positions_initialized(guild_id):
                 logger.info(f"Member positions already initialized for guild {guild.name}")
                 return True
 
@@ -116,6 +127,19 @@ class TrackingCog(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to initialize member positions for guild {guild.name}: {e}", exc_info=True)
             return False
+
+    def _start_member_enumeration(self, guild: discord.Guild) -> None:
+        """Schedule a one-shot member enumeration for a guild, deduping by guild.
+
+        Guards against on_ready re-firing on reconnects (re-scanning empty guilds)
+        and against a reconnect spawning a second import while one is still running.
+        The guild stays marked for the process lifetime; on_guild_remove clears it
+        so a later rejoin re-enumerates.
+        """
+        if guild.id in self._enumerating:
+            return
+        self._enumerating.add(guild.id)
+        asyncio.create_task(self._process_guild_members(guild))
 
     async def _process_guild_members(self, guild: discord.Guild):
         """
@@ -157,6 +181,9 @@ class TrackingCog(commands.Cog):
                         if member.id in self.bot.opted_out_users:
                             continue  # Respect the global privacy opt-out
 
+                        if not self._should_track_member(member):
+                            continue  # Respect the track-only-roles filter
+
                         try:
                             roles = get_member_roles(member)
                             join_date = int(member.joined_at.timestamp()) if member.joined_at else 0
@@ -196,8 +223,10 @@ class TrackingCog(commands.Cog):
 
             logger.info(f"Completed member enumeration for {guild.name}: added {member_count} members ({online_count} online, {member_count - online_count} offline)")
 
-            # After all members are added, initialize their join positions
-            await self._initialize_member_positions(guild)
+            # After all members are added, initialize their join positions.
+            # force=True so a stale positions_initialized flag from a prior run
+            # (marked while the member table was empty) still ranks these members.
+            await self._initialize_member_positions(guild, force=True)
 
         except Exception as e:
             logger.error(f"Failed to process members for guild {guild.name}: {e}", exc_info=True)
@@ -411,10 +440,25 @@ class TrackingCog(commands.Cog):
         if missing_guilds > 0:
             logger.warning(f"Added {missing_guilds} missing guild(s) to database during on_ready sync")
 
+        # Enumerate members for guilds whose member table is empty. on_guild_join
+        # only fires for newly joined guilds, so on a fresh/cleared database a guild
+        # the bot already belongs to would otherwise never be populated and message
+        # and inactivity tracking would silently skip everyone. _process_guild_members
+        # chunks, adds members, and initializes their join positions, so these guilds
+        # are handled entirely here and skipped by the position loop below.
+        for guild in self.bot.guilds:
+            if guild.id in self._enumerating:
+                continue  # already scheduled/handled this process
+            if not self.db.get_all_guild_members(guild.id):
+                logger.info(f"Guild {guild.name} has no members in database, scheduling member enumeration...")
+                self._start_member_enumeration(guild)
+
         # Initialize member positions for guilds that haven't been initialized yet
         # This handles the case where the bot restarts or joins existing guilds
         logger.info("Checking for guilds needing member position initialization...")
         for guild in self.bot.guilds:
+            if guild.id in self._enumerating:
+                continue  # _process_guild_members initializes positions itself (force=True)
             if not self.db.guild_positions_initialized(guild.id):
                 logger.info(f"Guild {guild.name} needs position initialization, scheduling background task...")
                 asyncio.create_task(self._initialize_member_positions(guild))
@@ -443,7 +487,7 @@ class TrackingCog(commands.Cog):
         )
 
         # Process members in background to avoid blocking the event loop
-        asyncio.create_task(self._process_guild_members(guild))
+        self._start_member_enumeration(guild)
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
@@ -457,6 +501,9 @@ class TrackingCog(commands.Cog):
         logger.info(f"Bot left guild: {guild.name} ({guild.id}). Cleaning up database...")
 
         success = self.db.remove_guild_data(guild.id)
+
+        # Allow a future rejoin to re-enumerate this guild's members.
+        self._enumerating.discard(guild.id)
 
         if success:
             logger.info(f"Successfully wiped data for guild {guild.id}")
@@ -512,6 +559,13 @@ class TrackingCog(commands.Cog):
 
         # Respect the global privacy opt-out
         if member.id in self.bot.opted_out_users:
+            return
+
+        # Respect the track-only-roles filter: don't track members who lack a
+        # required role. If a previously tracked member rejoins without the role,
+        # they are intentionally left untouched (not reactivated).
+        if not self._should_track_member(member):
+            logger.debug(f"Member {member} joined {member.guild.name} but lacks a tracked role, skipping")
             return
 
         logger.info(f"Member joined: {member} in guild {member.guild.name}")
@@ -1026,10 +1080,13 @@ class TrackingCog(commands.Cog):
                                 f"Current hour: {current_hour}, Configured hour: {time_hour}, "
                                 f"Frequency: {frequency}, Weekday: {current_weekday}, Day of month: {current_day_of_month}")
                     
-                    # Check if current hour matches the configured report time (in guild's timezone)
-                    if current_hour != time_hour:
-                        logger.debug(f"Guild {guild.name}: Skipping - current hour {current_hour} != configured hour {time_hour}")
-                        continue  # Skip this guild if it's not the right hour
+                    # Fire at or after the configured hour (in guild's timezone), not
+                    # only exactly on it. The per-day dedup below ensures a single send,
+                    # so this stays exact under normal operation but still fires if the
+                    # configured hour is skipped by a DST spring-forward or a missed tick.
+                    if current_hour < time_hour:
+                        logger.debug(f"Guild {guild.name}: Skipping - current hour {current_hour} < configured hour {time_hour}")
+                        continue  # Not yet at the configured hour today
                     
                     try:
                         report_types = json.loads(guild_config['report_types']) if guild_config['report_types'] else []
