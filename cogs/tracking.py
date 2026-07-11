@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands, tasks
 import logging
 import asyncio
+import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Tuple
 from collections import defaultdict
@@ -395,7 +396,12 @@ class TrackingCog(commands.Cog):
         for guild in self.bot.guilds:
             if guild.id in self._enumerating:
                 continue  # already scheduled/handled this process
-            if not self.db.get_all_guild_members(guild.id):
+            # Enumerate only guilds never successfully scanned. An empty member
+            # table alone isn't enough: a guild whose only members are bots or
+            # opted-out users is legitimately empty and was already scanned
+            # (_process_guild_members sets positions_initialized when it finishes),
+            # so this stops it being re-enumerated on every restart.
+            if not self.db.guild_positions_initialized(guild.id) and not self.db.get_all_guild_members(guild.id):
                 logger.info(f"Guild {guild.name} has no members in database, scheduling member enumeration...")
                 self._start_member_enumeration(guild)
 
@@ -588,6 +594,20 @@ class TrackingCog(commands.Cog):
         if not guild_config or not guild_config['notification_channel_id']:
             logger.info(f"No notification channel set for guild {guild_id}")
             return
+
+        # Honour track_only_roles for the notification. The departure bookkeeping
+        # above still runs for every member (store-everyone), but only members
+        # matching the filter trigger a channel notification — consistent with the
+        # other read-time-filtered surfaces. Uses the member's stored roles.
+        track_only_roles_json = guild_config.get('track_only_roles')
+        if track_only_roles_json:
+            try:
+                track_only_roles = set(json.loads(track_only_roles_json))
+            except (json.JSONDecodeError, TypeError):
+                track_only_roles = set()
+            if track_only_roles and not (set(member_data['roles']) & track_only_roles):
+                logger.debug(f"Member {member} left {member.guild.name} but has no tracked role; skipping leave notification")
+                return
 
         # Send notification
         channel = self.bot.get_channel(guild_config['notification_channel_id'])
