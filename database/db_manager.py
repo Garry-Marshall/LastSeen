@@ -1189,6 +1189,56 @@ class DatabaseManager:
             logger.error(f"Failed to get all members for guild {guild_id}: {e}")
             return []
 
+    def get_tracked_user_ids(self, guild_id: int) -> Optional[List[int]]:
+        """Return the user_ids of members matching the guild's track_only_roles.
+
+        Members are stored regardless of the filter; the filter is applied at
+        read time by the listing/reporting surfaces. Returns None when no filter
+        is configured (every member is in scope). An empty list means a filter is
+        set but no stored member currently has a matching role.
+        """
+        config = self.get_guild_config(guild_id)
+        raw = config.get('track_only_roles') if config else None
+        if not raw:
+            return None
+        try:
+            allowed = set(json.loads(raw))
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not allowed:
+            return None
+
+        tracked = []
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id, roles FROM members WHERE guild_id = ?", (guild_id,))
+                for row in cursor.fetchall():
+                    try:
+                        member_roles = set(json.loads(row['roles'])) if row['roles'] else set()
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if member_roles & allowed:
+                        tracked.append(row['user_id'])
+        except Exception as e:
+            logger.error(f"Failed to get tracked user ids for guild {guild_id}: {e}")
+            return None
+        return tracked
+
+    @staticmethod
+    def _member_filter_clause(user_ids: Optional[List[int]], column: str = "user_id") -> Tuple[str, list]:
+        """Build an ' AND <column> IN (...)' fragment restricting to user_ids.
+
+        None -> no restriction (empty fragment). Empty list -> ' AND 1=0' so a
+        role filter that no member satisfies yields no rows. Returns (sql, params).
+        """
+        if user_ids is None:
+            return "", []
+        if not user_ids:
+            return " AND 1=0", []
+        placeholders = ",".join("?" * len(user_ids))
+        return f" AND {column} IN ({placeholders})", list(user_ids)
+
     def member_exists(self, guild_id: int, user_id: int) -> bool:
         """Check if a member exists in the database."""
         try:
@@ -1267,7 +1317,7 @@ class DatabaseManager:
 
         return health
 
-    def get_guild_stats(self, guild_id: int) -> Dict[str, int]:
+    def get_guild_stats(self, guild_id: int, user_ids: Optional[List[int]] = None) -> Dict[str, int]:
         """
         Get statistics for a specific guild.
 
@@ -1286,25 +1336,26 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                fclause, fparams = self._member_filter_clause(user_ids)
 
                 # Total members tracked
-                cursor.execute("""
-                    SELECT COUNT(*) FROM members WHERE guild_id = ?
-                """, (guild_id,))
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM members WHERE guild_id = ?{fclause}
+                """, (guild_id, *fparams))
                 result = cursor.fetchone()
                 stats['total_members'] = result[0] if result else 0
 
                 # Active members
-                cursor.execute("""
-                    SELECT COUNT(*) FROM members WHERE guild_id = ? AND is_active = 1
-                """, (guild_id,))
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM members WHERE guild_id = ? AND is_active = 1{fclause}
+                """, (guild_id, *fparams))
                 result = cursor.fetchone()
                 stats['active_members'] = result[0] if result else 0
 
                 # Inactive (left) members
-                cursor.execute("""
-                    SELECT COUNT(*) FROM members WHERE guild_id = ? AND is_active = 0
-                """, (guild_id,))
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM members WHERE guild_id = ? AND is_active = 0{fclause}
+                """, (guild_id, *fparams))
                 result = cursor.fetchone()
                 stats['inactive_members'] = result[0] if result else 0
 
@@ -1313,7 +1364,7 @@ class DatabaseManager:
 
         return stats
 
-    def get_activity_stats(self, guild_id: int) -> Dict[str, Any]:
+    def get_activity_stats(self, guild_id: int, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Get detailed activity statistics for server-stats command.
 
@@ -1343,75 +1394,76 @@ class DatabaseManager:
 
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                fclause, fparams = self._member_filter_clause(user_ids)
 
                 # Currently online (last_seen = 0)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
-                    WHERE guild_id = ? AND is_active = 1 AND last_seen = 0
-                """, (guild_id,))
+                    WHERE guild_id = ? AND is_active = 1 AND last_seen = 0{fclause}
+                """, (guild_id, *fparams))
                 result = cursor.fetchone()
                 stats['currently_online'] = result[0] if result else 0
 
                 # Never seen offline (never tracked - last_seen IS NULL)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
-                    WHERE guild_id = ? AND is_active = 1 AND last_seen IS NULL
-                """, (guild_id,))
+                    WHERE guild_id = ? AND is_active = 1 AND last_seen IS NULL{fclause}
+                """, (guild_id, *fparams))
                 result = cursor.fetchone()
                 stats['never_seen_offline'] = result[0] if result else 0
 
                 # Offline within last hour
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
                     WHERE guild_id = ? AND is_active = 1
-                    AND last_seen > 0 AND last_seen >= ?
-                """, (guild_id, hour_ago))
+                    AND last_seen > 0 AND last_seen >= ?{fclause}
+                """, (guild_id, hour_ago, *fparams))
                 result = cursor.fetchone()
                 stats['offline_1h'] = result[0] if result else 0
 
                 # Offline within last 24 hours
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
                     WHERE guild_id = ? AND is_active = 1
-                    AND last_seen > 0 AND last_seen >= ?
-                """, (guild_id, day_ago))
+                    AND last_seen > 0 AND last_seen >= ?{fclause}
+                """, (guild_id, day_ago, *fparams))
                 result = cursor.fetchone()
                 stats['offline_24h'] = result[0] if result else 0
 
                 # Offline within last 7 days
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
                     WHERE guild_id = ? AND is_active = 1
-                    AND last_seen > 0 AND last_seen >= ?
-                """, (guild_id, week_ago))
+                    AND last_seen > 0 AND last_seen >= ?{fclause}
+                """, (guild_id, week_ago, *fparams))
                 result = cursor.fetchone()
                 stats['offline_7d'] = result[0] if result else 0
 
                 # Offline within last 30 days
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
                     WHERE guild_id = ? AND is_active = 1
-                    AND last_seen > 0 AND last_seen >= ?
-                """, (guild_id, month_ago))
+                    AND last_seen > 0 AND last_seen >= ?{fclause}
+                """, (guild_id, month_ago, *fparams))
                 result = cursor.fetchone()
                 stats['offline_30d'] = result[0] if result else 0
 
                 # Offline more than 30 days
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
                     WHERE guild_id = ? AND is_active = 1
-                    AND last_seen > 0 AND last_seen < ?
-                """, (guild_id, month_ago))
+                    AND last_seen > 0 AND last_seen < ?{fclause}
+                """, (guild_id, month_ago, *fparams))
                 result = cursor.fetchone()
                 stats['offline_30d_plus'] = result[0] if result else 0
 
                 # Total currently offline (total active - currently online)
                 # Note: offline buckets above are overlapping (e.g., 2h offline counts in all buckets),
                 # so we calculate it as: total active members - online members
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members
-                    WHERE guild_id = ? AND is_active = 1
-                """, (guild_id,))
+                    WHERE guild_id = ? AND is_active = 1{fclause}
+                """, (guild_id, *fparams))
                 result = cursor.fetchone()
                 total_active = result[0] if result else 0
                 stats['currently_offline'] = total_active - stats['currently_online']
@@ -1776,7 +1828,7 @@ class DatabaseManager:
             logger.error(f"Failed to get message activity trend for user {user_id}: {e}")
             return []
 
-    def get_guild_message_activity_stats(self, guild_id: int, days: int = 365) -> Dict[str, Any]:
+    def get_guild_message_activity_stats(self, guild_id: int, days: int = 365, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Get guild-wide message activity statistics.
 
@@ -1790,84 +1842,87 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
+                # Restrict every aggregate to the guild's track_only_roles filter
+                # (read-time). Empty fragment when no filter is set.
+                fclause, fparams = self._member_filter_clause(user_ids)
+
                 # Get today's date (start of day UTC)
                 now = datetime.now(timezone.utc)
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
-                
+
                 # Calculate cutoff dates
                 cutoff_date = today_start - (days * SECONDS_PER_DAY)
                 week_cutoff = today_start - (7 * SECONDS_PER_DAY)
                 month_cutoff = today_start - (30 * SECONDS_PER_DAY)
                 quarter_cutoff = today_start - (90 * SECONDS_PER_DAY)
-                
+
                 # Get total messages for all periods
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COALESCE(SUM(message_count), 0)
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
-                """, (guild_id, cutoff_date))
+                    WHERE guild_id = ? AND date >= ?{fclause}
+                """, (guild_id, cutoff_date, *fparams))
                 total_365d = cursor.fetchone()[0]
-                
+
                 # Get 90-day total
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COALESCE(SUM(message_count), 0)
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
-                """, (guild_id, quarter_cutoff))
+                    WHERE guild_id = ? AND date >= ?{fclause}
+                """, (guild_id, quarter_cutoff, *fparams))
                 total_90d = cursor.fetchone()[0]
-                
+
                 # Get 30-day total
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COALESCE(SUM(message_count), 0)
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
-                """, (guild_id, month_cutoff))
+                    WHERE guild_id = ? AND date >= ?{fclause}
+                """, (guild_id, month_cutoff, *fparams))
                 total_30d = cursor.fetchone()[0]
-                
+
                 # Get 7-day total
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COALESCE(SUM(message_count), 0)
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
-                """, (guild_id, week_cutoff))
+                    WHERE guild_id = ? AND date >= ?{fclause}
+                """, (guild_id, week_cutoff, *fparams))
                 total_7d = cursor.fetchone()[0]
-                
+
                 # Get today's count
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COALESCE(SUM(message_count), 0)
                     FROM message_activity
-                    WHERE guild_id = ? AND date = ?
-                """, (guild_id, today_start))
+                    WHERE guild_id = ? AND date = ?{fclause}
+                """, (guild_id, today_start, *fparams))
                 today_count = cursor.fetchone()[0]
-                
+
                 # Get busiest and quietest days (365 days)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT date, SUM(message_count) as total
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
+                    WHERE guild_id = ? AND date >= ?{fclause}
                     GROUP BY date
                     ORDER BY total DESC
                     LIMIT 1
-                """, (guild_id, cutoff_date))
+                """, (guild_id, cutoff_date, *fparams))
                 busiest_day = cursor.fetchone()
-                
-                cursor.execute("""
+
+                cursor.execute(f"""
                     SELECT date, SUM(message_count) as total
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
+                    WHERE guild_id = ? AND date >= ?{fclause}
                     GROUP BY date
                     ORDER BY total ASC
                     LIMIT 1
-                """, (guild_id, cutoff_date))
+                """, (guild_id, cutoff_date, *fparams))
                 quietest_day = cursor.fetchone()
-                
+
                 # Get active member count (30 days)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(DISTINCT user_id)
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
-                """, (guild_id, month_cutoff))
+                    WHERE guild_id = ? AND date >= ?{fclause}
+                """, (guild_id, month_cutoff, *fparams))
                 active_members_30d = cursor.fetchone()[0]
                 
                 # Average per day over the requested period. total_365d holds the
@@ -2243,7 +2298,7 @@ class DatabaseManager:
             logger.error(f"Failed to get hourly activity for guild {guild_id}: {e}", exc_info=True)
             return {hour: 0 for hour in range(24)}
 
-    def get_activity_by_day(self, guild_id: int, days: int = 30) -> Dict[str, int]:
+    def get_activity_by_day(self, guild_id: int, days: int = 30, user_ids: Optional[List[int]] = None) -> Dict[str, int]:
         """
         Get message activity distribution by day of week.
 
@@ -2257,15 +2312,16 @@ class DatabaseManager:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                fclause, fparams = self._member_filter_clause(user_ids)
                 now = int(datetime.now(timezone.utc).timestamp())
                 period_start = now - (days * SECONDS_PER_DAY)
-                
-                cursor.execute("""
+
+                cursor.execute(f"""
                     SELECT date, SUM(message_count) as count
                     FROM message_activity
-                    WHERE guild_id = ? AND date >= ?
+                    WHERE guild_id = ? AND date >= ?{fclause}
                     GROUP BY date
-                """, (guild_id, period_start))
+                """, (guild_id, period_start, *fparams))
                 
                 day_counts = {'Monday': 0, 'Tuesday': 0, 'Wednesday': 0, 'Thursday': 0, 
                              'Friday': 0, 'Saturday': 0, 'Sunday': 0}
@@ -2337,21 +2393,22 @@ class DatabaseManager:
             logger.error(f"Failed to get departed members for guild {guild_id}: {e}")
             return []
 
-    def get_top_active_users_period(self, guild_id: int, days: int, limit: int = 10) -> list:
+    def get_top_active_users_period(self, guild_id: int, days: int, limit: int = 10, user_ids: Optional[List[int]] = None) -> list:
         """Get most active users by message count in the last N days."""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                fclause, fparams = self._member_filter_clause(user_ids, column="m.user_id")
                 cutoff = int(datetime.now(timezone.utc).timestamp()) - (days * SECONDS_PER_DAY)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT m.user_id, m.username, m.nickname, SUM(ma.message_count) as total_messages
                     FROM message_activity ma
                     JOIN members m ON ma.user_id = m.user_id AND ma.guild_id = m.guild_id
-                    WHERE ma.guild_id = ? AND ma.date >= ? AND m.is_active = 1
+                    WHERE ma.guild_id = ? AND ma.date >= ? AND m.is_active = 1{fclause}
                     GROUP BY m.user_id, m.username, m.nickname
                     ORDER BY total_messages DESC
                     LIMIT ?
-                """, (guild_id, cutoff, limit))
+                """, (guild_id, cutoff, *fparams, limit))
                 columns = [desc[0] for desc in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
         except Exception as e:

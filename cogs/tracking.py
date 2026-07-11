@@ -181,9 +181,6 @@ class TrackingCog(commands.Cog):
                         if member.id in self.bot.opted_out_users:
                             continue  # Respect the global privacy opt-out
 
-                        if not self._should_track_member(member):
-                            continue  # Respect the track-only-roles filter
-
                         try:
                             roles = get_member_roles(member)
                             join_date = int(member.joined_at.timestamp()) if member.joined_at else 0
@@ -252,53 +249,6 @@ class TrackingCog(commands.Cog):
         except Exception as e:
             logger.error(f"Background VACUUM task failed: {e}", exc_info=True)
 
-    def _should_track_member(self, member: discord.Member) -> bool:
-        """Check if member should be tracked based on guild settings.
-        
-        Applies role-based and channel-based tracking filters if configured.
-        
-        Args:
-            member: Discord member to check
-            
-        Returns:
-            bool: True if member should be tracked, False otherwise
-        """
-        """
-        Check if a member should be tracked based on guild configuration.
-
-        Args:
-            member: Discord member to check
-
-        Returns:
-            bool: True if member should be tracked, False otherwise
-        """
-        import json
-
-        # Get guild config
-        guild_config = self.db.get_guild_config(member.guild.id)
-        if not guild_config:
-            return True  # If no config, track all members
-
-        # Check if track_only_roles is configured
-        track_only_roles_json = guild_config.get('track_only_roles')
-        if not track_only_roles_json:
-            return True  # If no role filter, track all members
-
-        try:
-            track_only_roles = json.loads(track_only_roles_json)
-            if not track_only_roles:
-                return True  # Empty list means track all
-
-            # Check if member has any of the required roles
-            member_role_names = [role.name for role in member.roles]
-            for required_role in track_only_roles:
-                if required_role in member_role_names:
-                    return True
-
-            return False  # Member doesn't have any required roles
-        except (json.JSONDecodeError, TypeError):
-            return True  # If error parsing, default to tracking
-
     def _calculate_and_set_join_position(self, member: discord.Member) -> bool:
         """Calculate and set join position for a member based on their join date.
         
@@ -360,10 +310,6 @@ class TrackingCog(commands.Cog):
         """
         # Respect the global privacy opt-out
         if member.id in self.bot.opted_out_users:
-            return False
-
-        # Check if member should be tracked based on role filter
-        if not self._should_track_member(member):
             return False
 
         guild_id = member.guild.id
@@ -559,13 +505,6 @@ class TrackingCog(commands.Cog):
 
         # Respect the global privacy opt-out
         if member.id in self.bot.opted_out_users:
-            return
-
-        # Respect the track-only-roles filter: don't track members who lack a
-        # required role. If a previously tracked member rejoins without the role,
-        # they are intentionally left untouched (not reactivated).
-        if not self._should_track_member(member):
-            logger.debug(f"Member {member} joined {member.guild.name} but lacks a tracked role, skipping")
             return
 
         logger.info(f"Member joined: {member} in guild {member.guild.name}")

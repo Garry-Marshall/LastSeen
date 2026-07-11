@@ -45,14 +45,19 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
     guild_id = int(guild.id)
     lang = guild_language(db.get_guild_config(guild_id))
 
+    # Restrict the whole report to the guild's track_only_roles filter (read-time;
+    # all members are stored regardless). None => no filter (everyone in scope).
+    tracked = db.get_tracked_user_ids(guild_id)
+    tracked_set = set(tracked) if tracked is not None else None
+
     # Get guild-wide message activity stats
-    activity_stats = db.get_guild_message_activity_stats(guild_id, days)
-    
+    activity_stats = db.get_guild_message_activity_stats(guild_id, days, user_ids=tracked)
+
     # Get top active users
-    top_users = db.get_top_active_users_period(guild_id, days, limit=5)
-    
+    top_users = db.get_top_active_users_period(guild_id, days, limit=5, user_ids=tracked)
+
     # Get daily activity for peak day
-    daily_activity = db.get_activity_by_day(guild_id, days)
+    daily_activity = db.get_activity_by_day(guild_id, days, user_ids=tracked)
     # Validate daily_activity is not None and not empty before calling max()
     if daily_activity and isinstance(daily_activity, dict) and len(daily_activity) > 0:
         peak_day = max(daily_activity.items(), key=lambda x: x[1])
@@ -92,10 +97,16 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         embed.description += t('report.member_changes_header', lang)
         joined = left = None
         if show_joined:
-            joined = len(db.get_new_members_period(guild_id, days))
+            new_members = db.get_new_members_period(guild_id, days)
+            if tracked_set is not None:
+                new_members = [m for m in new_members if m['user_id'] in tracked_set]
+            joined = len(new_members)
             embed.description += t('report.joined', lang, count=joined)
         if show_left:
-            left = len(db.get_departed_members_period(guild_id, days))
+            departed_members = db.get_departed_members_period(guild_id, days)
+            if tracked_set is not None:
+                departed_members = [m for m in departed_members if m['user_id'] in tracked_set]
+            left = len(departed_members)
             embed.description += t('report.left', lang, count=left)
         if show_joined and show_left:
             embed.description += t('report.net', lang, count=joined - left)

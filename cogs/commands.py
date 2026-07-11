@@ -673,8 +673,13 @@ class CommandsCog(commands.Cog):
         # Use provided days or fall back to config
         inactive_days = days if days is not None else guild_config['inactive_days']
 
-        # Get inactive members
+        # Get inactive members, then restrict to the guild's track_only_roles
+        # filter (applied at read time — every member is stored regardless).
         inactive_members = self.db.get_inactive_members(guild_id, inactive_days)
+        tracked = await asyncio.to_thread(self.db.get_tracked_user_ids, guild_id)
+        if tracked is not None:
+            tracked_set = set(tracked)
+            inactive_members = [m for m in inactive_members if m['user_id'] in tracked_set]
 
         if not inactive_members:
             embed = create_embed(t("commands.inactive.empty_title", lang), discord.Color.blue())
@@ -1198,6 +1203,13 @@ class CommandsCog(commands.Cog):
         # Get all members from database. A departed filter targets members who
         # have left, so those rows must be included in the fetch.
         db_members = self.db.get_guild_members(guild_id, include_left='departed' in filters)
+
+        # Restrict to the guild's track_only_roles filter (applied at read time;
+        # all members are stored regardless of the filter).
+        tracked = self.db.get_tracked_user_ids(guild_id)
+        if tracked is not None:
+            tracked_set = set(tracked)
+            db_members = [m for m in db_members if m['user_id'] in tracked_set]
 
         # Get Discord members from cache (chunked in background after on_ready,
         # so this may be partial shortly after startup — misses are tolerated below)

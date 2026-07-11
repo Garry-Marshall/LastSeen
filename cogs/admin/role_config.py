@@ -178,12 +178,23 @@ class TrackOnlyRolesModal(discord.ui.Modal):
         """
         self.db = db
         self.guild_id = guild_id
-        self.lang = guild_language(db.get_guild_config(guild_id))
+        guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
         super().__init__(title=t("admin.track_roles.modal_title", self.lang))
+
+        # Pre-fill with the roles already configured in the database, if any
+        current_roles = ''
+        raw = guild_config.get('track_only_roles') if guild_config else None
+        if raw:
+            try:
+                current_roles = ', '.join(json.loads(raw))
+            except (json.JSONDecodeError, TypeError):
+                current_roles = ''
 
         self.roles_input = discord.ui.TextInput(
             label=t("admin.track_roles.input_label", self.lang),
             placeholder=t("admin.track_roles.input_placeholder", self.lang),
+            default=current_roles or None,
             required=False,
             style=discord.TextStyle.paragraph,
             max_length=500
