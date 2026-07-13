@@ -1086,8 +1086,15 @@ class TrackingCog(commands.Cog):
                         if should_send_weekly:
                             logger.info(f"Sending weekly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
                             success = await send_scheduled_report(guild, channel_id, self.db, report_types, 7)
-                            if success:
-                                self.db.update_last_report_time(guild_id, 'weekly')
+                            # Mark as attempted even on failure. With the hourly
+                            # catch-up window (current_hour >= time_hour), a persistent
+                            # error (missing permissions, deleted channel) would
+                            # otherwise retry every hour until midnight. A genuine miss
+                            # (bot down at the scheduled hour) still catches up, since
+                            # no attempt was recorded then.
+                            self.db.update_last_report_time(guild_id, 'weekly')
+                            if not success:
+                                logger.warning(f"Weekly report for guild {guild.name} failed to send; will retry at next scheduled occurrence")
                     
                     # Check if monthly report is due
                     if frequency in ['monthly', 'both']:
@@ -1119,8 +1126,10 @@ class TrackingCog(commands.Cog):
                         if should_send_monthly:
                             logger.info(f"Sending monthly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
                             success = await send_scheduled_report(guild, channel_id, self.db, report_types, 30)
-                            if success:
-                                self.db.update_last_report_time(guild_id, 'monthly')
+                            # Mark as attempted even on failure — see the weekly note above.
+                            self.db.update_last_report_time(guild_id, 'monthly')
+                            if not success:
+                                logger.warning(f"Monthly report for guild {guild.name} failed to send; will retry at next scheduled occurrence")
                 
                 except Exception as e:
                     logger.error(f"Error processing scheduled report for guild: {e}", exc_info=True)
