@@ -694,7 +694,7 @@ class TrackingCog(commands.Cog):
         after_display = after.display_name if after.display_name != str(after) else None
 
         if before_display != after_display:
-            logger.info(f"Display name changed: {before_display} -> {after_display} for {after}")
+            logger.debug(f"Display name changed: {before_display} -> {after_display} for {after}")
             # Track nickname in history BEFORE updating the database
             self.db.update_nickname_history(guild_id, user_id, before_display, after_display)
             # Update the nickname in database
@@ -702,7 +702,7 @@ class TrackingCog(commands.Cog):
 
         # Check for username change (display name)
         if str(before) != str(after):
-            logger.info(f"Username changed: {before} -> {after}")
+            logger.debug(f"Username changed: {before} -> {after}")
             self.db.update_member_username(guild_id, user_id, str(after))
 
         # Check for role changes
@@ -744,7 +744,7 @@ class TrackingCog(commands.Cog):
 
         # Check for username change
         if str(before) != str(after):
-            logger.info(f"Global username changed: {before} -> {after}")
+            logger.debug(f"Global username changed: {before} -> {after}")
 
             # Update username in all guilds where this user is a member
             for guild in self.bot.guilds:
