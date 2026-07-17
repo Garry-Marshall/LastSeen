@@ -59,6 +59,8 @@
   "commands.about.description": "**LastSeen** is a Discord bot for monitoring and tracking user activity across guilds.\n\nIt tracks:\n• User joins and leaves\n• Nickname changes\n• Role updates\n• Presence and activity status\n\nDesigned for server moderators who want clear insight into member activity without unnecessary noise.",
   "commands.about.servers_served": "📡 Servers served:",
   "commands.about.users_counted": "👥 Users counted:",
+  "commands.about.messages_24h": "💬 Messages (24h):",
+  "commands.about.messages_7d": "📈 Messages (7d):",
   "commands.about.system_resources": "⚙️ System Resources",
   "commands.about.privacy_title": "🔐 Privacy",
   "commands.about.privacy_value": "This bot does **not** store or read message content. Only metadata required for activity tracking is recorded.\nUse `/forgetme` to delete your data and opt out of tracking.\n[Privacy Policy](https://lastseen.bot.nu/privacy-policy/)",

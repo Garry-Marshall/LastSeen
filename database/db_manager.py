@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
 
+# How long global /about statistics stay cached (seconds)
+BOT_STATS_CACHE_TTL = 300
+
 
 class DatabaseManager:
     """Manages SQLite database connections and operations."""
@@ -32,6 +35,11 @@ class DatabaseManager:
         self._pool: Queue = Queue(maxsize=pool_size)
         self._pool_lock = threading.Lock()
         self._connection_count = 0
+
+        # Cached global counts for /about (see get_bot_statistics)
+        self._bot_stats_cache: Optional[dict] = None
+        self._bot_stats_expires = 0
+        self._bot_stats_lock = threading.Lock()
         
         # Initialize the connection pool
         self._initialize_pool()
@@ -2714,29 +2722,72 @@ class DatabaseManager:
     def get_bot_statistics(self) -> dict:
         """
         Get global bot statistics across all guilds.
-        
+
+        Every query here is an unindexed full scan (each index on members and
+        the activity tables is guild_id-leading, so a cross-guild aggregate
+        cannot use them), so the result is cached and may be up to
+        BOT_STATS_CACHE_TTL seconds stale.
+
         Returns:
-            dict: Statistics including total guilds and total unique users tracked
+            dict: 'total_guilds', 'total_users' (active member rows, counted
+                  once per guild membership), 'last_24h' (rolling 24 hours)
+                  and 'last_7d' (7 calendar days including today, which is
+                  still in progress)
         """
+        now = int(datetime.now(timezone.utc).timestamp())
+
+        with self._bot_stats_lock:
+            if self._bot_stats_cache and now < self._bot_stats_expires:
+                return dict(self._bot_stats_cache)
+
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # Total guilds
                 cursor.execute("SELECT COUNT(DISTINCT guild_id) FROM guilds")
                 total_guilds = cursor.fetchone()[0]
-                
+
                 # Total active member records (not distinct - counts each guild membership)
                 cursor.execute("SELECT COUNT(*) FROM members WHERE is_active = 1")
                 total_users = cursor.fetchone()[0]
-                
-                return {
+
+                # Rolling 24h comes from the hourly table; message_activity
+                # only has start-of-day granularity, too coarse for this.
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity_hourly
+                    WHERE timestamp >= ?
+                """, (now - SECONDS_PER_DAY,))
+                last_24h = cursor.fetchone()[0]
+
+                # 7 day buckets: today plus the 6 preceding days.
+                today = datetime.now(timezone.utc)
+                today_start = int(datetime(today.year, today.month, today.day, tzinfo=timezone.utc).timestamp())
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE date >= ?
+                """, (today_start - (6 * SECONDS_PER_DAY),))
+                last_7d = cursor.fetchone()[0]
+
+                stats = {
                     'total_guilds': total_guilds,
-                    'total_users': total_users
+                    'total_users': total_users,
+                    'last_24h': last_24h,
+                    'last_7d': last_7d
                 }
+
+                with self._bot_stats_lock:
+                    self._bot_stats_cache = stats
+                    self._bot_stats_expires = now + BOT_STATS_CACHE_TTL
+
+                return dict(stats)
         except Exception as e:
             logger.error(f"Failed to get bot statistics: {e}")
             return {
                 'total_guilds': 0,
-                'total_users': 0
+                'total_users': 0,
+                'last_24h': 0,
+                'last_7d': 0
             }

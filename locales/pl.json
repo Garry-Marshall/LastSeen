@@ -59,6 +59,8 @@
   "commands.about.description": "**LastSeen** to bot Discord do monitorowania i śledzenia aktywności użytkowników na wielu serwerach.\n\nŚledzi:\n• Dołączenia i odejścia użytkowników\n• Zmiany pseudonimów\n• Aktualizacje ról\n• Status obecności i aktywności\n\nZaprojektowany dla moderatorów serwerów, którzy chcą mieć jasny wgląd w aktywność członków bez zbędnego szumu.",
   "commands.about.servers_served": "📡 Obsłużone serwery:",
   "commands.about.users_counted": "👥 Policzeni użytkownicy:",
+  "commands.about.messages_24h": "💬 Wiadomości (24 godz.):",
+  "commands.about.messages_7d": "📈 Wiadomości (7 dni):",
   "commands.about.system_resources": "⚙️ Zasoby systemowe",
   "commands.about.privacy_title": "🔐 Prywatność",
   "commands.about.privacy_value": "Ten bot **nie** przechowuje ani nie czyta treści wiadomości. Rejestrowane są tylko metadane niezbędne do śledzenia aktywności.\nUżyj `/forgetme`, aby usunąć swoje dane i zrezygnować ze śledzenia.\n[Polityka prywatności](https://lastseen.bot.nu/privacy-policy/)",

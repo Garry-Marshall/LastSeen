@@ -1027,13 +1027,14 @@ class CommandsCog(commands.Cog):
         import os
         import sys
 
-        lang = guild_language(self.db.get_guild_config(interaction.guild_id) if interaction.guild_id else None)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id) if interaction.guild_id else None
+        lang = guild_language(guild_config)
         embed = create_embed(t("commands.about.title", lang), discord.Color.green())
 
         embed.description = t("commands.about.description", lang)
 
         # Bot Statistics
-        bot_stats = self.db.get_bot_statistics()
+        bot_stats = await asyncio.to_thread(self.db.get_bot_statistics)
 
         embed.add_field(
             name=t("commands.about.servers_served", lang),
@@ -1050,10 +1051,27 @@ class CommandsCog(commands.Cog):
         # Add empty field for layout (3 columns)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
+        # Message Activity
+        embed.add_field(
+            name=t("commands.about.messages_24h", lang),
+            value=f"{bot_stats['last_24h']:,}",
+            inline=True
+        )
+
+        embed.add_field(
+            name=t("commands.about.messages_7d", lang),
+            value=f"{bot_stats['last_7d']:,}",
+            inline=True
+        )
+
+        # Add empty field to keep the second row aligned with the first
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
         # System Resources
         process = psutil.Process(os.getpid())
         memory_mb = process.memory_info().rss / 1024 / 1024
-        cpu_percent = process.cpu_percent(interval=0.1)
+        # cpu_percent sleeps for the full interval, so keep it off the event loop
+        cpu_percent = await asyncio.to_thread(process.cpu_percent, 0.1)
         thread_count = process.num_threads()
         
         # Bot uptime
@@ -1076,7 +1094,7 @@ class CommandsCog(commands.Cog):
         latency_ms = round(self.bot.latency * 1000)
         
         # Database status
-        db_health = self.db.get_database_health()
+        db_health = await asyncio.to_thread(self.db.get_database_health)
         db_status = "✅ Healthy" if db_health['status'] == 'healthy' else "❌ Unhealthy"
         
         # Python version

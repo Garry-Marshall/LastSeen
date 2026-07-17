@@ -59,6 +59,8 @@
   "commands.about.description": "**LastSeen** is een Discord-bot voor het monitoren en bijhouden van gebruikersactiviteit over servers heen.\n\nHet houdt bij:\n• Gebruikers die lid worden en vertrekken\n• Bijnaamwijzigingen\n• Rolwijzigingen\n• Aanwezigheids- en activiteitsstatus\n\nGemaakt voor servermoderators die helder inzicht in ledenactiviteit willen zonder onnodige ruis.",
   "commands.about.servers_served": "📡 Servers bediend:",
   "commands.about.users_counted": "👥 Gebruikers geteld:",
+  "commands.about.messages_24h": "💬 Berichten (24u):",
+  "commands.about.messages_7d": "📈 Berichten (7d):",
   "commands.about.system_resources": "⚙️ Systeembronnen",
   "commands.about.privacy_title": "🔐 Privacy",
   "commands.about.privacy_value": "Deze bot slaat berichtinhoud **niet** op en leest deze **niet**. Alleen metadata die nodig is voor activiteitstracking wordt vastgelegd.\nGebruik `/forgetme` om je gegevens te verwijderen en je af te melden voor tracking.\n[Privacybeleid](https://lastseen.bot.nu/privacy-policy/)",
