@@ -1027,6 +1027,9 @@ class CommandsCog(commands.Cog):
         import os
         import sys
 
+        # Stats gathering can exceed the 3s interaction window on a cold cache
+        await interaction.response.defer(ephemeral=True)
+
         guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id) if interaction.guild_id else None
         lang = guild_language(guild_config)
         embed = create_embed(t("commands.about.title", lang), discord.Color.green())
@@ -1133,7 +1136,7 @@ class CommandsCog(commands.Cog):
 
         embed.set_footer(text=t("commands.about.footer", lang))
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="search", description="🔍 Search and filter server members")
     @app_commands.guild_only()
