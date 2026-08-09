@@ -269,7 +269,7 @@
   "admin.help.footer_user": "Rôle utilisateur : {role} • Affichage des commandes utilisateur uniquement",
 
   "admin.allowed_channels.modal_title": "Définir les salons autorisés",
-  "admin.allowed_channels.input_label": "Noms ou ID de salons (séparés par des virgules)",
+  "admin.allowed_channels.input_label": "Noms ou ID de salons (séparés par virgules)",
   "admin.allowed_channels.input_placeholder": "ex. general, bot-commands, 123456 (laisser vide pour tous)",
   "admin.allowed_channels.cleared": "Les commandes du bot peuvent désormais être utilisées dans tous les salons",
   "admin.allowed_channels.update_failed": "Échec de la mise à jour des salons autorisés.",
@@ -338,8 +338,8 @@
   "admin.view_config.error_parsing_channels": "Erreur lors de l'analyse des salons",
   "admin.view_config.tracked_members": "Membres suivis",
 
-  "channel_config.retention.modal_title": "Définir les jours de conservation des messages",
-  "channel_config.retention.input_label": "Jours de conservation de l'activité des messages",
+  "channel_config.retention.modal_title": "Définir la conservation des messages",
+  "channel_config.retention.input_label": "Jours de conservation des messages",
   "channel_config.retention.input_placeholder": "ex. 365 (par défaut), 180, 730",
   "channel_config.retention.min": "La période de conservation doit être d'au moins 30 jours.",
   "channel_config.retention.max": "La période de conservation ne peut pas dépasser 3650 jours (10 ans).",
