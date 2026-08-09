@@ -19,6 +19,11 @@ Validates three things and exits non-zero if any fail:
      renaming a placeholder (e.g. {count} -> {aantal}) would crash str.format
      at runtime — this catches it before release.
 
+  4. Discord length limits: modal titles and TextInput labels are capped at
+     45 characters by Discord. A longer value (common when a translation runs
+     longer than the English source) crashes with 50035 Invalid Form Body the
+     moment the modal opens. Checked in every locale, English included.
+
 Duplicate keys within a single JSON file are also reported.
 """
 
@@ -32,6 +37,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOCALE_DIR = PROJECT_ROOT / "locales"
 DEFAULT_LANG = "en"
 CODE_DIRS = ["bot", "cogs"]
+
+# Discord caps modal titles and TextInput labels at 45 characters. Keys whose
+# values are used in either place must respect that limit in every locale.
+DISCORD_LABEL_MAX = 45
+LABEL_KEY_SUFFIXES = ("input_label", "modal_title")
 
 _KEY_RE = re.compile(r'''\bt\(\s*["']([^"']+)["']''')
 _FORMATTER = string.Formatter()
@@ -116,6 +126,17 @@ def main() -> int:
                 if extra:
                     detail.append(f"unexpected {sorted(extra)}")
                 problems.append(f"{lang}.json: placeholder mismatch in {key!r} ({'; '.join(detail)})")
+
+    # 4. Discord length limits on modal titles and TextInput labels (all locales)
+    for lang, cat in catalogs.items():
+        for key, value in cat.items():
+            if not key.endswith(LABEL_KEY_SUFFIXES) or not isinstance(value, str):
+                continue
+            if len(value) > DISCORD_LABEL_MAX:
+                problems.append(
+                    f"{lang}.json: {key!r} is {len(value)} chars, exceeds Discord's "
+                    f"{DISCORD_LABEL_MAX}-char limit for modal titles/labels"
+                )
 
     langs = ", ".join(sorted(catalogs))
     print(f"Checked {len(catalogs)} locale(s): {langs}")
