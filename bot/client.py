@@ -139,6 +139,23 @@ def create_bot(config) -> commands.Bot:
             logger.error(f"  ✗ Failed to chunk {guild.name}: {e}")
 
     @bot.event
+    async def on_interaction(interaction: discord.Interaction):
+        """Diagnostic: flag interactions that reach us with most of their 3s
+        acknowledgement window already gone. A large age at dispatch means the
+        delay happened before any handler code ran (gateway lag or a blocked
+        event loop), so an earlier defer() in the handler could not have
+        helped — this distinguishes those cases from time spent in handlers
+        when investigating 10062 Unknown interaction errors."""
+        age = (discord.utils.utcnow() - interaction.created_at).total_seconds()
+        if age > 2.0:
+            data = interaction.data or {}
+            name = data.get("name") or data.get("custom_id") or "?"
+            logger.warning(
+                f"Interaction {interaction.type.name} '{name}' was already "
+                f"{age:.2f}s old at dispatch (guild {interaction.guild_id})"
+            )
+
+    @bot.event
     async def on_error(event: str, *args, **kwargs):
         """Global error handler for events."""
         logger.error(f"Error in event {event}", exc_info=True)

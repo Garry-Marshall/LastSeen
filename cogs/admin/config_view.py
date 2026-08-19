@@ -1,5 +1,6 @@
 """Interactive configuration view for bot settings."""
 
+import asyncio
 import discord
 import logging
 import json
@@ -132,7 +133,7 @@ class ConfigView(discord.ui.View):
         lang = self.lang
 
         # Get current config
-        guild_config = self.db.get_guild_config(self.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, self.guild_id)
         if not guild_config:
             await interaction.response.send_message(
                 embed=create_error_embed(t("admin.errors.guild_config_not_found", lang), lang),
@@ -146,7 +147,7 @@ class ConfigView(discord.ui.View):
         new_value = not bool(guild_config.get("user_role_required", 0))
 
         # Update database
-        if self.db.set_user_role_required(self.guild_id, new_value, interaction.guild.name):
+        if await asyncio.to_thread(self.db.set_user_role_required, self.guild_id, new_value, interaction.guild.name):
             # Update the toggle button on the config panel itself. Responding to the
             # component interaction with edit_message targets the panel message
             # (works for ephemeral messages too).
@@ -212,7 +213,7 @@ class ConfigView(discord.ui.View):
         lang = self.lang
 
         # Check if reports are currently enabled
-        guild_config = self.db.get_guild_config(self.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, self.guild_id)
         if not guild_config or not guild_config.get('report_frequency'):
             await interaction.response.send_message(
                 embed=create_error_embed(t("admin.config_view.reports_not_enabled", lang), lang),
@@ -252,7 +253,7 @@ class ConfigView(discord.ui.View):
     async def view_config(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Button to view current configuration."""
         lang = self.lang
-        guild_config = self.db.get_guild_config(self.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, self.guild_id)
 
         if not guild_config:
             await interaction.response.send_message(
@@ -379,7 +380,7 @@ class ConfigView(discord.ui.View):
         embed.add_field(name=t("admin.view_config.allowed_channels", lang), value=allowed_channels_str, inline=False)
 
         # Member count
-        member_count = len(self.db.get_all_guild_members(self.guild_id))
+        member_count = len(await asyncio.to_thread(self.db.get_all_guild_members, self.guild_id))
         embed.add_field(name=t("admin.view_config.tracked_members", lang), value=str(member_count), inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -400,7 +401,7 @@ class DisableReportsConfirmView(discord.ui.View):
     async def confirm_disable(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Confirm disabling reports."""
         lang = self.lang
-        success = self.db.disable_reports(self.guild_id)
+        success = await asyncio.to_thread(self.db.disable_reports, self.guild_id)
         if success:
             await interaction.response.edit_message(
                 embed=create_success_embed(t("admin.config_view.reports_disabled_success", lang), lang),
@@ -457,7 +458,7 @@ class LanguageSelectView(discord.ui.View):
     async def _on_select(self, interaction: discord.Interaction):
         """Persist the chosen language and confirm in that new language."""
         new_lang = self.language_select.values[0]
-        if not self.db.set_guild_language(self.guild_id, new_lang, interaction.guild.name):
+        if not await asyncio.to_thread(self.db.set_guild_language, self.guild_id, new_lang, interaction.guild.name):
             await interaction.response.edit_message(
                 embed=create_error_embed(t("admin.language.update_failed", new_lang), new_lang),
                 view=None

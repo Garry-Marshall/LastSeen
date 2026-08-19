@@ -1,5 +1,6 @@
 """Channel-based command restriction modal."""
 
+import asyncio
 import discord
 import logging
 
@@ -42,7 +43,7 @@ class AllowedChannelsModal(discord.ui.Modal):
 
         # If empty, allow all channels
         if not channels_str:
-            if self.db.set_allowed_channels(self.guild_id, [], interaction.guild.name):
+            if await asyncio.to_thread(self.db.set_allowed_channels, self.guild_id, [], interaction.guild.name):
                 await interaction.response.send_message(
                     embed=create_success_embed(t("admin.allowed_channels.cleared", lang), lang),
                     ephemeral=True
@@ -94,7 +95,7 @@ class AllowedChannelsModal(discord.ui.Modal):
             return
 
         # Update database
-        if self.db.set_allowed_channels(self.guild_id, channel_ids, interaction.guild.name):
+        if await asyncio.to_thread(self.db.set_allowed_channels, self.guild_id, channel_ids, interaction.guild.name):
             channels = [interaction.guild.get_channel(cid) for cid in channel_ids]
             channel_mentions = [ch.mention for ch in channels if ch]
 

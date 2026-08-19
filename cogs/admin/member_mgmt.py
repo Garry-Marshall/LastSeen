@@ -1,5 +1,6 @@
 """Member database synchronization functionality."""
 
+import asyncio
 import discord
 import logging
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ async def update_all_members(
         db: Database manager
     """
     guild = interaction.guild
-    lang = guild_language(db.get_guild_config(guild.id))
+    lang = guild_language(await asyncio.to_thread(db.get_guild_config, guild.id))
     added_count = 0
     updated_count = 0
 
@@ -42,7 +43,10 @@ async def update_all_members(
             logger.info(f"Chunking {guild.name} before member scan...")
             await guild.chunk()
 
-        total_members = len([m for m in guild.members if not m.bot])
+        # Snapshot the member list so the whole scan can run off the event
+        # loop while the gateway keeps mutating the member cache.
+        members = [m for m in guild.members if not m.bot]
+        total_members = len(members)
 
         # Send progress message for large servers
         if total_members > 100:
@@ -50,39 +54,47 @@ async def update_all_members(
                 t("admin.update_members.scanning", lang, count=total_members),
                 ephemeral=True
             )
-        
-        # First, ensure guild name is correct
-        db.update_guild_name(guild.id, guild.name)
 
-        for member in guild.members:
-            if member.bot:
-                continue
+        opted_out_users = interaction.client.opted_out_users
 
-            # Respect the global privacy opt-out
-            if member.id in interaction.client.opted_out_users:
-                continue
+        def _sync_members() -> tuple[int, int]:
+            """Run the per-member DB writes in one batch off the event loop."""
+            added = 0
+            updated = 0
 
-            roles = get_member_roles(member)
-            join_date = int(member.joined_at.timestamp()) if member.joined_at else int(datetime.now(timezone.utc).timestamp())
-            nickname = member.display_name if member.display_name != str(member) else None
+            # First, ensure guild name is correct
+            db.update_guild_name(guild.id, guild.name)
 
-            if db.member_exists(guild.id, member.id):
-                # Update existing member
-                db.update_member_username(guild.id, member.id, str(member))
-                db.update_member_nickname(guild.id, member.id, nickname)
-                db.update_member_roles(guild.id, member.id, roles)
-                updated_count += 1
-            else:
-                # Add new member
-                db.add_member(
-                    guild_id=guild.id,
-                    user_id=member.id,
-                    username=str(member),
-                    nickname=nickname,
-                    join_date=join_date,
-                    roles=roles
-                )
-                added_count += 1
+            for member in members:
+                # Respect the global privacy opt-out
+                if member.id in opted_out_users:
+                    continue
+
+                roles = get_member_roles(member)
+                join_date = int(member.joined_at.timestamp()) if member.joined_at else int(datetime.now(timezone.utc).timestamp())
+                nickname = member.display_name if member.display_name != str(member) else None
+
+                if db.member_exists(guild.id, member.id):
+                    # Update existing member
+                    db.update_member_username(guild.id, member.id, str(member))
+                    db.update_member_nickname(guild.id, member.id, nickname)
+                    db.update_member_roles(guild.id, member.id, roles)
+                    updated += 1
+                else:
+                    # Add new member
+                    db.add_member(
+                        guild_id=guild.id,
+                        user_id=member.id,
+                        username=str(member),
+                        nickname=nickname,
+                        join_date=join_date,
+                        roles=roles
+                    )
+                    added += 1
+
+            return added, updated
+
+        added_count, updated_count = await asyncio.to_thread(_sync_members)
 
         embed = create_success_embed(
             t("admin.update_members.success", lang, added=added_count, updated=updated_count),

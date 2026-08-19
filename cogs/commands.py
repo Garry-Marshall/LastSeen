@@ -867,14 +867,15 @@ class CommandsCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
+        # Own stats are always ephemeral, so acknowledge before any DB work —
+        # the permission check reads the DB and must not spend the 3s token window
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
         # Check permissions
         can_proceed, error_embed, _, lang = await self._check_permissions(interaction)
         if not can_proceed:
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
             return
-
-        # Own stats are always ephemeral, regardless of channel restrictions
-        await interaction.response.defer(ephemeral=True, thinking=True)
 
         guild_id = interaction.guild_id
         user_id = interaction.user.id

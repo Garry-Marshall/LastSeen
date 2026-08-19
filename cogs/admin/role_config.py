@@ -1,5 +1,6 @@
 """Role-based access control and filtering modals."""
 
+import asyncio
 import discord
 import logging
 import json
@@ -70,12 +71,12 @@ class BotAdminRoleModal(discord.ui.Modal):
                 ephemeral=True
             )
             # Still update the database
-            self.db.set_bot_admin_role(self.guild_id, role_name, interaction.guild.name)
+            await asyncio.to_thread(self.db.set_bot_admin_role, self.guild_id, role_name, interaction.guild.name)
             logger.info(f"Bot admin role set to '{role_name}' in guild {interaction.guild.name} (role doesn't exist yet)")
             return
 
         # Update database
-        if self.db.set_bot_admin_role(self.guild_id, role_name, interaction.guild.name):
+        if await asyncio.to_thread(self.db.set_bot_admin_role, self.guild_id, role_name, interaction.guild.name):
             await interaction.response.send_message(
                 embed=create_success_embed(t("admin.role.bot_admin_set", lang, role=role_name), lang),
                 ephemeral=True
@@ -147,12 +148,12 @@ class UserRoleModal(discord.ui.Modal):
                 ephemeral=True
             )
             # Still update the database
-            self.db.set_user_role_name(self.guild_id, role_name, interaction.guild.name)
+            await asyncio.to_thread(self.db.set_user_role_name, self.guild_id, role_name, interaction.guild.name)
             logger.info(f"User role set to '{role_name}' in guild {interaction.guild.name} (role doesn't exist yet)")
             return
 
         # Update database
-        if self.db.set_user_role_name(self.guild_id, role_name, interaction.guild.name):
+        if await asyncio.to_thread(self.db.set_user_role_name, self.guild_id, role_name, interaction.guild.name):
             await interaction.response.send_message(
                 embed=create_success_embed(t("admin.role.user_set", lang, role=role_name), lang),
                 ephemeral=True
@@ -208,7 +209,7 @@ class TrackOnlyRolesModal(discord.ui.Modal):
 
         # If empty, track all roles
         if not roles_str:
-            if self.db.set_track_only_roles(self.guild_id, [], interaction.guild.name):
+            if await asyncio.to_thread(self.db.set_track_only_roles, self.guild_id, [], interaction.guild.name):
                 await interaction.response.send_message(
                     embed=create_success_embed(t("admin.track_roles.cleared", lang), lang),
                     ephemeral=True
@@ -239,7 +240,7 @@ class TrackOnlyRolesModal(discord.ui.Modal):
                 missing_roles.append(role_name)
 
         # Update database
-        if self.db.set_track_only_roles(self.guild_id, role_names, interaction.guild.name):
+        if await asyncio.to_thread(self.db.set_track_only_roles, self.guild_id, role_names, interaction.guild.name):
             message = t("admin.track_roles.set", lang, roles=', '.join(role_names))
             if missing_roles:
                 message += t("admin.track_roles.set_warning", lang, roles=', '.join(missing_roles))

@@ -1,5 +1,6 @@
 """Channel and timing configuration modals."""
 
+import asyncio
 import discord
 import logging
 import pytz
@@ -62,7 +63,7 @@ class RetentionDaysModal(discord.ui.Modal):
                 return
 
             # Update database
-            self.db.set_message_retention_days(self.guild_id, days, interaction.guild.name)
+            await asyncio.to_thread(self.db.set_message_retention_days, self.guild_id, days, interaction.guild.name)
 
             await interaction.response.send_message(
                 embed=create_success_embed(t("channel_config.retention.set", lang, days=days), lang),
@@ -133,7 +134,7 @@ class TimezoneModal(discord.ui.Modal):
                 return
 
             # Update database
-            self.db.set_timezone(self.guild_id, timezone_str, interaction.guild.name)
+            await asyncio.to_thread(self.db.set_timezone, self.guild_id, timezone_str, interaction.guild.name)
 
             await interaction.response.send_message(
                 embed=create_success_embed(t("channel_config.timezone.set", lang, tz=timezone_str), lang),
@@ -346,10 +347,11 @@ class ReportsConfigModal(discord.ui.Modal):
                     return
 
             # Save configuration
-            success = self.db.set_report_config(
-                self.guild_id, 
-                channel.id, 
-                frequency, 
+            success = await asyncio.to_thread(
+                self.db.set_report_config,
+                self.guild_id,
+                channel.id,
+                frequency,
                 report_types,
                 day_weekly,
                 day_monthly,
@@ -359,7 +361,7 @@ class ReportsConfigModal(discord.ui.Modal):
 
             if success:
                 # Get timezone for display
-                guild_config = self.db.get_guild_config(self.guild_id)
+                guild_config = await asyncio.to_thread(self.db.get_guild_config, self.guild_id)
                 guild_tz_str = guild_config.get('timezone', 'UTC') if guild_config else 'UTC'
                 
                 day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -470,7 +472,7 @@ class ChannelModal(discord.ui.Modal):
             return
 
         # Update database
-        if self.db.set_notification_channel(self.guild_id, channel.id, interaction.guild.name):
+        if await asyncio.to_thread(self.db.set_notification_channel, self.guild_id, channel.id, interaction.guild.name):
             await interaction.response.send_message(
                 embed=create_success_embed(t("channel_config.channel.set", lang, channel=channel.mention), lang),
                 ephemeral=True
@@ -528,7 +530,7 @@ class InactiveDaysModal(discord.ui.Modal):
             return
 
         # Update database
-        if self.db.set_inactive_days(self.guild_id, days, interaction.guild.name):
+        if await asyncio.to_thread(self.db.set_inactive_days, self.guild_id, days, interaction.guild.name):
             await interaction.response.send_message(
                 embed=create_success_embed(t("channel_config.inactive_days.set", lang, days=days), lang),
                 ephemeral=True

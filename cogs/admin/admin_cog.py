@@ -1,5 +1,6 @@
 """Admin commands cog for bot configuration."""
 
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -47,7 +48,7 @@ class AdminCog(commands.Cog):
         if not await check_admin_permission(interaction, self.db):
             return
 
-        lang = guild_language(self.db.get_guild_config(interaction.guild_id))
+        lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id))
 
         # Create embed
         embed = create_embed(t("admin.config.title", lang), discord.Color.gold())
@@ -70,7 +71,7 @@ class AdminCog(commands.Cog):
             interaction: Discord interaction
         """
         # Check if user is admin (without auto-responding)
-        guild_config = self.db.get_guild_config(interaction.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
         is_admin = has_bot_admin_role(interaction.user, bot_admin_role_name)
         lang = guild_language(guild_config)

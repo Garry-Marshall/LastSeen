@@ -1,5 +1,6 @@
 """Shared permission checking utilities for admin commands."""
 
+import asyncio
 import discord
 import logging
 from typing import Optional
@@ -32,8 +33,8 @@ async def check_admin_permission(
     if guild_id is None:
         guild_id = interaction.guild_id
 
-    # Get guild config for bot admin role name
-    guild_config = db.get_guild_config(guild_id)
+    # Get guild config for bot admin role name (off the event loop)
+    guild_config = await asyncio.to_thread(db.get_guild_config, guild_id)
     bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
 
     # Check permissions
