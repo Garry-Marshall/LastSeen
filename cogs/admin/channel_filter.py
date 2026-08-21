@@ -27,14 +27,18 @@ class AllowedChannelsModal(discord.ui.Modal):
         self.lang = guild_language(db.get_guild_config(guild_id))
         super().__init__(title=t("admin.allowed_channels.modal_title", self.lang))
 
+        self.add_item(discord.ui.TextDisplay(t("admin.allowed_channels.info", self.lang)))
+
         self.channels_input = discord.ui.TextInput(
-            label=t("admin.allowed_channels.input_label", self.lang),
             placeholder=t("admin.allowed_channels.input_placeholder", self.lang),
             required=False,
             style=discord.TextStyle.paragraph,
             max_length=500
         )
-        self.add_item(self.channels_input)
+        self.add_item(discord.ui.Label(
+            text=t("admin.allowed_channels.input_label", self.lang),
+            component=self.channels_input
+        ))
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""

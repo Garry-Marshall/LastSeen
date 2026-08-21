@@ -96,13 +96,17 @@ class TimezoneModal(discord.ui.Modal):
         lang = self.lang
         super().__init__(title=t("channel_config.timezone.modal_title", lang))
 
+        self.add_item(discord.ui.TextDisplay(t("channel_config.timezone.info", lang)))
+
         self.timezone_input = discord.ui.TextInput(
-            label=t("channel_config.timezone.input_label", lang),
             placeholder=t("channel_config.timezone.input_placeholder", lang),
             required=True,
             max_length=50
         )
-        self.add_item(self.timezone_input)
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.timezone.input_label", lang),
+            component=self.timezone_input
+        ))
 
         # Pre-fill with current value
         if guild_config and guild_config.get('timezone'):
@@ -169,39 +173,55 @@ class ReportsConfigModal(discord.ui.Modal):
         super().__init__(title=t("channel_config.reports.modal_title", lang))
 
         self.channel_input = discord.ui.TextInput(
-            label=t("channel_config.reports.channel_label", lang),
             placeholder=t("channel_config.reports.channel_placeholder", lang),
             required=True,
             max_length=100
         )
         self.frequency_input = discord.ui.TextInput(
-            label=t("channel_config.reports.frequency_label", lang),
             placeholder=t("channel_config.reports.frequency_placeholder", lang),
             required=True,
             max_length=10
         )
         self.report_types_input = discord.ui.TextInput(
-            label=t("channel_config.reports.types_label", lang),
             placeholder=t("channel_config.reports.types_placeholder", lang),
             required=True,
             max_length=50,
             default="activity,members,departures"
         )
         self.days_input = discord.ui.TextInput(
-            label=t("channel_config.reports.days_label", lang),
             placeholder=t("channel_config.reports.days_placeholder", lang),
             required=False,
             max_length=10
         )
         self.hour_input = discord.ui.TextInput(
-            label=t("channel_config.reports.hour_label", lang),
             placeholder=t("channel_config.reports.hour_placeholder", lang),
             required=False,
             default="9",
             max_length=2
         )
-        for item in (self.channel_input, self.frequency_input, self.report_types_input, self.days_input, self.hour_input):
-            self.add_item(item)
+        # A TextDisplay explainer would exceed the 5-component modal limit, so the
+        # channel field carries it as a label description instead.
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.reports.channel_label", lang),
+            description=t("channel_config.reports.channel_label_desc", lang),
+            component=self.channel_input
+        ))
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.reports.frequency_label", lang),
+            component=self.frequency_input
+        ))
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.reports.types_label", lang),
+            component=self.report_types_input
+        ))
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.reports.days_label", lang),
+            component=self.days_input
+        ))
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.reports.hour_label", lang),
+            component=self.hour_input
+        ))
 
         # Pre-fill with current values if configured
         if guild_config:
@@ -415,13 +435,17 @@ class ChannelModal(discord.ui.Modal):
         self.lang = guild_language(db.get_guild_config(guild_id))
         super().__init__(title=t("channel_config.channel.modal_title", self.lang))
 
+        self.add_item(discord.ui.TextDisplay(t("channel_config.channel.info", self.lang)))
+
         self.channel_input = discord.ui.TextInput(
-            label=t("channel_config.channel.input_label", self.lang),
             placeholder=t("channel_config.channel.input_placeholder", self.lang),
             required=True,
             max_length=100
         )
-        self.add_item(self.channel_input)
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.channel.input_label", self.lang),
+            component=self.channel_input
+        ))
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
@@ -501,13 +525,17 @@ class InactiveDaysModal(discord.ui.Modal):
         self.lang = guild_language(db.get_guild_config(guild_id))
         super().__init__(title=t("channel_config.inactive_days.modal_title", self.lang))
 
+        self.add_item(discord.ui.TextDisplay(t("channel_config.inactive_days.info", self.lang)))
+
         self.days_input = discord.ui.TextInput(
-            label=t("channel_config.inactive_days.input_label", self.lang),
             placeholder=t("channel_config.inactive_days.input_placeholder", self.lang),
             required=True,
             max_length=3
         )
-        self.add_item(self.days_input)
+        self.add_item(discord.ui.Label(
+            text=t("channel_config.inactive_days.input_label", self.lang),
+            component=self.days_input
+        ))
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""

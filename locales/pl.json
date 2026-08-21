@@ -269,6 +269,7 @@
   "admin.help.footer_user": "Rola użytkownika: {role} • Wyświetlanie tylko poleceń użytkownika",
 
   "admin.allowed_channels.modal_title": "Ustaw dozwolone kanały",
+  "admin.allowed_channels.info": "Filtr opcjonalny: komendy LastSeen działają tylko na kanałach podanych tutaj.\n\nℹ️ Zostaw puste, aby zezwolić na komendy na wszystkich kanałach.",
   "admin.allowed_channels.input_label": "Nazwy lub ID kanałów (oddzielone przecinkami)",
   "admin.allowed_channels.input_placeholder": "np. general, bot-commands, 123456 (pozostaw puste dla wszystkich)",
   "admin.allowed_channels.cleared": "Poleceń bota można teraz używać na wszystkich kanałach",
@@ -285,7 +286,7 @@
   "admin.errors.guild_config_not_found": "Nie znaleziono konfiguracji serwera.",
 
   "admin.language.prompt_title": "Ustaw język",
-  "admin.language.prompt_desc": "Wybierz język wiadomości bota na tym serwerze.",
+  "admin.language.prompt_desc": "Wybierz język wiadomości bota na tym serwerze.\n\nℹ️ Dotyczy wszystkich komend, osadzeń i powiadomień dla wszystkich tutaj, nie tylko dla Ciebie.",
   "admin.language.select_placeholder": "Wybierz język",
   "admin.language.set": "Język bota ustawiono na **{language}**.",
   "admin.language.update_failed": "Nie udało się zaktualizować języka. Spróbuj ponownie.",
@@ -347,6 +348,7 @@
   "channel_config.retention.invalid": "Nieprawidłowa liczba. Wprowadź prawidłową liczbę dni.",
 
   "channel_config.timezone.modal_title": "Ustaw strefę czasową serwera",
+  "channel_config.timezone.info": "Ustawia strefę czasową używaną do wyświetlania dat i godzin oraz do wysyłania zaplanowanych raportów.\n\nℹ️ Użyj nazwy z bazy TZ, np. `Europe/Warsaw` lub `America/New_York`.",
   "channel_config.timezone.input_label": "Strefa czasowa (np. Europe/London)",
   "channel_config.timezone.input_placeholder": "Przykłady: America/New_York, Asia/Tokyo, Australia/Sydney",
   "channel_config.timezone.invalid": "Nieprawidłowa strefa czasowa: `{tz}`",
@@ -358,6 +360,7 @@
 
   "channel_config.reports.modal_title": "Skonfiguruj zaplanowane raporty",
   "channel_config.reports.channel_label": "Kanał raportu (nazwa, ID lub wzmianka)",
+  "channel_config.reports.channel_label_desc": "Raporty są publikowane tutaj — upewnij się, że bot może tu wysyłać wiadomości.",
   "channel_config.reports.channel_placeholder": "np. reports, #reports lub ID kanału",
   "channel_config.reports.frequency_label": "Częstotliwość (weekly, monthly lub both)",
   "channel_config.reports.frequency_placeholder": "weekly, monthly lub both",
@@ -384,6 +387,7 @@
   "channel_config.reports.error": "Błąd podczas konfigurowania raportów: {error}",
 
   "channel_config.channel.modal_title": "Ustaw kanał powiadomień",
+  "channel_config.channel.info": "Wybierz kanał tekstowy, na którym będą publikowane powiadomienia o odejściu członków.\n\n⚠️ Upewnij się, że bot ma uprawnienia **Wyświetlanie kanału** i **Wysyłanie wiadomości** na tym kanale.",
   "channel_config.channel.input_label": "Nazwa, ID lub wzmianka kanału",
   "channel_config.channel.input_placeholder": "np. general, #general lub 1234567890",
   "channel_config.channel.not_found": "Kanał '{channel}' nie został znaleziony. Użyj nazwy kanału (np. 'general'), wzmianki (np. '#general') lub ID.",
@@ -392,6 +396,7 @@
   "channel_config.channel.update_failed": "Nie udało się zaktualizować kanału powiadomień.",
 
   "channel_config.inactive_days.modal_title": "Ustaw próg dni nieaktywności",
+  "channel_config.inactive_days.info": "Ustawia domyślny próg dla **/inactive**: członkowie bez zarejestrowanej aktywności przez tyle dni są pokazywani jako nieaktywni.\n\nℹ️ Przy każdym użyciu można go zmienić opcją `days`.",
   "channel_config.inactive_days.input_label": "Liczba dni",
   "channel_config.inactive_days.input_placeholder": "Wprowadź liczbę dni (np. 10)",
   "channel_config.inactive_days.range": "Dni muszą być w zakresie od 1 do 365",
@@ -400,9 +405,11 @@
   "channel_config.inactive_days.update_failed": "Nie udało się zaktualizować progu dni nieaktywności.",
 
   "admin.role.bot_admin_modal_title": "Ustaw rolę administratora bota",
+  "admin.role.bot_admin_info": "Osoby z tą rolą mogą zmieniać ustawienia LastSeen i używać jego komend administracyjnych.\n\nℹ️ Administratorzy serwera zawsze mają dostęp. Wpisz nazwę roli dokładnie tak, jak widnieje na serwerze.",
   "admin.role.bot_admin_input_label": "Nazwa roli administratora bota",
   "admin.role.bot_admin_input_placeholder": "np. LastSeen Admin, Moderator, Admin",
   "admin.role.user_modal_title": "Ustaw rolę użytkownika",
+  "admin.role.user_info": "Ustawia rolę, która może używać komend LastSeen, gdy **Wymagana rola użytkownika** jest włączona.\n\nℹ️ Gdy ta opcja jest wyłączona, nie ma znaczenia. Administratorzy zawsze mogą używać komend.",
   "admin.role.user_input_label": "Nazwa roli użytkownika",
   "admin.role.user_input_placeholder": "np. LastSeen User, Member, Verified",
   "admin.role.name_empty": "Nazwa roli nie może być pusta.",
@@ -414,6 +421,7 @@
   "admin.role.user_update_failed": "Nie udało się zaktualizować roli użytkownika. Wystąpił błąd bazy danych. Spróbuj ponownie lub skontaktuj się z pomocą techniczną.",
 
   "admin.track_roles.modal_title": "Ustaw role do śledzenia",
+  "admin.track_roles.info": "Filtr opcjonalny: tylko członkowie z jedną z tych ról pojawiają się w /inactive, raportach i powiadomieniach o odejściu.\n\nℹ️ Zostaw puste, aby uwzględnić wszystkich. Wszyscy członkowie i tak są zapisywani.",
   "admin.track_roles.input_label": "Nazwy ról (oddzielone przecinkami)",
   "admin.track_roles.input_placeholder": "np. Member, Verified, VIP (pozostaw puste dla wszystkich ról)",
   "admin.track_roles.cleared": "Śledzone są teraz wszystkie role (bez filtra)",

@@ -33,15 +33,19 @@ class BotAdminRoleModal(discord.ui.Modal):
         super().__init__(title=t("admin.role.bot_admin_modal_title", lang))
         current_role = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
 
+        self.add_item(discord.ui.TextDisplay(t("admin.role.bot_admin_info", lang)))
+
         # Create text input with current value
         self.role_input = discord.ui.TextInput(
-            label=t("admin.role.bot_admin_input_label", lang),
             placeholder=t("admin.role.bot_admin_input_placeholder", lang),
             default=current_role,
             required=True,
             max_length=100
         )
-        self.add_item(self.role_input)
+        self.add_item(discord.ui.Label(
+            text=t("admin.role.bot_admin_input_label", lang),
+            component=self.role_input
+        ))
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
@@ -110,15 +114,19 @@ class UserRoleModal(discord.ui.Modal):
         super().__init__(title=t("admin.role.user_modal_title", lang))
         current_role = guild_config.get('user_role_name', 'LastSeen User') if guild_config else 'LastSeen User'
 
+        self.add_item(discord.ui.TextDisplay(t("admin.role.user_info", lang)))
+
         # Create text input with current value
         self.role_input = discord.ui.TextInput(
-            label=t("admin.role.user_input_label", lang),
             placeholder=t("admin.role.user_input_placeholder", lang),
             default=current_role,
             required=True,
             max_length=100
         )
-        self.add_item(self.role_input)
+        self.add_item(discord.ui.Label(
+            text=t("admin.role.user_input_label", lang),
+            component=self.role_input
+        ))
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
@@ -192,15 +200,19 @@ class TrackOnlyRolesModal(discord.ui.Modal):
             except (json.JSONDecodeError, TypeError):
                 current_roles = ''
 
+        self.add_item(discord.ui.TextDisplay(t("admin.track_roles.info", self.lang)))
+
         self.roles_input = discord.ui.TextInput(
-            label=t("admin.track_roles.input_label", self.lang),
             placeholder=t("admin.track_roles.input_placeholder", self.lang),
             default=current_roles or None,
             required=False,
             style=discord.TextStyle.paragraph,
             max_length=500
         )
-        self.add_item(self.roles_input)
+        self.add_item(discord.ui.Label(
+            text=t("admin.track_roles.input_label", self.lang),
+            component=self.roles_input
+        ))
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""

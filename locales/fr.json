@@ -269,6 +269,7 @@
   "admin.help.footer_user": "Rôle utilisateur : {role} • Affichage des commandes utilisateur uniquement",
 
   "admin.allowed_channels.modal_title": "Définir les salons autorisés",
+  "admin.allowed_channels.info": "Filtre optionnel : les commandes LastSeen ne fonctionnent que dans les salons indiqués ici.\n\nℹ️ Laissez vide pour autoriser les commandes dans tous les salons.",
   "admin.allowed_channels.input_label": "Noms ou ID de salons (séparés par virgules)",
   "admin.allowed_channels.input_placeholder": "ex. general, bot-commands, 123456 (laisser vide pour tous)",
   "admin.allowed_channels.cleared": "Les commandes du bot peuvent désormais être utilisées dans tous les salons",
@@ -285,7 +286,7 @@
   "admin.errors.guild_config_not_found": "Configuration du serveur introuvable.",
 
   "admin.language.prompt_title": "Définir la langue",
-  "admin.language.prompt_desc": "Choisissez la langue des messages du bot sur ce serveur.",
+  "admin.language.prompt_desc": "Choisissez la langue des messages du bot sur ce serveur.\n\nℹ️ Elle s'applique à toutes les commandes, embeds et notifications pour tout le monde ici, pas seulement pour vous.",
   "admin.language.select_placeholder": "Sélectionnez une langue",
   "admin.language.set": "Langue du bot définie sur **{language}**.",
   "admin.language.update_failed": "Échec de la mise à jour de la langue. Veuillez réessayer.",
@@ -347,6 +348,7 @@
   "channel_config.retention.invalid": "Nombre invalide. Veuillez saisir un nombre de jours valide.",
 
   "channel_config.timezone.modal_title": "Définir le fuseau horaire du serveur",
+  "channel_config.timezone.info": "Définit le fuseau horaire utilisé pour afficher les dates et heures, et pour déterminer l'envoi des rapports programmés.\n\nℹ️ Utilisez un nom de la base TZ comme `Europe/Paris` ou `America/New_York`.",
   "channel_config.timezone.input_label": "Fuseau horaire (ex. Europe/London)",
   "channel_config.timezone.input_placeholder": "Exemples : America/New_York, Asia/Tokyo, Australia/Sydney",
   "channel_config.timezone.invalid": "Fuseau horaire invalide : `{tz}`",
@@ -358,6 +360,7 @@
 
   "channel_config.reports.modal_title": "Configurer les rapports planifiés",
   "channel_config.reports.channel_label": "Salon du rapport (nom, ID ou mention)",
+  "channel_config.reports.channel_label_desc": "Les rapports sont publiés ici — assurez-vous que le bot peut y envoyer des messages.",
   "channel_config.reports.channel_placeholder": "ex. reports, #reports, ou ID du salon",
   "channel_config.reports.frequency_label": "Fréquence (weekly, monthly ou both)",
   "channel_config.reports.frequency_placeholder": "weekly, monthly ou both",
@@ -384,6 +387,7 @@
   "channel_config.reports.error": "Erreur lors de la configuration des rapports : {error}",
 
   "channel_config.channel.modal_title": "Définir le salon de notifications",
+  "channel_config.channel.info": "Choisissez le salon textuel où les notifications de départ des membres seront publiées.\n\n⚠️ Assurez-vous que le bot a la permission de **Voir le salon** et d'**Envoyer des messages** dans ce salon.",
   "channel_config.channel.input_label": "Nom, ID ou mention du salon",
   "channel_config.channel.input_placeholder": "ex. general, #general, ou 1234567890",
   "channel_config.channel.not_found": "Salon '{channel}' introuvable. Utilisez le nom du salon (ex. 'general'), une mention (ex. '#general'), ou l'ID.",
@@ -392,6 +396,7 @@
   "channel_config.channel.update_failed": "Échec de la mise à jour du salon de notifications.",
 
   "channel_config.inactive_days.modal_title": "Définir le seuil de jours d'inactivité",
+  "channel_config.inactive_days.info": "Définit le seuil par défaut de **/inactive** : les membres sans activité enregistrée depuis ce nombre de jours sont listés comme inactifs.\n\nℹ️ Chaque exécution peut le remplacer avec l'option `days`.",
   "channel_config.inactive_days.input_label": "Nombre de jours",
   "channel_config.inactive_days.input_placeholder": "Saisissez le nombre de jours (ex. 10)",
   "channel_config.inactive_days.range": "Les jours doivent être compris entre 1 et 365",
@@ -400,9 +405,11 @@
   "channel_config.inactive_days.update_failed": "Échec de la mise à jour du seuil de jours d'inactivité.",
 
   "admin.role.bot_admin_modal_title": "Définir le rôle d'administrateur du bot",
+  "admin.role.bot_admin_info": "Les membres ayant ce rôle peuvent modifier les paramètres de LastSeen et utiliser ses commandes d'administration.\n\nℹ️ Les administrateurs du serveur y ont toujours accès. Saisissez le nom du rôle exactement tel qu'il apparaît sur votre serveur.",
   "admin.role.bot_admin_input_label": "Nom du rôle d'administrateur du bot",
   "admin.role.bot_admin_input_placeholder": "ex. LastSeen Admin, Moderator, Admin",
   "admin.role.user_modal_title": "Définir le rôle utilisateur",
+  "admin.role.user_info": "Définit le rôle autorisé à utiliser les commandes LastSeen tant que **Rôle utilisateur requis** est activé.\n\nℹ️ Sans effet lorsque cette option est désactivée. Les administrateurs peuvent toujours utiliser les commandes.",
   "admin.role.user_input_label": "Nom du rôle utilisateur",
   "admin.role.user_input_placeholder": "ex. LastSeen User, Member, Verified",
   "admin.role.name_empty": "Le nom du rôle ne peut pas être vide.",
@@ -414,6 +421,7 @@
   "admin.role.user_update_failed": "Échec de la mise à jour du rôle utilisateur. Une erreur de base de données s'est produite. Veuillez réessayer ou contacter le support.",
 
   "admin.track_roles.modal_title": "Définir les rôles à suivre",
+  "admin.track_roles.info": "Filtre optionnel : seuls les membres possédant l'un de ces rôles apparaissent dans /inactive, les rapports et les notifications de départ.\n\nℹ️ Laissez vide pour inclure tout le monde. Tous les membres restent enregistrés.",
   "admin.track_roles.input_label": "Noms de rôles (séparés par des virgules)",
   "admin.track_roles.input_placeholder": "ex. Member, Verified, VIP (laisser vide pour tous les rôles)",
   "admin.track_roles.cleared": "Tous les rôles sont désormais suivis (aucun filtre appliqué)",

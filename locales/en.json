@@ -269,6 +269,7 @@
   "admin.help.footer_user": "User role: {role} • Showing user commands only",
 
   "admin.allowed_channels.modal_title": "Set Allowed Channels",
+  "admin.allowed_channels.info": "Optional filter: LastSeen commands only work in the channels you list here.\n\nℹ️ Leave empty to allow commands in every channel.",
   "admin.allowed_channels.input_label": "Channel Names or IDs (comma-separated)",
   "admin.allowed_channels.input_placeholder": "e.g., general, bot-commands, 123456 (leave empty for all)",
   "admin.allowed_channels.cleared": "Bot commands can now be used in all channels",
@@ -285,7 +286,7 @@
   "admin.errors.guild_config_not_found": "Guild configuration not found.",
 
   "admin.language.prompt_title": "Set Language",
-  "admin.language.prompt_desc": "Choose the language for bot messages in this server.",
+  "admin.language.prompt_desc": "Choose the language for bot messages in this server.\n\nℹ️ It applies to every command, embed and notification for everyone here, not just for you.",
   "admin.language.select_placeholder": "Select a language",
   "admin.language.set": "Bot language set to **{language}**.",
   "admin.language.update_failed": "Failed to update the language. Please try again.",
@@ -347,6 +348,7 @@
   "channel_config.retention.invalid": "Invalid number. Please enter a valid number of days.",
 
   "channel_config.timezone.modal_title": "Set Server Timezone",
+  "channel_config.timezone.info": "Sets the timezone used to display dates and times, and to decide when scheduled reports are sent.\n\nℹ️ Use a TZ database name such as `Europe/Amsterdam` or `America/New_York`.",
   "channel_config.timezone.input_label": "Timezone (e.g. Europe/London)",
   "channel_config.timezone.input_placeholder": "Examples: America/New_York, Asia/Tokyo, Australia/Sydney",
   "channel_config.timezone.invalid": "Invalid timezone: `{tz}`",
@@ -358,6 +360,7 @@
 
   "channel_config.reports.modal_title": "Configure Scheduled Reports",
   "channel_config.reports.channel_label": "Report Channel (name, ID, or mention)",
+  "channel_config.reports.channel_label_desc": "Reports are posted here — make sure the bot can send messages in this channel.",
   "channel_config.reports.channel_placeholder": "e.g., reports, #reports, or channel ID",
   "channel_config.reports.frequency_label": "Frequency (weekly, monthly, or both)",
   "channel_config.reports.frequency_placeholder": "weekly, monthly, or both",
@@ -384,6 +387,7 @@
   "channel_config.reports.error": "Error configuring reports: {error}",
 
   "channel_config.channel.modal_title": "Set Notification Channel",
+  "channel_config.channel.info": "Choose the text channel where member leave notifications are posted.\n\n⚠️ Make sure the bot has permission to **View Channel** and **Send Messages** there.",
   "channel_config.channel.input_label": "Channel Name, ID, or Mention",
   "channel_config.channel.input_placeholder": "e.g., general, #general, or 1234567890",
   "channel_config.channel.not_found": "Channel '{channel}' not found. Please use channel name (e.g., 'general'), mention (e.g., '#general'), or ID.",
@@ -392,6 +396,7 @@
   "channel_config.channel.update_failed": "Failed to update notification channel.",
 
   "channel_config.inactive_days.modal_title": "Set Inactive Days Threshold",
+  "channel_config.inactive_days.info": "Sets the default cut-off used by **/inactive**: members with no recorded activity for this many days are listed as inactive.\n\nℹ️ Anyone running the command can still override it with the `days` option.",
   "channel_config.inactive_days.input_label": "Number of Days",
   "channel_config.inactive_days.input_placeholder": "Enter number of days (e.g., 10)",
   "channel_config.inactive_days.range": "Days must be between 1 and 365",
@@ -400,9 +405,11 @@
   "channel_config.inactive_days.update_failed": "Failed to update inactive days threshold.",
 
   "admin.role.bot_admin_modal_title": "Set Bot Admin Role",
+  "admin.role.bot_admin_info": "Members with this role can change LastSeen settings and use its admin commands.\n\nℹ️ Server administrators always have access. Enter the role name exactly as it appears in your server.",
   "admin.role.bot_admin_input_label": "Bot Admin Role Name",
   "admin.role.bot_admin_input_placeholder": "e.g., LastSeen Admin, Moderator, Admin",
   "admin.role.user_modal_title": "Set User Role",
+  "admin.role.user_info": "Sets the role allowed to use LastSeen commands while **User Role Required** is ON.\n\nℹ️ It has no effect while that toggle is OFF. Administrators and bot admins can always use the commands.",
   "admin.role.user_input_label": "User Role Name",
   "admin.role.user_input_placeholder": "e.g., LastSeen User, Member, Verified",
   "admin.role.name_empty": "Role name cannot be empty.",
@@ -414,6 +421,7 @@
   "admin.role.user_update_failed": "Failed to update user role. Database error occurred. Please try again or contact support.",
 
   "admin.track_roles.modal_title": "Set Track Only Roles",
+  "admin.track_roles.info": "Optional filter: only members holding one of these roles appear in /inactive, reports and leave notifications.\n\nℹ️ Leave empty to include everyone. Every member is still tracked either way.",
   "admin.track_roles.input_label": "Role Names (comma-separated)",
   "admin.track_roles.input_placeholder": "e.g., Member, Verified, VIP (leave empty for all roles)",
   "admin.track_roles.cleared": "Now tracking all roles (no filter applied)",

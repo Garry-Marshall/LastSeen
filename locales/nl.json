@@ -269,6 +269,7 @@
   "admin.help.footer_user": "Gebruikersrol: {role} • Toont alleen gebruikerscommando's",
 
   "admin.allowed_channels.modal_title": "Toegestane kanalen instellen",
+  "admin.allowed_channels.info": "Optioneel filter: LastSeen-opdrachten werken alleen in de kanalen die je hier opgeeft.\n\nℹ️ Laat leeg om opdrachten in elk kanaal toe te staan.",
   "admin.allowed_channels.input_label": "Kanaalnamen of -ID's (komma-gescheiden)",
   "admin.allowed_channels.input_placeholder": "bijv. general, bot-commands, 123456 (leeg laten voor alle)",
   "admin.allowed_channels.cleared": "Botcommando's kunnen nu in alle kanalen worden gebruikt",
@@ -285,7 +286,7 @@
   "admin.errors.guild_config_not_found": "Serverconfiguratie niet gevonden.",
 
   "admin.language.prompt_title": "Taal instellen",
-  "admin.language.prompt_desc": "Kies de taal voor botberichten op deze server.",
+  "admin.language.prompt_desc": "Kies de taal voor botberichten in deze server.\n\nℹ️ Dit geldt voor elke opdracht, embed en melding voor iedereen hier, niet alleen voor jou.",
   "admin.language.select_placeholder": "Selecteer een taal",
   "admin.language.set": "Bottaal ingesteld op **{language}**.",
   "admin.language.update_failed": "Bijwerken van de taal mislukt. Probeer het opnieuw.",
@@ -347,6 +348,7 @@
   "channel_config.retention.invalid": "Ongeldig getal. Voer een geldig aantal dagen in.",
 
   "channel_config.timezone.modal_title": "Servertijdzone instellen",
+  "channel_config.timezone.info": "Bepaalt de tijdzone voor het weergeven van datums en tijden, en voor het moment waarop geplande rapporten worden verstuurd.\n\nℹ️ Gebruik een TZ-naam zoals `Europe/Amsterdam` of `America/New_York`.",
   "channel_config.timezone.input_label": "Tijdzone (bijv. Europe/London)",
   "channel_config.timezone.input_placeholder": "Voorbeelden: America/New_York, Asia/Tokyo, Australia/Sydney",
   "channel_config.timezone.invalid": "Ongeldige tijdzone: `{tz}`",
@@ -358,6 +360,7 @@
 
   "channel_config.reports.modal_title": "Geplande rapporten configureren",
   "channel_config.reports.channel_label": "Rapportkanaal (naam, ID of vermelding)",
+  "channel_config.reports.channel_label_desc": "Rapporten komen hier — zorg dat de bot in dit kanaal berichten mag sturen.",
   "channel_config.reports.channel_placeholder": "bijv. reports, #reports, of kanaal-ID",
   "channel_config.reports.frequency_label": "Frequentie (weekly, monthly, of both)",
   "channel_config.reports.frequency_placeholder": "weekly, monthly, of both",
@@ -384,6 +387,7 @@
   "channel_config.reports.error": "Fout bij het configureren van rapporten: {error}",
 
   "channel_config.channel.modal_title": "Meldingskanaal instellen",
+  "channel_config.channel.info": "Kies het tekstkanaal waar meldingen over vertrekkende leden worden geplaatst.\n\n⚠️ Zorg ervoor dat de bot daar **Kanaal bekijken** en **Berichten versturen** heeft.",
   "channel_config.channel.input_label": "Kanaalnaam, ID of vermelding",
   "channel_config.channel.input_placeholder": "bijv. general, #general, of 1234567890",
   "channel_config.channel.not_found": "Kanaal '{channel}' niet gevonden. Gebruik de kanaalnaam (bijv. 'general'), vermelding (bijv. '#general'), of ID.",
@@ -392,6 +396,7 @@
   "channel_config.channel.update_failed": "Bijwerken van meldingskanaal mislukt.",
 
   "channel_config.inactive_days.modal_title": "Drempel inactieve dagen instellen",
+  "channel_config.inactive_days.info": "Stelt de standaarddrempel voor **/inactive** in: leden zonder geregistreerde activiteit gedurende dit aantal dagen worden als inactief getoond.\n\nℹ️ Bij elke oproep kan dit met de optie `days` worden overschreven.",
   "channel_config.inactive_days.input_label": "Aantal dagen",
   "channel_config.inactive_days.input_placeholder": "Voer het aantal dagen in (bijv. 10)",
   "channel_config.inactive_days.range": "Dagen moet tussen 1 en 365 liggen",
@@ -400,9 +405,11 @@
   "channel_config.inactive_days.update_failed": "Bijwerken van drempel inactieve dagen mislukt.",
 
   "admin.role.bot_admin_modal_title": "Botbeheerdersrol instellen",
+  "admin.role.bot_admin_info": "Leden met deze rol kunnen LastSeen-instellingen wijzigen en de beheerdersopdrachten gebruiken.\n\nℹ️ Serverbeheerders hebben altijd toegang. Voer de rolnaam exact in zoals die in je server staat.",
   "admin.role.bot_admin_input_label": "Naam botbeheerdersrol",
   "admin.role.bot_admin_input_placeholder": "bijv. LastSeen Admin, Moderator, Admin",
   "admin.role.user_modal_title": "Gebruikersrol instellen",
+  "admin.role.user_info": "Stelt de rol in die LastSeen-opdrachten mag gebruiken zolang **Gebruikersrol vereist** AAN staat.\n\nℹ️ Zolang die schakelaar UIT staat heeft dit geen effect. Beheerders en botbeheerders kunnen de opdrachten altijd gebruiken.",
   "admin.role.user_input_label": "Naam gebruikersrol",
   "admin.role.user_input_placeholder": "bijv. LastSeen User, Member, Verified",
   "admin.role.name_empty": "Rolnaam mag niet leeg zijn.",
@@ -414,6 +421,7 @@
   "admin.role.user_update_failed": "Bijwerken van gebruikersrol mislukt. Er is een databasefout opgetreden. Probeer het opnieuw of neem contact op met support.",
 
   "admin.track_roles.modal_title": "Alleen-volgen-rollen instellen",
+  "admin.track_roles.info": "Optioneel filter: alleen leden met een van deze rollen verschijnen in /inactive, rapporten en vertrekmeldingen.\n\nℹ️ Laat leeg om iedereen op te nemen. Alle leden worden hoe dan ook bijgehouden.",
   "admin.track_roles.input_label": "Rolnamen (komma-gescheiden)",
   "admin.track_roles.input_placeholder": "bijv. Member, Verified, VIP (leeg laten voor alle rollen)",
   "admin.track_roles.cleared": "Volgt nu alle rollen (geen filter toegepast)",

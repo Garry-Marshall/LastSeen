@@ -19,10 +19,11 @@ Validates three things and exits non-zero if any fail:
      renaming a placeholder (e.g. {count} -> {aantal}) would crash str.format
      at runtime — this catches it before release.
 
-  4. Discord length limits: modal titles and TextInput labels are capped at
-     45 characters by Discord. A longer value (common when a translation runs
-     longer than the English source) crashes with 50035 Invalid Form Body the
-     moment the modal opens. Checked in every locale, English included.
+  4. Discord length limits: modal titles and input labels are capped at 45
+     characters by Discord, and the description line under a label at 100. A
+     longer value (common when a translation runs longer than the English
+     source) crashes with 50035 Invalid Form Body the moment the modal opens.
+     Checked in every locale, English included.
 
 Duplicate keys within a single JSON file are also reported.
 """
@@ -38,10 +39,13 @@ LOCALE_DIR = PROJECT_ROOT / "locales"
 DEFAULT_LANG = "en"
 CODE_DIRS = ["bot", "cogs"]
 
-# Discord caps modal titles and TextInput labels at 45 characters. Keys whose
-# values are used in either place must respect that limit in every locale.
+# Discord caps modal titles and input labels at 45 characters, and the optional
+# description under a label at 100. Keys whose values are used in either place
+# must respect that limit in every locale.
 DISCORD_LABEL_MAX = 45
-LABEL_KEY_SUFFIXES = ("input_label", "modal_title")
+DISCORD_LABEL_DESC_MAX = 100
+LABEL_KEY_SUFFIXES = ("_label", "modal_title")
+LABEL_DESC_KEY_SUFFIXES = ("label_desc",)
 
 _KEY_RE = re.compile(r'''\bt\(\s*["']([^"']+)["']''')
 _FORMATTER = string.Formatter()
@@ -130,9 +134,15 @@ def main() -> int:
     # 4. Discord length limits on modal titles and TextInput labels (all locales)
     for lang, cat in catalogs.items():
         for key, value in cat.items():
-            if not key.endswith(LABEL_KEY_SUFFIXES) or not isinstance(value, str):
+            if not isinstance(value, str):
                 continue
-            if len(value) > DISCORD_LABEL_MAX:
+            if key.endswith(LABEL_DESC_KEY_SUFFIXES):
+                if len(value) > DISCORD_LABEL_DESC_MAX:
+                    problems.append(
+                        f"{lang}.json: {key!r} is {len(value)} chars, exceeds Discord's "
+                        f"{DISCORD_LABEL_DESC_MAX}-char limit for label descriptions"
+                    )
+            elif key.endswith(LABEL_KEY_SUFFIXES) and len(value) > DISCORD_LABEL_MAX:
                 problems.append(
                     f"{lang}.json: {key!r} is {len(value)} chars, exceeds Discord's "
                     f"{DISCORD_LABEL_MAX}-char limit for modal titles/labels"

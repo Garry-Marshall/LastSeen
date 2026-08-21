@@ -269,6 +269,7 @@
   "admin.help.footer_user": "Rol de usuario: {role} • Mostrando solo comandos de usuario",
 
   "admin.allowed_channels.modal_title": "Establecer canales permitidos",
+  "admin.allowed_channels.info": "Filtro opcional: los comandos de LastSeen solo funcionan en los canales que indiques aquí.\n\nℹ️ Déjalo vacío para permitir los comandos en todos los canales.",
   "admin.allowed_channels.input_label": "Nombres o ID de canales (separados por comas)",
   "admin.allowed_channels.input_placeholder": "p. ej., general, bot-commands, 123456 (dejar vacío para todos)",
   "admin.allowed_channels.cleared": "Los comandos del bot ahora se pueden usar en todos los canales",
@@ -285,7 +286,7 @@
   "admin.errors.guild_config_not_found": "Configuración del servidor no encontrada.",
 
   "admin.language.prompt_title": "Establecer idioma",
-  "admin.language.prompt_desc": "Elige el idioma de los mensajes del bot en este servidor.",
+  "admin.language.prompt_desc": "Elige el idioma de los mensajes del bot en este servidor.\n\nℹ️ Se aplica a todos los comandos, embeds y notificaciones para todos aquí, no solo para ti.",
   "admin.language.select_placeholder": "Selecciona un idioma",
   "admin.language.set": "Idioma del bot establecido en **{language}**.",
   "admin.language.update_failed": "No se pudo actualizar el idioma. Inténtalo de nuevo.",
@@ -347,6 +348,7 @@
   "channel_config.retention.invalid": "Número no válido. Introduce un número de días válido.",
 
   "channel_config.timezone.modal_title": "Establecer zona horaria del servidor",
+  "channel_config.timezone.info": "Define la zona horaria usada para mostrar fechas y horas, y para decidir cuándo se envían los informes programados.\n\nℹ️ Usa un nombre de la base TZ como `Europe/Madrid` o `America/New_York`.",
   "channel_config.timezone.input_label": "Zona horaria (p. ej. Europe/London)",
   "channel_config.timezone.input_placeholder": "Ejemplos: America/New_York, Asia/Tokyo, Australia/Sydney",
   "channel_config.timezone.invalid": "Zona horaria no válida: `{tz}`",
@@ -358,6 +360,7 @@
 
   "channel_config.reports.modal_title": "Configurar informes programados",
   "channel_config.reports.channel_label": "Canal del informe (nombre, ID o mención)",
+  "channel_config.reports.channel_label_desc": "Los informes se publican aquí: asegúrate de que el bot pueda enviar mensajes en este canal.",
   "channel_config.reports.channel_placeholder": "p. ej., reports, #reports, o ID de canal",
   "channel_config.reports.frequency_label": "Frecuencia (weekly, monthly, o both)",
   "channel_config.reports.frequency_placeholder": "weekly, monthly, o both",
@@ -384,6 +387,7 @@
   "channel_config.reports.error": "Error al configurar los informes: {error}",
 
   "channel_config.channel.modal_title": "Establecer canal de notificaciones",
+  "channel_config.channel.info": "Elige el canal de texto donde se publicarán las notificaciones de salida de miembros.\n\n⚠️ Asegúrate de que el bot tenga permiso para **Ver canal** y **Enviar mensajes** en él.",
   "channel_config.channel.input_label": "Nombre, ID o mención del canal",
   "channel_config.channel.input_placeholder": "p. ej., general, #general, o 1234567890",
   "channel_config.channel.not_found": "El canal '{channel}' no se encontró. Usa el nombre del canal (p. ej., 'general'), una mención (p. ej., '#general'), o el ID.",
@@ -392,6 +396,7 @@
   "channel_config.channel.update_failed": "No se pudo actualizar el canal de notificaciones.",
 
   "channel_config.inactive_days.modal_title": "Establecer umbral de días de inactividad",
+  "channel_config.inactive_days.info": "Define el umbral predeterminado de **/inactive**: los miembros sin actividad registrada durante estos días aparecen como inactivos.\n\nℹ️ Cada ejecución puede anularlo con la opción `days`.",
   "channel_config.inactive_days.input_label": "Número de días",
   "channel_config.inactive_days.input_placeholder": "Introduce el número de días (p. ej., 10)",
   "channel_config.inactive_days.range": "Los días deben estar entre 1 y 365",
@@ -400,9 +405,11 @@
   "channel_config.inactive_days.update_failed": "No se pudo actualizar el umbral de días de inactividad.",
 
   "admin.role.bot_admin_modal_title": "Establecer rol de administrador del bot",
+  "admin.role.bot_admin_info": "Los miembros con este rol pueden cambiar la configuración de LastSeen y usar sus comandos de administración.\n\nℹ️ Los administradores del servidor siempre tienen acceso. Escribe el nombre del rol tal como aparece en tu servidor.",
   "admin.role.bot_admin_input_label": "Nombre del rol de administrador del bot",
   "admin.role.bot_admin_input_placeholder": "p. ej., LastSeen Admin, Moderator, Admin",
   "admin.role.user_modal_title": "Establecer rol de usuario",
+  "admin.role.user_info": "Define el rol que puede usar los comandos de LastSeen mientras **Rol de usuario requerido** esté activado.\n\nℹ️ No tiene efecto mientras esa opción esté desactivada. Los administradores siempre pueden usar los comandos.",
   "admin.role.user_input_label": "Nombre del rol de usuario",
   "admin.role.user_input_placeholder": "p. ej., LastSeen User, Member, Verified",
   "admin.role.name_empty": "El nombre del rol no puede estar vacío.",
@@ -414,6 +421,7 @@
   "admin.role.user_update_failed": "No se pudo actualizar el rol de usuario. Ocurrió un error de base de datos. Inténtalo de nuevo o contacta con soporte.",
 
   "admin.track_roles.modal_title": "Establecer roles a rastrear",
+  "admin.track_roles.info": "Filtro opcional: solo los miembros con uno de estos roles aparecen en /inactive, los informes y las notificaciones de salida.\n\nℹ️ Déjalo vacío para incluir a todos. Todos los miembros se registran igualmente.",
   "admin.track_roles.input_label": "Nombres de roles (separados por comas)",
   "admin.track_roles.input_placeholder": "p. ej., Member, Verified, VIP (dejar vacío para todos los roles)",
   "admin.track_roles.cleared": "Ahora se rastrean todos los roles (sin filtro aplicado)",
