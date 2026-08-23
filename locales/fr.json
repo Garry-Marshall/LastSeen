@@ -179,7 +179,7 @@
   "commands.leaderboard.line": "{medal} **{name}** - {count:,} messages",
   "commands.leaderboard.footer": "Sélectionnez une période ci-dessous pour voir différents classements",
 
-  "commands.whois.not_found": "Cet utilisateur n'est pas encore dans la base de données. Une heure de dernière connexion ne peut être indiquée qu'après que le bot a observé le membre se déconnecter alors qu'il était en ligne sur ce serveur.",
+  "commands.whois.not_found": "Aucune donnée pour ce membre pour l'instant. Je commence à suivre quelqu'un seulement après l'avoir vu actif pendant que j'étais en ligne sur ce serveur — reviens quand il aura été présent un moment.",
   "commands.whois.title": "👤 {username}",
   "commands.whois.user_id": "🆔 ID utilisateur : `{user_id}`\n",
   "commands.whois.account_created": "📅 Compte créé : {date}\n",

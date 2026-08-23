@@ -179,7 +179,7 @@
   "commands.leaderboard.line": "{medal} **{name}** - {count:,} wiadomości",
   "commands.leaderboard.footer": "Wybierz okres poniżej, aby zobaczyć różne rankingi",
 
-  "commands.whois.not_found": "Tego użytkownika nie ma jeszcze w bazie danych. Czas ostatniej obecności można podać dopiero po tym, jak bot zaobserwuje, że członek przechodzi w tryb offline, będąc online na tym serwerze.",
+  "commands.whois.not_found": "Brak jeszcze danych o tym członku. Zaczynam śledzić kogoś dopiero, gdy zobaczę go aktywnego, będąc online na tym serwerze — wróć, gdy pobędzie tu chwilę.",
   "commands.whois.title": "👤 {username}",
   "commands.whois.user_id": "🆔 ID użytkownika: `{user_id}`\n",
   "commands.whois.account_created": "📅 Konto utworzono: {date}\n",

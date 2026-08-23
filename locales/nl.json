@@ -179,7 +179,7 @@
   "commands.leaderboard.line": "{medal} **{name}** - {count:,} berichten",
   "commands.leaderboard.footer": "Selecteer hieronder een periode om andere ranglijsten te bekijken",
 
-  "commands.whois.not_found": "Deze gebruiker staat nog niet in de database. Een 'laatst gezien'-tijd kan pas worden gerapporteerd nadat de bot heeft waargenomen dat het lid offline ging terwijl de bot online was op deze server.",
+  "commands.whois.not_found": "Nog geen gegevens voor dit lid. Ik begin iemand pas bij te houden zodra ik ze actief heb gezien terwijl ik online was op deze server — kom terug wanneer ze er even zijn geweest.",
   "commands.whois.title": "👤 {username}",
   "commands.whois.user_id": "🆔 Gebruikers-ID: `{user_id}`\n",
   "commands.whois.account_created": "📅 Account aangemaakt: {date}\n",

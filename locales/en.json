@@ -179,7 +179,7 @@
   "commands.leaderboard.line": "{medal} **{name}** - {count:,} messages",
   "commands.leaderboard.footer": "Select a time period below to view different rankings",
 
-  "commands.whois.not_found": "This user isn't in the database yet. A last seen time can only be reported after the bot has observed the member going offline while it's online in this server.",
+  "commands.whois.not_found": "No record for this member yet. I only start tracking someone once I've seen them active while I'm online in this server — check back after they've been around a bit.",
   "commands.whois.title": "👤 {username}",
   "commands.whois.user_id": "🆔 User ID: `{user_id}`\n",
   "commands.whois.account_created": "📅 Account Created: {date}\n",
