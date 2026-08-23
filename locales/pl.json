@@ -211,7 +211,7 @@
   "commands.lastseen.currently_online": "Teraz online",
   "commands.lastseen.offline": "Offline",
   "commands.lastseen.right_meow": "Właśnie miau! 🐱",
-  "commands.lastseen.not_available": "Jeszcze niedostępne — czas ostatniej obecności jest rejestrowany dopiero po tym, jak bot zaobserwuje, że ten członek przechodzi w tryb offline.",
+  "commands.lastseen.not_available": "Jeszcze nie zapisano — od teraz śledzę tego członka i zapiszę to, gdy pierwszy raz przejdzie w tryb offline. Zajrzyj później! ✅",
   "commands.lastseen.left_server": "Użytkownik opuścił serwer",
 
   "commands.role_history.not_found": "Nie znaleziono użytkownika w bazie danych.",

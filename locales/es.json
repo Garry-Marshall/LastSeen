@@ -211,7 +211,7 @@
   "commands.lastseen.currently_online": "En línea ahora",
   "commands.lastseen.offline": "Desconectado",
   "commands.lastseen.right_meow": "¡Ahora miaumo! 🐱",
-  "commands.lastseen.not_available": "Aún no disponible — la hora de última conexión solo se registra después de que el bot observa que este miembro se desconecta.",
+  "commands.lastseen.not_available": "Aún no registrado — a partir de ahora sigo a este miembro y lo anotaré la primera vez que se desconecte. ¡Vuelve más tarde! ✅",
   "commands.lastseen.left_server": "El usuario ha salido del servidor",
 
   "commands.role_history.not_found": "Usuario no encontrado en la base de datos.",

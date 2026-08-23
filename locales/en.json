@@ -211,7 +211,7 @@
   "commands.lastseen.currently_online": "Currently online",
   "commands.lastseen.offline": "Offline",
   "commands.lastseen.right_meow": "Right meow! 🐱",
-  "commands.lastseen.not_available": "Not available yet — a last seen time is recorded only after the bot observes this member going offline.",
+  "commands.lastseen.not_available": "Not recorded yet — I'm tracking this member from now on and will log it the first time they go offline. Check back a bit later! ✅",
   "commands.lastseen.left_server": "User has left the server",
 
   "commands.role_history.not_found": "User not found in the database.",

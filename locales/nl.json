@@ -211,7 +211,7 @@
   "commands.lastseen.currently_online": "Nu online",
   "commands.lastseen.offline": "Offline",
   "commands.lastseen.right_meow": "Miauw-menteel! 🐱",
-  "commands.lastseen.not_available": "Nog niet beschikbaar — een 'laatst gezien'-tijd wordt pas vastgelegd nadat de bot ziet dat dit lid offline gaat.",
+  "commands.lastseen.not_available": "Nog niet vastgelegd — ik houd dit lid vanaf nu bij en registreer het zodra ik ze offline zie gaan. Kom straks nog eens terug! ✅",
   "commands.lastseen.left_server": "Gebruiker heeft de server verlaten",
 
   "commands.role_history.not_found": "Gebruiker niet gevonden in de database.",
