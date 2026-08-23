@@ -11,7 +11,7 @@ import sys
 import os
 
 from database import DatabaseManager
-from bot.utils import create_embed, create_error_embed, has_bot_admin_role
+from bot.utils import create_embed, create_error_embed, has_bot_admin_role, can_use_bot_commands
 from bot.locale import t, guild_language
 from .config_view import ConfigView
 from .permissions import check_admin_permission, get_bot_admin_role_name
@@ -73,15 +73,13 @@ class AdminCog(commands.Cog):
         # Check if user is admin (without auto-responding)
         guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        user_role_name = guild_config.get('user_role_name', 'LastSeen User') if guild_config else 'LastSeen User'
         is_admin = has_bot_admin_role(interaction.user, bot_admin_role_name)
         lang = guild_language(guild_config)
 
-        # Check if user has 'LastSeen Users' role
-        user_role_name = guild_config.get('user_role_name', 'LastSeen User') if guild_config else 'LastSeen User'
-        has_user_role = discord.utils.get(interaction.user.roles, name=user_role_name) is not None
-
-        # If neither admin nor has user role, deny access
-        if not is_admin and not has_user_role:
+        # Respect the user_role_required toggle: when the user role isn't required,
+        # everyone can use help (consistent with can_use_bot_commands elsewhere).
+        if guild_config and not can_use_bot_commands(interaction.user, guild_config):
             await interaction.response.send_message(
                 embed=create_error_embed(t("errors.no_user_or_admin_permission", lang, role=user_role_name), lang),
                 ephemeral=True

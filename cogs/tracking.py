@@ -24,14 +24,16 @@ REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
 WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to truncate the SQLite WAL file
 STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
 
-# Presence messages cycled by rotate_status. The full phrase is the activity
-# name (verb included) so it displays verbatim.
+# Presence messages cycled by rotate_status, as (emoji, text) pairs. Shown as a
+# custom status (no "Playing/Watching" header). The emoji is prepended into the
+# text because Discord ignores the emoji field for bots. Set emoji to None to
+# show text only.
 STATUS_MESSAGES = [
-    'Listening to /lastseen',
-    'Watching you',
-    'Watching who\'s online',
-    'Visit lastseen.bot.nu',
-    'Listening to /help',
+    ('', 'Listening to /lastseen'),
+    ('👀', 'Watching you'),
+    ('', 'Watching who\'s online'),
+    ('🌐', 'Visit lastseen.bot.nu'),
+    ('', 'Listening to /help'),
 ]
 
 
@@ -1010,9 +1012,14 @@ class TrackingCog(commands.Cog):
         Runs once immediately on start (after before_loop) to set the initial
         status, then advances to the next message every interval.
         """
-        message = next(self._status_cycle)
+        emoji, message = next(self._status_cycle)
         try:
-            await self.bot.change_presence(activity=discord.Game(name=message))
+            # CustomActivity shows the text verbatim in the member list with no
+            # "Playing/Watching" header, matching how commercial bots present.
+            # Discord ignores the custom-status emoji field for bots, so the
+            # emoji is prepended into the text (where it renders) instead.
+            name = f"{emoji} {message}" if emoji else message
+            await self.bot.change_presence(activity=discord.CustomActivity(name=name))
         except Exception as e:
             logger.error(f"Error rotating bot status: {e}", exc_info=True)
 
