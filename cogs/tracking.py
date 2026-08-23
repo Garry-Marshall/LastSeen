@@ -607,7 +607,7 @@ class TrackingCog(commands.Cog):
         # Get guild config for notification channel
         guild_config = self.db.get_guild_config(guild_id)
         if not guild_config or not guild_config['notification_channel_id']:
-            logger.info(f"No notification channel set for guild {guild_id}")
+            logger.info(f"No notification channel set for guild {member.guild.name}")
             return
 
         # Honour track_only_roles for the notification. The departure bookkeeping

@@ -165,7 +165,7 @@ class QuickSetupView(discord.ui.View):
             # Finish setup
             embed = create_success_embed(t("admin.quick_setup.finished", self.lang), self.lang)
             await interaction.response.edit_message(embed=embed, view=None)
-            logger.info(f"Quick setup completed for guild {self.guild_id}")
+            logger.info(f"Quick setup completed for guild {interaction.guild.name}")
         else:
             self.current_step = min(self.max_steps - 1, self.current_step + 1)
             self._update_buttons()
@@ -208,4 +208,4 @@ class QuickSetupView(discord.ui.View):
         embed = create_embed(t("admin.quick_setup.cancelled_title", self.lang), discord.Color.red())
         embed.description = t("admin.quick_setup.cancelled_desc", self.lang)
         await interaction.response.edit_message(embed=embed, view=None)
-        logger.info(f"Quick setup cancelled for guild {self.guild_id}")
+        logger.info(f"Quick setup cancelled for guild {interaction.guild.name}")
