@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands, tasks
 import logging
 import asyncio
+import itertools
 import json
 from datetime import datetime, timezone
 from typing import Optional, Dict, Tuple
@@ -21,6 +22,17 @@ FLUSH_INTERVAL = 30  # How often to flush activity buffers
 CLEANUP_INTERVAL_HOURS = 24  # How often to run data cleanup
 REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
 WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to truncate the SQLite WAL file
+STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
+
+# Presence messages cycled by rotate_status. The full phrase is the activity
+# name (verb included) so it displays verbatim.
+STATUS_MESSAGES = [
+    'Listening to /lastseen',
+    'Watching you',
+    'Watching who\'s online',
+    'Visit lastseen.bot.nu',
+    'Listening to /help',
+]
 
 
 class TrackingCog(commands.Cog):
@@ -63,12 +75,16 @@ class TrackingCog(commands.Cog):
         # Cleared per-guild on leave so a rejoin re-enumerates.
         self._enumerating: set = set()
 
+        # Endless cycle over STATUS_MESSAGES for the presence rotation loop.
+        self._status_cycle = itertools.cycle(STATUS_MESSAGES)
+
         # Start background tasks
         self.flush_activity_buffer.start()
         self.cleanup_old_data.start()
         self.check_scheduled_reports.start()
         self.backup_database.start()
         self.checkpoint_wal.start()
+        self.rotate_status.start()
 
     async def _initialize_member_positions(self, guild: discord.Guild, force: bool = False) -> bool:
         """
@@ -415,10 +431,7 @@ class TrackingCog(commands.Cog):
                 logger.info(f"Guild {guild.name} needs position initialization, scheduling background task...")
                 asyncio.create_task(self._initialize_member_positions(guild))
 
-        # Set bot presence - "Playing Watching you"
-        await self.bot.change_presence(
-            activity=discord.Game(name='Watching you')
-        )
+        # Bot presence is set and cycled by the rotate_status background loop.
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -990,6 +1003,24 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before starting the WAL checkpoint loop."""
         await self.bot.wait_until_ready()
 
+    @tasks.loop(minutes=STATUS_ROTATE_INTERVAL_MINUTES)
+    async def rotate_status(self):
+        """Cycle the bot's presence through STATUS_MESSAGES.
+
+        Runs once immediately on start (after before_loop) to set the initial
+        status, then advances to the next message every interval.
+        """
+        message = next(self._status_cycle)
+        try:
+            await self.bot.change_presence(activity=discord.Game(name=message))
+        except Exception as e:
+            logger.error(f"Error rotating bot status: {e}", exc_info=True)
+
+    @rotate_status.before_loop
+    async def before_rotate_status(self):
+        """Wait for bot to be ready before setting presence."""
+        await self.bot.wait_until_ready()
+
     @tasks.loop(hours=REPORT_CHECK_INTERVAL_HOURS)
     async def check_scheduled_reports(self):
         """
@@ -1210,7 +1241,8 @@ class TrackingCog(commands.Cog):
         self.check_scheduled_reports.cancel()
         self.backup_database.cancel()
         self.checkpoint_wal.cancel()
-        
+        self.rotate_status.cancel()
+
         # Schedule async flush task to run in the event loop
         # This avoids blocking the shutdown process
         async def async_flush():
