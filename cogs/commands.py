@@ -681,6 +681,9 @@ class CommandsCog(commands.Cog):
             tracked_set = set(tracked)
             inactive_members = [m for m in inactive_members if m['user_id'] in tracked_set]
 
+        logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name} with threshold {inactive_days}")
+        logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")
+
         if not inactive_members:
             embed = create_embed(t("commands.inactive.empty_title", lang), discord.Color.blue())
             embed.description = t("commands.inactive.empty_desc", lang, days=inactive_days)
@@ -711,9 +714,6 @@ class CommandsCog(commands.Cog):
         # Send with pagination view
         view = PaginationView(embeds, export_members=inactive_members, lang=lang)
         await interaction.followup.send(embed=embeds[0], view=view, ephemeral=not channels_restricted)
-
-        logger.info(f"User {interaction.user} used /inactive in guild {interaction.guild.name} with threshold {inactive_days}")
-        logger.info(f"Found {len(inactive_members)} inactive members (>{inactive_days} days)")
 
     @app_commands.command(name="chat-history", description="📈 View extended message activity history (365 days)")
     @app_commands.describe(user="Username, nickname, or @mention (leave empty for server-wide stats)")
