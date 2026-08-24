@@ -1097,6 +1097,10 @@ class DatabaseManager:
         """
         Get all members who have been inactive for more than the specified days.
 
+        Members never seen online (NULL last_seen) count as inactive once the
+        threshold has passed since the bot could first observe them: the later
+        of the guild's added_at and their join_date.
+
         Args:
             guild_id: Discord guild ID
             inactive_days: Number of days threshold
@@ -1111,14 +1115,19 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT * FROM members
-                    WHERE guild_id = ?
-                    AND is_active = 1
-                    AND last_seen IS NOT NULL
-                    AND last_seen != 0
-                    AND last_seen <= ?
-                    ORDER BY last_seen ASC
-                """, (guild_id, threshold))
+                    SELECT m.* FROM members m
+                    JOIN guilds g ON g.guild_id = m.guild_id
+                    WHERE m.guild_id = ?
+                    AND m.is_active = 1
+                    AND (
+                        (m.last_seen IS NOT NULL AND m.last_seen != 0 AND m.last_seen <= ?)
+                        OR (
+                            m.last_seen IS NULL
+                            AND MAX(COALESCE(m.join_date, 0), g.added_at) <= ?
+                        )
+                    )
+                    ORDER BY m.last_seen ASC
+                """, (guild_id, threshold, threshold))
 
                 members = []
                 for row in cursor.fetchall():
