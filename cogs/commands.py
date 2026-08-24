@@ -1453,6 +1453,19 @@ class CommandsCog(commands.Cog):
                 inline=False
             )
 
+        # Participation gap: present-but-silent (lurkers) and never-active (ghosts)
+        segments = self.db.get_participation_segments(stats.get('guild_id', 0))
+        if segments and (segments['lurkers'] or segments['ghosts']):
+            embed.add_field(
+                name=t("commands.user_stats.participation_title", lang),
+                value=t(
+                    "commands.user_stats.participation_value", lang,
+                    lurkers=segments['lurkers'], pct=round(segments['lurker_pct']),
+                    ghosts=segments['ghosts']
+                ),
+                inline=False
+            )
+
         embed.set_footer(text=t("commands.user_stats.overview_footer", lang))
         return embed
 
@@ -2156,6 +2169,7 @@ class UserStatsView(discord.ui.View):
         self.growth_button.label = t("commands.stats_view.btn_growth", lang)
         self.leaderboard_button.label = t("commands.stats_view.btn_leaderboard", lang)
         self.heatmap_button.label = t("commands.stats_view.btn_heatmap", lang)
+        self.participation_button.label = t("commands.stats_view.btn_participation", lang)
         self.export_button.label = t("commands.stats_view.btn_export", lang)
 
     @discord.ui.button(label="📊 Retention Report", style=discord.ButtonStyle.primary, row=0)
@@ -2283,6 +2297,42 @@ class UserStatsView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Failed to show activity heatmap: {e}", exc_info=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
+
+    @discord.ui.button(label="👥 Participation", style=discord.ButtonStyle.primary, row=1)
+    async def participation_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show lurkers (present but silent) and ghosts (never active)."""
+        await interaction.response.defer()
+
+        try:
+            lurkers = self.db.get_lurkers(self.guild_id, window_days=30, limit=15)
+            ghosts = self.db.get_ghosts(self.guild_id, window_days=30, limit=15)
+            segments = self.db.get_participation_segments(self.guild_id, window_days=30)
+            embed = self._create_participation_embed(segments, lurkers, ghosts)
+
+            view = discord.ui.View(timeout=300)
+            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
+
+            async def back_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats['guild_id'] = self.guild_id
+                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+
+                cog = interaction.client.get_cog('CommandsCog')
+                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
+
+                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+
+            back_button.callback = back_callback
+            view.add_item(back_button)
+
+            await interaction.edit_original_response(embed=embed, view=view)
+
+        except Exception as e:
+            logger.error(f"Failed to show participation report: {e}", exc_info=True)
             await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="📋 Export Report", style=discord.ButtonStyle.green, row=1)
@@ -2489,7 +2539,62 @@ class UserStatsView(discord.ui.View):
                 value=t("commands.stats_view.heatmap_peak_value", lang, label=time_label, count=peak_hour_count),
                 inline=True
             )
-        
+
+        return embed
+
+    def _create_participation_embed(self, segments: dict, lurkers: list, ghosts: list) -> discord.Embed:
+        """Create the participation-gap embed (lurkers and ghosts)."""
+        lang = self.lang
+        embed = create_embed(t("commands.stats_view.participation_title", lang), discord.Color.dark_grey())
+
+        lurker_count = segments.get('lurkers', 0)
+        ghost_count = segments.get('ghosts', 0)
+
+        if not lurker_count and not ghost_count:
+            embed.description = t("commands.stats_view.participation_no_data", lang)
+            return embed
+
+        embed.description = t("commands.stats_view.participation_desc", lang)
+
+        def display_name(m: dict) -> str:
+            return m['nickname'] if m.get('nickname') else m['username']
+
+        # Lurkers: present but silent — show when each was last seen.
+        lurker_lines = []
+        for m in lurkers:
+            if m['last_seen'] == 0:
+                when = t("commands.stats_view.participation_online_now", lang)
+            elif m['last_seen']:
+                when = t("commands.stats_view.participation_last_seen", lang,
+                         when=format_timestamp(m['last_seen'], 'R', self.guild_id, self.db, lang))
+            else:
+                when = t("commands.stats_view.participation_never_seen", lang)
+            lurker_lines.append(t("commands.stats_view.participation_line", lang, name=display_name(m), detail=when))
+        if lurker_count > len(lurkers):
+            lurker_lines.append(t("commands.stats_view.participation_more", lang, count=lurker_count - len(lurkers)))
+        embed.add_field(
+            name=t("commands.stats_view.participation_lurkers_title", lang, count=lurker_count),
+            value="".join(lurker_lines) if lurker_lines else t("commands.stats_view.participation_none", lang),
+            inline=False
+        )
+
+        # Ghosts: never active — show when (if ever) they were last seen.
+        ghost_lines = []
+        for m in ghosts:
+            if m['last_seen']:
+                when = t("commands.stats_view.participation_last_seen", lang,
+                         when=format_timestamp(m['last_seen'], 'R', self.guild_id, self.db, lang))
+            else:
+                when = t("commands.stats_view.participation_never_seen", lang)
+            ghost_lines.append(t("commands.stats_view.participation_line", lang, name=display_name(m), detail=when))
+        if ghost_count > len(ghosts):
+            ghost_lines.append(t("commands.stats_view.participation_more", lang, count=ghost_count - len(ghosts)))
+        embed.add_field(
+            name=t("commands.stats_view.participation_ghosts_title", lang, count=ghost_count),
+            value="".join(ghost_lines) if ghost_lines else t("commands.stats_view.participation_none", lang),
+            inline=False
+        )
+
         return embed
 
 

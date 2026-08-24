@@ -1490,6 +1490,149 @@ class DatabaseManager:
 
         return stats
 
+    # ---- Participation segments (lurkers / ghosts) ----
+    #
+    # These split active members by the gap between *presence* (last_seen) and
+    # *participation* (message_activity), over a fixed window:
+    #
+    #   Lurker  = present but silent: seen within the window, yet zero messages
+    #             in the window.
+    #   Ghost   = dead weight: never sent a single message and not seen within
+    #             the window (never tracked, or offline longer than the window).
+    #
+    # Both exclude members who joined *inside* the window, so brand-new members
+    # aren't punished before they've had a chance to speak. Opted-out users never
+    # appear: /forgetme purges their member row entirely (see purge_user_data).
+    #
+    # last_seen encoding (see get_activity_stats): 0 = online now,
+    # NULL = never tracked, > 0 = unix time they last went offline.
+
+    def _participation_window_start(self, window_days: int) -> int:
+        """Start-of-day cutoff `window_days` ago, matching message_activity dates."""
+        now = datetime.now(timezone.utc)
+        today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+        return today_start - (window_days * SECONDS_PER_DAY)
+
+    def get_participation_segments(self, guild_id: int, window_days: int = 30) -> Dict[str, Any]:
+        """
+        Count active members split into participants, lurkers, and ghosts.
+
+        Cheap COUNT-only queries suitable for the stats overview. See the block
+        comment above for the segment definitions.
+
+        Returns:
+            Dict with 'total_active', 'lurkers', 'ghosts', and 'lurker_pct'.
+        """
+        result = {'total_active': 0, 'lurkers': 0, 'ghosts': 0, 'lurker_pct': 0.0}
+        try:
+            window_start = self._participation_window_start(window_days)
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members
+                    WHERE guild_id = ? AND is_active = 1
+                """, (guild_id,))
+                result['total_active'] = cursor.fetchone()[0]
+
+                # Lurker: established, seen within window, no messages in window.
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members m
+                    WHERE m.guild_id = ? AND m.is_active = 1
+                      AND (m.join_date IS NULL OR m.join_date < ?)
+                      AND (m.last_seen = 0 OR (m.last_seen IS NOT NULL AND m.last_seen >= ?))
+                      AND NOT EXISTS (
+                          SELECT 1 FROM message_activity ma
+                          WHERE ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                            AND ma.date >= ?
+                      )
+                """, (guild_id, window_start, window_start, window_start))
+                result['lurkers'] = cursor.fetchone()[0]
+
+                # Ghost: established, not seen within window, never any message.
+                cursor.execute("""
+                    SELECT COUNT(*) FROM members m
+                    WHERE m.guild_id = ? AND m.is_active = 1
+                      AND (m.join_date IS NULL OR m.join_date < ?)
+                      AND (m.last_seen IS NULL OR (m.last_seen > 0 AND m.last_seen < ?))
+                      AND NOT EXISTS (
+                          SELECT 1 FROM message_activity ma
+                          WHERE ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                      )
+                """, (guild_id, window_start, window_start))
+                result['ghosts'] = cursor.fetchone()[0]
+
+            if result['total_active'] > 0:
+                result['lurker_pct'] = result['lurkers'] / result['total_active'] * 100
+        except Exception as e:
+            logger.error(f"Failed to get participation segments for guild {guild_id}: {e}")
+        return result
+
+    def get_lurkers(self, guild_id: int, window_days: int = 30, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Active members seen within the window but with zero messages in it.
+
+        Ordered most-recently-seen first. See the participation block comment for
+        the full definition.
+        """
+        try:
+            window_start = self._participation_window_start(window_days)
+            limit_clause = " LIMIT ?" if limit else ""
+            params = [guild_id, window_start, window_start, window_start]
+            if limit:
+                params.append(limit)
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    SELECT m.user_id, m.username, m.nickname, m.last_seen
+                    FROM members m
+                    WHERE m.guild_id = ? AND m.is_active = 1
+                      AND (m.join_date IS NULL OR m.join_date < ?)
+                      AND (m.last_seen = 0 OR (m.last_seen IS NOT NULL AND m.last_seen >= ?))
+                      AND NOT EXISTS (
+                          SELECT 1 FROM message_activity ma
+                          WHERE ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                            AND ma.date >= ?
+                      )
+                    ORDER BY CASE WHEN m.last_seen = 0 THEN 1 ELSE 0 END DESC,
+                             m.last_seen DESC{limit_clause}
+                """, params)
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get lurkers for guild {guild_id}: {e}")
+            return []
+
+    def get_ghosts(self, guild_id: int, window_days: int = 30, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Active members who never messaged and weren't seen within the window.
+
+        Ordered by last seen ascending, which (since SQLite sorts NULL first)
+        surfaces the most-gone first: never-tracked members, then those seen
+        longest ago. See the participation block comment for the definition.
+        """
+        try:
+            window_start = self._participation_window_start(window_days)
+            limit_clause = " LIMIT ?" if limit else ""
+            params = [guild_id, window_start, window_start]
+            if limit:
+                params.append(limit)
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    SELECT m.user_id, m.username, m.nickname, m.last_seen
+                    FROM members m
+                    WHERE m.guild_id = ? AND m.is_active = 1
+                      AND (m.join_date IS NULL OR m.join_date < ?)
+                      AND (m.last_seen IS NULL OR (m.last_seen > 0 AND m.last_seen < ?))
+                      AND NOT EXISTS (
+                          SELECT 1 FROM message_activity ma
+                          WHERE ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                      )
+                    ORDER BY m.last_seen ASC{limit_clause}
+                """, params)
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get ghosts for guild {guild_id}: {e}")
+            return []
+
     def remove_guild_data(self, guild_id: int) -> bool:
         """
         Completely remove a guild and all its associated members from the database.
