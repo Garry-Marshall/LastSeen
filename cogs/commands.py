@@ -2160,9 +2160,10 @@ class UserStatsView(discord.ui.View):
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
                 stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats['guild_id'] = self.guild_id
                 prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-                
+
                 # Get the parent cog to access _create_stats_overview_embed
                 cog = interaction.client.get_cog('CommandsCog')
                 overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
@@ -2199,9 +2200,10 @@ class UserStatsView(discord.ui.View):
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
                 stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats['guild_id'] = self.guild_id
                 prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-                
+
                 cog = interaction.client.get_cog('CommandsCog')
                 overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
                 overview_view = UserStatsView(self.guild_id, self.db, self.lang)
@@ -2250,9 +2252,10 @@ class UserStatsView(discord.ui.View):
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
                 stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats['guild_id'] = self.guild_id
                 prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-                
+
                 cog = interaction.client.get_cog('CommandsCog')
                 overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
                 overview_view = UserStatsView(self.guild_id, self.db, self.lang)
@@ -2564,12 +2567,13 @@ class LeaderboardView(discord.ui.View):
         
         try:
             stats = self.db.get_server_snapshot_stats(self.guild_id)
+            stats['guild_id'] = self.guild_id
             prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
             growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-            
+
             cog = interaction.client.get_cog('CommandsCog')
-            overview_embed = cog._create_stats_overview_embed(stats, growth_rate)
-            overview_view = UserStatsView(self.guild_id, self.db)
+            overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+            overview_view = UserStatsView(self.guild_id, self.db, self.lang)
             
             await interaction.edit_original_response(embed=overview_embed, view=overview_view)
             
