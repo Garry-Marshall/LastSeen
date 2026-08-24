@@ -69,7 +69,7 @@ class RetentionDaysModal(discord.ui.Modal):
                 embed=create_success_embed(t("channel_config.retention.set", lang, days=days), lang),
                 ephemeral=True
             )
-            logger.info(f"Message retention set to {days} days for guild {self.guild_id}")
+            logger.info(f"Message retention set to {days} days for guild {interaction.guild.name}")
 
         except ValueError:
             await interaction.response.send_message(
@@ -144,7 +144,7 @@ class TimezoneModal(discord.ui.Modal):
                 embed=create_success_embed(t("channel_config.timezone.set", lang, tz=timezone_str), lang),
                 ephemeral=True
             )
-            logger.info(f"Timezone set to {timezone_str} for guild {self.guild_id}")
+            logger.info(f"Timezone set to {timezone_str} for guild {interaction.guild.name}")
 
         except Exception as e:
             await interaction.response.send_message(
@@ -404,7 +404,7 @@ class ReportsConfigModal(discord.ui.Modal):
                     ),
                     ephemeral=True
                 )
-                logger.info(f"Reports configured for guild {self.guild_id}: {frequency} to {channel.name} at {time_hour:02d}:00 {guild_tz_str}")
+                logger.info(f"Reports configured for guild {interaction.guild.name}: {frequency} to {channel.name} at {time_hour:02d}:00 {guild_tz_str}")
             else:
                 await interaction.response.send_message(
                     embed=create_error_embed(t("channel_config.reports.save_failed", lang), lang),

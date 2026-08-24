@@ -89,12 +89,17 @@ class Config:
             except ValueError:
                 logger.warning("Invalid SHARD_COUNT, using Discord's recommended count")
 
+        # Optional TOP.GG token. When set, the bot pushes its server and shard
+        # count to the TOP.GG listing on every guild join/leave. Unset = disabled.
+        self.topgg_token = os.getenv('TOPGG_TOKEN', '').strip()
+
         logger.info("Configuration loaded successfully")
         logger.info(f"Database file: {self.db_file}")
         logger.info(f"Log level: {logging.getLevelName(self.log_level)}")
         logger.info(f"Log retention: {self.logs_days_to_keep} days")
         logger.info(f"Database backup: every {self.backup_interval_hours} hours, keep {self.backup_retention_count} backups")
         logger.info(f"Shard count: {self.shard_count if self.shard_count else 'auto (Discord recommended)'}")
+        logger.info(f"TOP.GG metrics: {'enabled' if self.topgg_token else 'disabled (no TOPGG_TOKEN)'}")
 
     def _create_default_env(self):
         """Create a default .env file from template if it doesn't exist."""
@@ -125,6 +130,10 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
 
 # Sharding Settings
 # SHARD_COUNT=2  # uncomment to force a fixed shard count (testing only); unset = Discord's recommended count
+
+# TOP.GG Token (optional): Set your token here to automatically update the server count on the TOP.GG site listing.
+# Leave unset to disable this feature.
+TOPGG_TOKEN=
 
 """
                 self.env_path.write_text(default_content)
