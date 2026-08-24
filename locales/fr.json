@@ -53,6 +53,8 @@
   "commands.mystats.activity_header": "📊 Activité des messages :\n",
   "commands.mystats.activity_365": "     • 365 derniers jours : {count:,} messages\n",
   "commands.mystats.activity_busiest": "     • Jour le plus actif : {count:,} messages le {date}\n",
+  "commands.mystats.percentile": "     • Plus actif que {pct} % des membres ce mois-ci (rang n° {rank} sur {total})\n",
+  "commands.mystats.percentile_unranked": "     • Aucun message ce mois-ci — envoyez-en pour être classé !\n",
   "commands.mystats.footer": "Vous seul pouvez voir ce message",
 
   "commands.about.title": "📊 LastSeen",

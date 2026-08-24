@@ -1803,6 +1803,85 @@ class DatabaseManager:
             logger.error(f"Failed to get message activity for user {user_id}: {e}")
             return {'total': 0, 'today': 0, 'this_week': 0, 'this_month': 0, 'avg_per_day': 0}
 
+    def get_activity_percentile(self, guild_id: int, user_id: int, days: int = 30) -> Optional[Dict[str, Any]]:
+        """
+        Rank a member's message activity against all active members over a period.
+
+        The population is every active member (matching the leaderboard), with
+        members who have no activity rows counted as 0 messages. "Percentile" is
+        the share of *other* ranked members strictly less active than the caller,
+        so ties do not inflate it. Rank is 1-based (1 = most active).
+
+        Returns None when the population is too small to be meaningful
+        (< MIN_RANKED members) or on error, so callers can simply skip the line.
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            days: Look-back window in days (default 30)
+
+        Returns:
+            Dict with 'percentile' (0-100 int), 'rank', 'total_ranked',
+            'caller_total', or None.
+        """
+        MIN_RANKED = 5
+        try:
+            # Match get_message_activity_period's cutoff exactly so the caller's
+            # total here lines up with the "this month" figure shown alongside it.
+            now = datetime.now(timezone.utc)
+            today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+            cutoff_date = today_start - (days * SECONDS_PER_DAY)
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT COALESCE(SUM(message_count), 0)
+                    FROM message_activity
+                    WHERE guild_id = ? AND user_id = ? AND date >= ?
+                """, (guild_id, user_id, cutoff_date))
+                caller_total = cursor.fetchone()[0]
+
+                # Per-member totals over the window (0 for members with no rows),
+                # collapsed into counts above/below the caller in one pass.
+                cursor.execute("""
+                    SELECT
+                        SUM(CASE WHEN total > ? THEN 1 ELSE 0 END) AS above,
+                        SUM(CASE WHEN total < ? THEN 1 ELSE 0 END) AS below,
+                        COUNT(*) AS total_ranked
+                    FROM (
+                        SELECT COALESCE(SUM(ma.message_count), 0) AS total
+                        FROM members m
+                        LEFT JOIN message_activity ma
+                            ON ma.guild_id = m.guild_id
+                            AND ma.user_id = m.user_id
+                            AND ma.date >= ?
+                        WHERE m.guild_id = ? AND m.is_active = 1
+                        GROUP BY m.user_id
+                    )
+                """, (caller_total, caller_total, cutoff_date, guild_id))
+                row = cursor.fetchone()
+
+            if not row or not row['total_ranked'] or row['total_ranked'] < MIN_RANKED:
+                return None
+
+            above = row['above'] or 0
+            below = row['below'] or 0
+            total_ranked = row['total_ranked']
+
+            # Denominator excludes the caller themselves.
+            percentile = round(below / (total_ranked - 1) * 100) if total_ranked > 1 else 0
+
+            return {
+                'percentile': percentile,
+                'rank': above + 1,
+                'total_ranked': total_ranked,
+                'caller_total': caller_total,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get activity percentile for user {user_id} in guild {guild_id}: {e}")
+            return None
+
     def get_message_activity_trend(self, guild_id: int, user_id: int, days: int = 365) -> List[Dict[str, Any]]:
         """
         Get detailed daily message breakdown for trend analysis.

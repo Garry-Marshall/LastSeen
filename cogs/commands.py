@@ -948,6 +948,20 @@ class CommandsCog(commands.Cog):
             embed.description += t("commands.mystats.activity_365", lang, count=total_365)
             embed.description += t("commands.mystats.activity_busiest", lang, count=busiest['message_count'], date=busiest_str)
 
+        # Percentile rank vs the rest of the server (last 30 days)
+        percentile = await asyncio.to_thread(
+            self.db.get_activity_percentile, guild_id, user_id, 30
+        )
+        if percentile:
+            if percentile['caller_total'] > 0:
+                embed.description += t(
+                    "commands.mystats.percentile", lang,
+                    pct=percentile['percentile'], rank=percentile['rank'],
+                    total=percentile['total_ranked']
+                )
+            else:
+                embed.description += t("commands.mystats.percentile_unranked", lang)
+
         embed.set_footer(text=t("commands.mystats.footer", lang))
 
         await interaction.followup.send(embed=embed, ephemeral=True)

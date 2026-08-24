@@ -53,6 +53,8 @@
   "commands.mystats.activity_header": "📊 Berichtactiviteit:\n",
   "commands.mystats.activity_365": "     • Laatste 365 dagen: {count:,} berichten\n",
   "commands.mystats.activity_busiest": "     • Drukste dag: {count:,} berichten op {date}\n",
+  "commands.mystats.percentile": "     • Actiever dan {pct}% van de leden deze maand (plaats #{rank} van {total})\n",
+  "commands.mystats.percentile_unranked": "     • Nog geen berichten deze maand — stuur er wat om meegeteld te worden!\n",
   "commands.mystats.footer": "Alleen jij kunt dit bericht zien",
 
   "commands.about.title": "📊 LastSeen",
