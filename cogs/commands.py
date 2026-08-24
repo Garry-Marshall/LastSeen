@@ -631,7 +631,7 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /role-history for '{user}' in guild {interaction.guild.name}")
 
-    @app_commands.command(name="inactive", description="💤 List inactive members (add days to override server threshold)")
+    @app_commands.command(name="inactive", description="💤 List inactive members — Admin only (add days to override threshold)")
     @app_commands.describe(days="Override default threshold - specify number of days (1-365)")
     @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -647,6 +647,16 @@ class CommandsCog(commands.Cog):
         can_proceed, error_embed, channels_restricted, lang = await self._check_permissions(interaction)
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            return
+
+        # Admin-only: listing inactive members is a server-management action
+        guild_config = self.db.get_guild_config(interaction.guild_id)
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
+            await interaction.response.send_message(
+                embed=create_error_embed(t("errors.no_permission", lang, role=bot_admin_role_name), lang),
+                ephemeral=True
+            )
             return
 
         # Validate days input if provided
@@ -1303,7 +1313,7 @@ class CommandsCog(commands.Cog):
         else:
             await self._display_search_results(interaction, filtered, filters, channels_restricted, lang)
 
-    @app_commands.command(name="user-stats", description="📊 View server statistics and analytics")
+    @app_commands.command(name="user-stats", description="📊 View server statistics and analytics (Admin only)")
     @app_commands.guild_only()
     async def user_stats(self, interaction: discord.Interaction):
         """
@@ -1313,21 +1323,17 @@ class CommandsCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
-        # Check if user has permission (admin or user role)
+        # Admin-only: server-wide analytics is a server-management action
         guild_config = self.db.get_guild_config(interaction.guild_id)
         lang = guild_language(guild_config)
 
-        if guild_config and not has_bot_admin_role(interaction.user, guild_config.get('bot_admin_role_name', 'LastSeen Admin')):
-            # Not admin, check for user role
-            user_role_required = guild_config.get('user_role_required', 0)
-            if user_role_required:
-                user_role_name = guild_config.get('user_role_name', 'LastSeen User')
-                if not discord.utils.get(interaction.user.roles, name=user_role_name):
-                    await interaction.response.send_message(
-                        t("commands.user_stats.no_permission", lang, role=user_role_name),
-                        ephemeral=True
-                    )
-                    return
+        bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        if not has_bot_admin_role(interaction.user, bot_admin_role_name):
+            await interaction.response.send_message(
+                embed=create_error_embed(t("errors.no_permission", lang, role=bot_admin_role_name), lang),
+                ephemeral=True
+            )
+            return
 
         # Check channel restrictions
         allowed_channels_json = guild_config.get('allowed_channels') if guild_config else None

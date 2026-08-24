@@ -96,7 +96,6 @@
   "commands.search.export_success": "✅ Exported {count} members to {format}",
   "commands.search.export_failed": "❌ Failed to generate export: {error}",
 
-  "commands.user_stats.no_permission": "❌ You need the '{role}' role or admin permissions to use this command.",
   "commands.user_stats.stats_failed": "❌ Failed to retrieve server statistics. Please try again.",
   "commands.user_stats.error": "❌ An error occurred while retrieving statistics: {error}",
   "commands.user_stats.overview_title": "📊 User Statistics Overview",
@@ -274,11 +273,11 @@
   "admin.config.description": "Configure bot settings for this server.\n\n**🚀 First time here?** Click **Quick Setup** for a guided walkthrough!\n\n**📢 Set Notification Channel:** Choose where member leave notifications are posted\n**📅 Set Inactive Days:** Set the threshold for /inactive command\n**🌍 Set Timezone:** Configure server timezone (e.g., America/New_York)\n**🌐 Set Language:** Choose the language for bot messages\n**👑 Set Bot Admin Role:** Set which role can manage bot settings\n**🔐 Toggle User Role Required:** Enable/disable role requirement for using bot commands\n**👤 Set User Role:** Set which role can use bot commands (when required)\n**🎯 Set Track Only Roles:** Only track members with specific roles (optional)\n**📝 Set Allowed Channels:** Restrict bot commands to specific channels (optional)\n**📊 Configure Reports:** Set up automated weekly/monthly activity reports\n**🚫 Disable Reports:** Turn off scheduled reports for this server\n**🚀 Quick Setup:** Guided wizard for first-time setup\n**⚙️ View Config:** View current configuration settings",
 
   "admin.help.title": "LastSeen Bot - Help",
-  "admin.help.description": "Track member activity, monitor server statistics, and automate reports. Use `/config` to configure bot settings.\n\n**Quick Start:**\n• Check when someone was last online: `/lastseen @user`\n• View member details: `/whois @user`\n• List inactive members: `/inactive`\n• Configure bot settings: `/config` (Admin only)",
+  "admin.help.description": "Track member activity, monitor server statistics, and automate reports.\n\n**Quick Start:**\n• Check when someone was last online: `/lastseen @user`\n• View member details: `/whois @user`",
   "admin.help.user_commands_title": "👥 User Commands",
-  "admin.help.user_commands": "`/whois <user>` - Show user info, roles, join date, last seen\n`/lastseen <user>` or `/seen <user>` - When user was last online\n`/inactive` - List members offline beyond threshold\n`/inactive <days>` - List members offline for <days> days\n`/chat-history <user>` - Show message posting stats for the last year\n`/mystats` - View your own activity statistics (only visible to you)\n`/user-stats` - Interactive statistics dashboard with analytics\n`/forgetme` - Delete your data and opt out of tracking\n`/optin` - Re-enable tracking after opting out\n",
+  "admin.help.user_commands": "`/whois <user>` - Show user info, roles, join date, last seen\n`/lastseen <user>` or `/seen <user>` - When user was last online\n`/chat-history <user>` - Show message posting stats for the last year\n`/mystats` - View your own activity statistics (only visible to you)\n`/forgetme` - Delete your data and opt out of tracking\n`/optin` - Re-enable tracking after opting out\n",
   "admin.help.admin_commands_title": "⚙️ Admin Commands",
-  "admin.help.admin_commands": "`/config` - Configure bot settings:\n  • Notification channel & inactive days\n  • Admin/user role permissions\n  • Track only specific roles (optional)\n  • Allowed channels (restrict commands)\n`/role-history <user>` - View role change history for a member\n",
+  "admin.help.admin_commands": "`/config` - Configure bot settings:\n  • Notification channel & inactive days\n  • Admin/user role permissions\n  • Track only specific roles (optional)\n  • Allowed channels (restrict commands)\n`/role-history <user>` - View role change history for a member\n`/inactive` - List members offline beyond threshold\n`/inactive <days>` - List members offline for <days> days\n`/user-stats` - Interactive statistics dashboard with analytics\n",
   "admin.help.search_title": "🔍 Search & Filter",
   "admin.help.search": "`/search` - Advanced member search with filters\n  Examples:\n  • `/search roles:@Moderator status:online`\n  • `/search inactive:>30 activity:<10`\n  • `/search joined:>2025-01-01 export:csv`\n  Filters: roles, status, inactive, activity, joined, username\n  Export: csv or txt format",
   "admin.help.footer_admin": "Bot Admin Role: {role} • Showing all commands",
