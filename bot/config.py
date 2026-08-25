@@ -93,6 +93,15 @@ class Config:
         # count to the TOP.GG listing on every guild join/leave. Unset = disabled.
         self.topgg_token = os.getenv('TOPGG_TOKEN', '').strip()
 
+        # Optional discordbotlist.com token. When set, the bot pushes its guild
+        # and user count to that listing on every guild join/leave. Unset = disabled.
+        self.discordbotlist_token = os.getenv('DISCORDBOTLIST_TOKEN', '').strip()
+
+        # Bot identifier used in the discordbotlist.com stats URL. This is the
+        # site's vanity slug (e.g. "lastseen-2591"), not the numeric Discord ID —
+        # the numeric ID is rejected. Falls back to the numeric ID when unset.
+        self.discordbotlist_bot_id = os.getenv('DISCORDBOTLIST_BOT_ID', '').strip()
+
         logger.info("Configuration loaded successfully")
         logger.info(f"Database file: {self.db_file}")
         logger.info(f"Log level: {logging.getLevelName(self.log_level)}")
@@ -100,6 +109,7 @@ class Config:
         logger.info(f"Database backup: every {self.backup_interval_hours} hours, keep {self.backup_retention_count} backups")
         logger.info(f"Shard count: {self.shard_count if self.shard_count else 'auto (Discord recommended)'}")
         logger.info(f"TOP.GG metrics: {'enabled' if self.topgg_token else 'disabled (no TOPGG_TOKEN)'}")
+        logger.info(f"DiscordBotList metrics: {'enabled' if self.discordbotlist_token else 'disabled (no DISCORDBOTLIST_TOKEN)'}")
 
     def _create_default_env(self):
         """Create a default .env file from template if it doesn't exist."""
@@ -134,6 +144,13 @@ DB_BACKUP_RETENTION_COUNT=5  # number of backup copies to keep (older backups ar
 # TOP.GG Token (optional): Set your token here to automatically update the server count on the TOP.GG site listing.
 # Leave unset to disable this feature.
 TOPGG_TOKEN=
+
+# DiscordBotList Token (Optional): Set your token here to automatically update the server count on the discordbotlist.com site listing.
+# Leave unset to disable this feature.
+DISCORDBOTLIST_TOKEN=
+# The bot's discordbotlist.com URL slug (e.g. lastseen-2591), NOT the numeric Discord ID.
+# Find it in your bot's discordbotlist.com page URL. Falls back to the numeric ID if unset.
+DISCORDBOTLIST_BOT_ID=
 
 """
                 self.env_path.write_text(default_content)

@@ -15,6 +15,7 @@ from bot.utils import get_member_roles, create_embed
 from bot.locale import t, guild_language
 from bot.reports import purge_guild_state
 from bot.topgg import update_topgg_metrics
+from bot.discordbotlist import update_discordbotlist_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -458,8 +459,9 @@ class TrackingCog(commands.Cog):
         # Process members in background to avoid blocking the event loop
         self._start_member_enumeration(guild)
 
-        # Push the updated server count to the TOP.GG listing (no-op if unconfigured)
+        # Push the updated counts to the external listings (no-op if unconfigured)
         await update_topgg_metrics(self.bot)
+        await update_discordbotlist_metrics(self.bot)
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
@@ -503,9 +505,10 @@ class TrackingCog(commands.Cog):
         else:
             logger.error(f"Failed to wipe data for guild {guild.id} during on_guild_remove")
 
-        # Push the updated server count to the TOP.GG listing (no-op if unconfigured).
-        # By now the guild is already gone from bot.guilds, so the count is current.
+        # Push the updated counts to the external listings (no-op if unconfigured).
+        # By now the guild is already gone from bot.guilds, so the counts are current.
         await update_topgg_metrics(self.bot)
+        await update_discordbotlist_metrics(self.bot)
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
