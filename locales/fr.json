@@ -65,7 +65,7 @@
   "commands.about.messages_7d": "📈 Messages (7 j) :",
   "commands.about.system_resources": "⚙️ Ressources système",
   "commands.about.privacy_title": "🔐 Confidentialité",
-  "commands.about.privacy_value": "Ce bot ne stocke **pas** et ne lit **pas** le contenu des messages. Seules les métadonnées nécessaires au suivi de l'activité sont enregistrées.\nUtilisez `/forgetme` pour supprimer vos données et vous désinscrire du suivi.\n[Politique de confidentialité](https://lastseen.bot.nu/privacy-policy/)",
+  "commands.about.privacy_value": "Ce bot ne stocke **pas** et ne lit **pas** le contenu des messages. Seules les métadonnées nécessaires au suivi de l'activité sont enregistrées.\nUtilisez `/forgetme` pour supprimer vos données et vous désinscrire du suivi.\n[Politique de confidentialité](https://lastseen.bot/privacy-policy/)",
   "commands.about.help_title": "🔗 Besoin d'aide / Des suggestions ?",
   "commands.about.help_value": "[Rejoignez notre serveur communautaire](https://discord.gg/d3N5sd58fh)",
   "commands.about.footer": "Utilisez /help pour voir les commandes disponibles",
