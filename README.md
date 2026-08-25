@@ -39,6 +39,8 @@ Configurable database backups with automatic retention management. Set your back
 - **Activity Statistics**: Detailed server activity metrics with visual charts
 - **Scheduled Reports**: Automated weekly/monthly reports with activity, new members, and departures
 - **Timezone Support**: Guild-specific timezone configuration for accurate timestamp display
+- **Localization**: Per-guild language selection with multiple built-in translations (English, Spanish, French, Dutch, Polish)
+- **TOP.GG Integration**: Optional automatic upload of server and shard counts to your TOP.GG listing
 - **Role-Based Visibility**: Optionally track only members with specific roles
 - **Channel Restrictions**: Limit bot commands to specific channels
 - **Database Storage**: SQLite database with connection pooling for optimal performance
@@ -59,23 +61,27 @@ Configurable database backups with automatic retention management. Set your back
 - `/whois <user>` - Display detailed information about a user
 - `/lastseen <user>` - Check when a user was last seen online
 - `/seen <user>` - Alias for `/lastseen`
-- `/inactive` - List all members inactive for more than configured days
 - `/chat-history <user>` - Show message posting stats for the last year
-- `/user-stats` - User statistics and analytics dashboard
-  - Interactive buttons for detailed reports
-  - Retention analysis, growth trends, activity leaderboard
-  - Activity heatmap and comprehensive CSV export
-  - Last seen distribution chart
+- `/mystats` - View your own activity statistics (always private/ephemeral)
+- `/forgetme` - Delete your tracked data and opt out of tracking
+- `/optin` - Re-enable activity tracking after a `/forgetme` opt-out
 - `/help` - Show available commands
 - `/about` - Show bot information and system resources
 
 ### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
 
+- `/inactive` - List all members inactive for more than configured days (add days to override the threshold)
+- `/user-stats` - Server statistics and analytics dashboard
+  - Interactive buttons for detailed reports
+  - Retention analysis, growth trends, activity leaderboard
+  - Activity heatmap, participation (lurkers/ghosts), and comprehensive CSV export
+  - Last seen distribution chart
 - `/config` - Open interactive configuration panel
   - **🚀 Quick Setup** - Guided wizard for first-time setup (recommended for new users)
   - Set notification channel for leave messages
   - Set inactive days threshold
   - Set bot admin role name
+  - Set language - Choose the bot's display language for this server
   - Configure user command permissions (toggle role requirement, set user role)
   - Set track only roles - Only track members with specific roles (optional)
   - Set allowed channels - Restrict bot commands to specific channels (optional)
@@ -183,6 +189,10 @@ DB_BACKUP_RETENTION_COUNT=5  # Number of backup copies to keep (default: 5)
 # Sharding (optional): force a fixed shard count, e.g. for testing multi-shard behavior.
 # Leave unset to use Discord's recommended count (1 shard until ~1000 guilds).
 # SHARD_COUNT=2
+
+# TOP.GG Token (optional): set your token to automatically push server and shard
+# counts to your TOP.GG listing on guild join/leave. Leave unset to disable.
+TOPGG_TOKEN=
 ```
 
 ### Per-Guild Configuration
@@ -232,6 +242,12 @@ Prefer to configure individual settings? Use the other buttons in `/config`:
   - Supports all IANA timezone names (e.g., `America/New_York`, `Europe/London`, `Asia/Tokyo`)
   - Defaults to UTC if not configured
   - Timezone names are validated against the official pytz timezone database
+
+#### Language
+- **Server Language**: Choose the language the bot uses for this guild
+  - Applies to command responses, embeds, and scheduled reports
+  - Built-in translations: English, Spanish, French, Dutch, Polish
+  - Defaults to English if not configured
 
 #### Message Activity & Retention
 - **Message Retention Days**: Control how long message activity data is stored
@@ -312,6 +328,8 @@ lastseen_bot/
 │   ├── client.py          # Bot client setup
 │   ├── config.py          # Configuration loader
 │   ├── utils.py           # Helper functions
+│   ├── locale.py          # Localization / translation loader
+│   ├── topgg.py           # TOP.GG server-count metric uploads
 │   └── reports.py         # Scheduled report generation
 ├── cogs/
 │   ├── __init__.py
@@ -330,6 +348,14 @@ lastseen_bot/
 ├── database/
 │   ├── __init__.py
 │   └── db_manager.py      # Database connection & schema
+├── locales/               # Translation files (one JSON per language)
+│   ├── en.json            # Canonical language
+│   ├── es.json
+│   ├── fr.json
+│   ├── nl.json
+│   └── pl.json
+├── tools/
+│   └── check_locales.py   # Locale validation (placeholder parity, length limits)
 └── logs/                  # Daily log files (auto-created)
     ├── 2024-01-17.log
     └── ...
@@ -452,6 +478,11 @@ Interactive statistics dashboard with comprehensive server analytics.
 - Visual bar charts showing peak days
 - Message count breakdown by day
 
+👥 **Participation**
+- **Lurkers**: members present in the server but silent (no recent messages)
+- **Ghosts**: members who have never been active
+- Share of the server each segment represents, to gauge engagement gaps
+
 📋 **Export CSV**
 - Comprehensive stats report
 - Includes overview, growth metrics, and top 25 members
@@ -549,7 +580,7 @@ Logs are stored in the `logs/` directory with daily rotation:
 
 ### Presence tracking not working
 - Enable **PRESENCE INTENT** in Discord Developer Portal
-- Bot must be in fewer than 100 servers (or be verified)
+- Once the bot reaches **10,000 or more users**, Discord requires it to be verified for privileged intents (presence/members) to keep working
 
 ### Database errors
 - Ensure database file has write permissions
