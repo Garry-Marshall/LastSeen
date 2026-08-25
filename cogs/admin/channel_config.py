@@ -186,7 +186,7 @@ class ReportsConfigModal(discord.ui.Modal):
             placeholder=t("channel_config.reports.types_placeholder", lang),
             required=True,
             max_length=50,
-            default="activity,members,departures"
+            default="activity,members,departures,retention"
         )
         self.days_input = discord.ui.TextInput(
             placeholder=t("channel_config.reports.days_placeholder", lang),
@@ -292,7 +292,7 @@ class ReportsConfigModal(discord.ui.Modal):
             # Parse report types
             report_types_str = self.report_types_input.value.strip().lower()
             report_types = [t.strip() for t in report_types_str.split(',') if t.strip()]
-            valid_types = ['activity', 'members', 'departures']
+            valid_types = ['activity', 'members', 'departures', 'retention']
             report_types = [t for t in report_types if t in valid_types]
 
             if not report_types:

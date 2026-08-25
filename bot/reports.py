@@ -88,6 +88,14 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         # peak_day[0] is a day name (e.g., 'Monday'), not a timestamp
         embed.description += t('report.peak_day', lang, day=weekday_name(peak_day[0], lang), count=peak_day[1])
 
+    # Peak hour of day (UTC, period-scoped). No track_only_roles filter — the
+    # hourly table is guild-wide, matching the /user-stats heatmap.
+    hour_activity = db.get_activity_by_hour(guild_id, days)
+    if hour_activity and sum(hour_activity.values()) > 0:
+        peak_hour = max(hour_activity, key=hour_activity.get)
+        hour_label = f"{peak_hour:02d}:00-{(peak_hour + 1) % 24:02d}:00"
+        embed.description += t('report.peak_hour', lang, hour=hour_label, count=hour_activity[peak_hour])
+
     embed.description += "\n"
 
     # Member changes - only show the counts whose report type is enabled
@@ -110,7 +118,43 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
             embed.description += t('report.left', lang, count=left)
         if show_joined and show_left:
             embed.description += t('report.net', lang, count=joined - left)
+        # Growth rate over the period (guild-wide, like /user-stats). Complements
+        # the raw counts above with the net change as a percentage.
+        growth = db.get_member_growth_stats(guild_id, days)
+        if growth:
+            rate = growth.get('growth_rate', 0)
+            indicator = "📈" if rate > 0 else "📉" if rate < 0 else "➡️"
+            embed.description += t('report.growth_rate', lang, indicator=indicator, rate=abs(rate))
         embed.description += "\n"
+
+    # Participation gap: present-but-silent (lurkers) and never-active (ghosts)
+    segments = db.get_participation_segments(guild_id, window_days=days)
+    if segments and (segments['lurkers'] or segments['ghosts']):
+        embed.description += t('report.participation_header', lang)
+        embed.description += t('report.lurkers', lang, count=segments['lurkers'], pct=round(segments['lurker_pct']))
+        embed.description += t('report.ghosts', lang, count=segments['ghosts'])
+        embed.description += "\n"
+
+    # New-member retention cohorts — opt-in, monthly only. The cohort windows are
+    # fixed at 30/60/90 days, so they don't map onto a 7-day weekly period.
+    if 'retention' in report_types and days >= 30:
+        cohorts = db.get_retention_cohorts(guild_id)
+        if cohorts and any(c['total_joined'] > 0 for c in cohorts.values()):
+            embed.description += t('report.retention_header', lang)
+            period_labels = {
+                '30d': t('report.retention_period_30d', lang),
+                '60d': t('report.retention_period_60d', lang),
+                '90d': t('report.retention_period_90d', lang),
+            }
+            for period in ('30d', '60d', '90d'):
+                data = cohorts.get(period)
+                if data and data['total_joined'] > 0:
+                    embed.description += t(
+                        'report.retention_line', lang,
+                        period=period_labels[period], rate=data['retention_rate'],
+                        active=data['still_active'], joined=data['total_joined']
+                    )
+            embed.description += "\n"
 
     # Top contributors
     if top_users:
