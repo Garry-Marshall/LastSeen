@@ -432,14 +432,15 @@ class ChannelModal(discord.ui.Modal):
         """
         self.db = db
         self.guild_id = guild_id
-        self.lang = guild_language(db.get_guild_config(guild_id))
+        guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
         super().__init__(title=t("channel_config.channel.modal_title", self.lang))
 
         self.add_item(discord.ui.TextDisplay(t("channel_config.channel.info", self.lang)))
 
         self.channel_input = discord.ui.TextInput(
             placeholder=t("channel_config.channel.input_placeholder", self.lang),
-            required=True,
+            required=False,
             max_length=100
         )
         self.add_item(discord.ui.Label(
@@ -447,11 +448,30 @@ class ChannelModal(discord.ui.Modal):
             component=self.channel_input
         ))
 
+        # Pre-fill with current value so it can be reviewed or cleared
+        if guild_config and guild_config.get('notification_channel_id'):
+            self.channel_input.default = f"<#{guild_config['notification_channel_id']}>"
+
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""
         lang = self.lang
         channel_str = self.channel_input.value.strip()
         channel = None
+
+        # Empty submit disables member-leave notifications
+        if not channel_str:
+            if await asyncio.to_thread(self.db.set_notification_channel, self.guild_id, None, interaction.guild.name):
+                await interaction.response.send_message(
+                    embed=create_success_embed(t("channel_config.channel.cleared", lang), lang),
+                    ephemeral=True
+                )
+                logger.info(f"Notification channel cleared in guild {interaction.guild.name}")
+            else:
+                await interaction.response.send_message(
+                    embed=create_error_embed(t("channel_config.channel.update_failed", lang), lang),
+                    ephemeral=True
+                )
+            return
 
         # Try different parsing methods
         # 1. Check if it's a mention like <#1234567890>
@@ -522,7 +542,8 @@ class InactiveDaysModal(discord.ui.Modal):
         """
         self.db = db
         self.guild_id = guild_id
-        self.lang = guild_language(db.get_guild_config(guild_id))
+        guild_config = db.get_guild_config(guild_id)
+        self.lang = guild_language(guild_config)
         super().__init__(title=t("channel_config.inactive_days.modal_title", self.lang))
 
         self.add_item(discord.ui.TextDisplay(t("channel_config.inactive_days.info", self.lang)))
@@ -536,6 +557,10 @@ class InactiveDaysModal(discord.ui.Modal):
             text=t("channel_config.inactive_days.input_label", self.lang),
             component=self.days_input
         ))
+
+        # Pre-fill with current value
+        if guild_config and guild_config.get('inactive_days'):
+            self.days_input.default = str(guild_config['inactive_days'])
 
     async def on_submit(self, interaction: discord.Interaction):
         """Handle modal submission."""

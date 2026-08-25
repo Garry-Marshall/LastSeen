@@ -406,12 +406,13 @@
   "channel_config.reports.error": "Błąd podczas konfigurowania raportów: {error}",
 
   "channel_config.channel.modal_title": "Ustaw kanał powiadomień",
-  "channel_config.channel.info": "Wybierz kanał tekstowy, na którym będą publikowane powiadomienia o odejściu członków.\n\n⚠️ Upewnij się, że bot ma uprawnienia **Wyświetlanie kanału** i **Wysyłanie wiadomości** na tym kanale.",
+  "channel_config.channel.info": "Wybierz kanał tekstowy, na którym będą publikowane powiadomienia o odejściu członków.\n\n⚠️ Upewnij się, że bot ma uprawnienia **Wyświetlanie kanału** i **Wysyłanie wiadomości** na tym kanale.\n\nℹ️ Pozostaw puste, aby wyłączyć powiadomienia.",
   "channel_config.channel.input_label": "Nazwa, ID lub wzmianka kanału",
-  "channel_config.channel.input_placeholder": "np. general, #general lub 1234567890",
+  "channel_config.channel.input_placeholder": "np. general, #general lub 1234567890 (puste = wyłącz)",
   "channel_config.channel.not_found": "Kanał '{channel}' nie został znaleziony. Użyj nazwy kanału (np. 'general'), wzmianki (np. '#general') lub ID.",
   "channel_config.channel.invalid_type": "Nieprawidłowy typ kanału. '{channel}' to {type}, ale kanały powiadomień muszą być kanałami tekstowymi.",
   "channel_config.channel.set": "Kanał powiadomień ustawiono na {channel}",
+  "channel_config.channel.cleared": "Powiadomienia o odejściu członków wyłączone.",
   "channel_config.channel.update_failed": "Nie udało się zaktualizować kanału powiadomień.",
 
   "channel_config.inactive_days.modal_title": "Ustaw próg dni nieaktywności",

@@ -406,12 +406,13 @@
   "channel_config.reports.error": "Error al configurar los informes: {error}",
 
   "channel_config.channel.modal_title": "Establecer canal de notificaciones",
-  "channel_config.channel.info": "Elige el canal de texto donde se publicarán las notificaciones de salida de miembros.\n\n⚠️ Asegúrate de que el bot tenga permiso para **Ver canal** y **Enviar mensajes** en él.",
+  "channel_config.channel.info": "Elige el canal de texto donde se publicarán las notificaciones de salida de miembros.\n\n⚠️ Asegúrate de que el bot tenga permiso para **Ver canal** y **Enviar mensajes** en él.\n\nℹ️ Déjalo vacío para desactivar las notificaciones.",
   "channel_config.channel.input_label": "Nombre, ID o mención del canal",
-  "channel_config.channel.input_placeholder": "p. ej., general, #general, o 1234567890",
+  "channel_config.channel.input_placeholder": "p. ej., general, #general, o 1234567890 (vacío para desactivar)",
   "channel_config.channel.not_found": "El canal '{channel}' no se encontró. Usa el nombre del canal (p. ej., 'general'), una mención (p. ej., '#general'), o el ID.",
   "channel_config.channel.invalid_type": "Tipo de canal no válido. '{channel}' es un {type}, pero los canales de notificaciones deben ser canales de texto.",
   "channel_config.channel.set": "Canal de notificaciones establecido en {channel}",
+  "channel_config.channel.cleared": "Notificaciones de salida de miembros desactivadas.",
   "channel_config.channel.update_failed": "No se pudo actualizar el canal de notificaciones.",
 
   "channel_config.inactive_days.modal_title": "Establecer umbral de días de inactividad",

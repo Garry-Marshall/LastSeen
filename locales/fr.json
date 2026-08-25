@@ -406,12 +406,13 @@
   "channel_config.reports.error": "Erreur lors de la configuration des rapports : {error}",
 
   "channel_config.channel.modal_title": "Définir le salon de notifications",
-  "channel_config.channel.info": "Choisissez le salon textuel où les notifications de départ des membres seront publiées.\n\n⚠️ Assurez-vous que le bot a la permission de **Voir le salon** et d'**Envoyer des messages** dans ce salon.",
+  "channel_config.channel.info": "Choisissez le salon textuel où les notifications de départ des membres seront publiées.\n\n⚠️ Assurez-vous que le bot a la permission de **Voir le salon** et d'**Envoyer des messages** dans ce salon.\n\nℹ️ Laissez vide pour désactiver les notifications.",
   "channel_config.channel.input_label": "Nom, ID ou mention du salon",
-  "channel_config.channel.input_placeholder": "ex. general, #general, ou 1234567890",
+  "channel_config.channel.input_placeholder": "ex. general, #general, ou 1234567890 (vide pour désactiver)",
   "channel_config.channel.not_found": "Salon '{channel}' introuvable. Utilisez le nom du salon (ex. 'general'), une mention (ex. '#general'), ou l'ID.",
   "channel_config.channel.invalid_type": "Type de salon invalide. '{channel}' est un {type}, mais les salons de notifications doivent être des salons textuels.",
   "channel_config.channel.set": "Salon de notifications défini sur {channel}",
+  "channel_config.channel.cleared": "Notifications de départ des membres désactivées.",
   "channel_config.channel.update_failed": "Échec de la mise à jour du salon de notifications.",
 
   "channel_config.inactive_days.modal_title": "Définir le seuil de jours d'inactivité",

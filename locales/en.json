@@ -406,12 +406,13 @@
   "channel_config.reports.error": "Error configuring reports: {error}",
 
   "channel_config.channel.modal_title": "Set Notification Channel",
-  "channel_config.channel.info": "Choose the text channel where member leave notifications are posted.\n\n⚠️ Make sure the bot has permission to **View Channel** and **Send Messages** there.",
+  "channel_config.channel.info": "Choose the text channel where member leave notifications are posted.\n\n⚠️ Make sure the bot has permission to **View Channel** and **Send Messages** there.\n\nℹ️ Leave empty to disable notifications.",
   "channel_config.channel.input_label": "Channel Name, ID, or Mention",
-  "channel_config.channel.input_placeholder": "e.g., general, #general, or 1234567890",
+  "channel_config.channel.input_placeholder": "e.g., general, #general, or 1234567890 (leave empty to disable)",
   "channel_config.channel.not_found": "Channel '{channel}' not found. Please use channel name (e.g., 'general'), mention (e.g., '#general'), or ID.",
   "channel_config.channel.invalid_type": "Invalid channel type. '{channel}' is a {type}, but notification channels must be text channels.",
   "channel_config.channel.set": "Notification channel set to {channel}",
+  "channel_config.channel.cleared": "Member-leave notifications disabled.",
   "channel_config.channel.update_failed": "Failed to update notification channel.",
 
   "channel_config.inactive_days.modal_title": "Set Inactive Days Threshold",

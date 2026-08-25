@@ -406,12 +406,13 @@
   "channel_config.reports.error": "Fout bij het configureren van rapporten: {error}",
 
   "channel_config.channel.modal_title": "Meldingskanaal instellen",
-  "channel_config.channel.info": "Kies het tekstkanaal waar meldingen over vertrekkende leden worden geplaatst.\n\n⚠️ Zorg ervoor dat de bot daar **Kanaal bekijken** en **Berichten versturen** heeft.",
+  "channel_config.channel.info": "Kies het tekstkanaal waar meldingen over vertrekkende leden worden geplaatst.\n\n⚠️ Zorg ervoor dat de bot daar **Kanaal bekijken** en **Berichten versturen** heeft.\n\nℹ️ Laat leeg om meldingen uit te schakelen.",
   "channel_config.channel.input_label": "Kanaalnaam, ID of vermelding",
-  "channel_config.channel.input_placeholder": "bijv. general, #general, of 1234567890",
+  "channel_config.channel.input_placeholder": "bijv. general, #general, of 1234567890 (leeg om uit te schakelen)",
   "channel_config.channel.not_found": "Kanaal '{channel}' niet gevonden. Gebruik de kanaalnaam (bijv. 'general'), vermelding (bijv. '#general'), of ID.",
   "channel_config.channel.invalid_type": "Ongeldig kanaaltype. '{channel}' is een {type}, maar meldingskanalen moeten tekstkanalen zijn.",
   "channel_config.channel.set": "Meldingskanaal ingesteld op {channel}",
+  "channel_config.channel.cleared": "Meldingen over vertrekkende leden uitgeschakeld.",
   "channel_config.channel.update_failed": "Bijwerken van meldingskanaal mislukt.",
 
   "channel_config.inactive_days.modal_title": "Drempel inactieve dagen instellen",
