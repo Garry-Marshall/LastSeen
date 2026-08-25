@@ -33,8 +33,9 @@ STATUS_MESSAGES = [
     ('', 'Listening to /lastseen'),
     ('👀', 'Watching you'),
     ('', 'Watching who\'s online'),
-    ('🌐', 'Visit lastseen.bot.nu'),
     ('', 'Listening to /help'),
+    ('', 'Listening to /whois'),
+    ('', 'Listening to /mystats'),
 ]
 
 

@@ -2185,7 +2185,8 @@ class UserStatsView(discord.ui.View):
         
         try:
             cohorts = self.db.get_retention_cohorts(self.guild_id)
-            embed = self._create_retention_embed(cohorts)
+            lifespan = self.db.get_departure_lifespan(self.guild_id)
+            embed = self._create_retention_embed(cohorts, lifespan)
             
             # Create view with back button
             view = discord.ui.View(timeout=300)
@@ -2406,8 +2407,8 @@ class UserStatsView(discord.ui.View):
             logger.error(f"Failed to export stats: {e}", exc_info=True)
             await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
 
-    def _create_retention_embed(self, cohorts: dict) -> discord.Embed:
-        """Create retention report embed."""
+    def _create_retention_embed(self, cohorts: dict, lifespan: dict) -> discord.Embed:
+        """Create retention report embed (join cohorts + departed-member lifespan)."""
         lang = self.lang
         embed = create_embed(t("commands.stats_view.retention_title", lang), discord.Color.purple())
 
@@ -2433,6 +2434,35 @@ class UserStatsView(discord.ui.View):
 
         if not cohorts or all(c['total_joined'] == 0 for c in cohorts.values()):
             embed.description = t("commands.stats_view.retention_no_data", lang)
+
+        # Departed-member lifespan: how long members who left actually stayed —
+        # the churn side of retention. Labels are fixed (like the last-seen chart).
+        if lifespan['sample'] >= 3:
+            b = lifespan['buckets']
+            labels = ["<1 day", "<7 days", "<30 days", "<90 days", "90+ days"]
+            counts = [b['under_1d'], b['under_7d'], b['under_30d'], b['under_90d'], b['over_90d']]
+            max_count = max(counts) if any(counts) else 1
+            chart_lines = []
+            for label, count in zip(labels, counts):
+                filled = int((count / max_count) * 20)
+                bar = "█" * filled + "░" * (20 - filled)
+                chart_lines.append(f"{label:<8} {bar} {count:>4}")
+
+            value = t(
+                "commands.stats_view.lifespan_summary", lang,
+                sample=lifespan['sample'], median=lifespan['median_days'], avg=lifespan['avg_days']
+            )
+            value += "\n```\n" + "\n".join(chart_lines) + "\n```"
+            value += t("commands.stats_view.lifespan_early_churn", lang, pct=round(lifespan['early_churn_pct']))
+            embed.add_field(
+                name=t("commands.stats_view.lifespan_title", lang), value=value, inline=False
+            )
+        else:
+            embed.add_field(
+                name=t("commands.stats_view.lifespan_title", lang),
+                value=t("commands.stats_view.lifespan_no_data", lang),
+                inline=False
+            )
 
         return embed
 

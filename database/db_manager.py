@@ -2434,6 +2434,73 @@ class DatabaseManager:
             logger.error(f"Failed to get retention cohorts for guild {guild_id}: {e}")
             return {}
 
+    def get_departure_lifespan(self, guild_id: int) -> Dict[str, Any]:
+        """
+        Analyse how long departed members stayed before leaving.
+
+        Tenure is left_date - join_date. Only departures recorded since the
+        left_date column was added are analysable (older ones have left_date
+        NULL); rejoining clears left_date, so only the current departure counts.
+        The churn side of retention — pairs with get_retention_cohorts().
+
+        Returns a dict with 'sample' (number of analysable departures), and when
+        sample >= MIN_SAMPLE: 'median_days', 'avg_days', 'buckets' (non-overlapping
+        tenure ranges), and 'early_churn_pct' (share who left within a week).
+        Below MIN_SAMPLE the stats stay zeroed so callers can show a placeholder.
+        """
+        MIN_SAMPLE = 3
+        EARLY_CHURN_DAYS = 7
+        result = {
+            'sample': 0,
+            'median_days': 0,
+            'avg_days': 0,
+            'buckets': {'under_1d': 0, 'under_7d': 0, 'under_30d': 0, 'under_90d': 0, 'over_90d': 0},
+            'early_churn_pct': 0.0,
+        }
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT (left_date - join_date) AS tenure
+                    FROM members
+                    WHERE guild_id = ? AND is_active = 0
+                      AND left_date IS NOT NULL AND join_date IS NOT NULL
+                      AND left_date > join_date
+                """, (guild_id,))
+                tenures = sorted(row['tenure'] for row in cursor.fetchall())
+
+            n = len(tenures)
+            result['sample'] = n
+            if n < MIN_SAMPLE:
+                return result
+
+            # Median in seconds (average the two middle values for even counts).
+            mid = n // 2
+            median_s = tenures[mid] if n % 2 else (tenures[mid - 1] + tenures[mid]) / 2
+            result['median_days'] = round(median_s / SECONDS_PER_DAY)
+            result['avg_days'] = round(sum(tenures) / n / SECONDS_PER_DAY)
+
+            d = SECONDS_PER_DAY
+            b = result['buckets']
+            for tsec in tenures:
+                if tsec < 1 * d:
+                    b['under_1d'] += 1
+                elif tsec < 7 * d:
+                    b['under_7d'] += 1
+                elif tsec < 30 * d:
+                    b['under_30d'] += 1
+                elif tsec < 90 * d:
+                    b['under_90d'] += 1
+                else:
+                    b['over_90d'] += 1
+
+            early = sum(1 for tsec in tenures if tsec < EARLY_CHURN_DAYS * d)
+            result['early_churn_pct'] = early / n * 100
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get departure lifespan for guild {guild_id}: {e}")
+            return result
+
     def get_activity_leaderboard(self, guild_id: int, days: int = 30, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Get activity leaderboard for top members.
