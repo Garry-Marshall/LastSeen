@@ -444,6 +444,49 @@ class CommandsCog(commands.Cog):
             if activity_stats['avg_per_day'] > 0:
                 embed.description += t("commands.whois.activity_avg", lang, avg=activity_stats['avg_per_day'])
 
+        # ===== ACTIVITY PROFILE SECTION =====
+        # When-active patterns are more revealing than raw counts, so this block
+        # is limited to admins and to a member viewing their own profile. It is
+        # derived entirely from message activity (never presence).
+        show_profile = is_admin or interaction.user.id == member_data['user_id']
+        if show_profile:
+            guild_tz = guild_config.get('timezone', 'UTC') if guild_config else 'UTC'
+            profile = await asyncio.to_thread(
+                self.db.get_activity_profile, guild_id, member_data['user_id'], 30, guild_tz
+            )
+            if profile['total'] > 0:
+                embed.description += "\n"
+                embed.description += t("commands.whois.profile_header", lang)
+                embed.description += t("commands.whois.profile_active_days", lang,
+                                       active=profile['active_days'], total=profile['window_days'])
+
+                # Suppress the pattern lines on thin data — a "most active day"
+                # off a handful of messages is noise, not a profile.
+                if profile['total'] >= 15 and profile['active_days'] >= 5:
+                    if profile['peak_weekday'] is not None:
+                        embed.description += t("commands.whois.profile_peak_day", lang,
+                                               day=weekday_name(profile['peak_weekday'], lang))
+                    if profile['peak_hours']:
+                        start, end = profile['peak_hours']
+                        embed.description += t("commands.whois.profile_peak_hours", lang,
+                                               start=f"{start:02d}:00", end=f"{end:02d}:00")
+                    trend_key = {
+                        'increasing': "commands.whois.profile_trend_up",
+                        'decreasing': "commands.whois.profile_trend_down",
+                        'steady': "commands.whois.profile_trend_steady",
+                    }.get(profile['trend'])
+                    if trend_key:
+                        embed.description += t(trend_key, lang)
+
+                    percentile = await asyncio.to_thread(
+                        self.db.get_activity_percentile, guild_id, member_data['user_id'], 30
+                    )
+                    if percentile:
+                        filled = round(percentile['percentile'] / 10)
+                        bar = "█" * filled + "░" * (10 - filled)
+                        embed.description += t("commands.whois.profile_activity_bar", lang,
+                                               bar=bar, percentile=percentile['percentile'])
+
         await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
 

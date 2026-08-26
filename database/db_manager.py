@@ -2229,6 +2229,121 @@ class DatabaseManager:
             logger.error(f"Failed to get message activity trend for user {user_id}: {e}")
             return []
 
+    def get_activity_profile(self, guild_id: int, user_id: int, days: int = 30, tz_str: str = 'UTC') -> Dict[str, Any]:
+        """Build a per-member activity profile from message activity (never presence).
+
+        Aggregates the member's hourly message buckets over the window into
+        weekday and hour-of-day distributions, the count of distinct active
+        days, and a coarse rising/steady/falling trend. Every bucket is
+        converted to the guild's timezone per-row (not by a fixed offset), so
+        DST and sub-hour offsets are handled correctly.
+
+        This reads message_activity_hourly only — it does not touch last_seen or
+        any presence data, keeping the single-column presence commitment intact.
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            days: Look-back window in days (default 30)
+            tz_str: Guild timezone name for local-time bucketing (default UTC)
+
+        Returns:
+            Dict with 'total', 'active_days', 'window_days', 'by_weekday'
+            (0=Mon..6=Sun -> count), 'by_hour' (0-23 -> count), 'peak_weekday'
+            (0-6 or None), 'peak_hours' ((start_hour, end_hour) or None), and
+            'trend' ('increasing'|'steady'|'decreasing'|None).
+        """
+        import pytz
+
+        empty = {
+            'total': 0, 'active_days': 0, 'window_days': days,
+            'by_weekday': {i: 0 for i in range(7)},
+            'by_hour': {h: 0 for h in range(24)},
+            'peak_weekday': None, 'peak_hours': None, 'trend': None,
+        }
+        try:
+            try:
+                tz = pytz.timezone(tz_str) if tz_str in pytz.all_timezones else pytz.UTC
+            except Exception:
+                tz = pytz.UTC
+
+            now = int(datetime.now(timezone.utc).timestamp())
+            period_start = now - (days * SECONDS_PER_DAY)
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT timestamp, message_count
+                    FROM message_activity_hourly
+                    WHERE guild_id = ? AND user_id = ? AND timestamp >= ?
+                """, (guild_id, user_id, period_start))
+                rows = cursor.fetchall()
+
+            if not rows:
+                return empty
+
+            by_weekday = {i: 0 for i in range(7)}
+            by_hour = {h: 0 for h in range(24)}
+            per_date: Dict[Any, int] = {}
+            total = 0
+
+            for row in rows:
+                ts = row['timestamp']
+                cnt = row['message_count'] or 0
+                local = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(tz)
+                by_weekday[local.weekday()] += cnt
+                by_hour[local.hour] += cnt
+                d = local.date()
+                per_date[d] = per_date.get(d, 0) + cnt
+                total += cnt
+
+            if total == 0:
+                return empty
+
+            peak_weekday = max(by_weekday, key=by_weekday.get)
+
+            # Peak activity band: the 4-hour window (wrap-safe across midnight)
+            # with the most messages. Answers "when are they most concentrated".
+            best_start, best_sum = 0, -1
+            for start in range(24):
+                s = sum(by_hour[(start + k) % 24] for k in range(4))
+                if s > best_sum:
+                    best_sum, best_start = s, start
+            peak_hours = (best_start, (best_start + 4) % 24)
+
+            # Coarse trend: recent half of the window vs the prior half, by
+            # local date. Deliberately blunt — callers gate it behind a minimum
+            # sample so it isn't reported off a handful of messages.
+            half = days // 2
+            today_local = datetime.now(tz).date()
+            recent = prior = 0
+            for d, c in per_date.items():
+                age = (today_local - d).days
+                if age < half:
+                    recent += c
+                elif age < days:
+                    prior += c
+
+            trend = None
+            if recent + prior > 0:
+                if prior == 0:
+                    trend = 'increasing'
+                elif recent >= prior * 1.2:
+                    trend = 'increasing'
+                elif recent <= prior * 0.8:
+                    trend = 'decreasing'
+                else:
+                    trend = 'steady'
+
+            return {
+                'total': total, 'active_days': len(per_date), 'window_days': days,
+                'by_weekday': by_weekday, 'by_hour': by_hour,
+                'peak_weekday': peak_weekday, 'peak_hours': peak_hours, 'trend': trend,
+            }
+        except Exception as e:
+            logger.error(f"Failed to build activity profile for user {user_id} in guild {guild_id}: {e}")
+            return empty
+
     def get_guild_message_activity_stats(self, guild_id: int, days: int = 365, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Get guild-wide message activity statistics.
