@@ -162,6 +162,25 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
                     )
             embed.description += "\n"
 
+    # New-member activation funnel — same opt-in/monthly gate as the cohorts
+    # above. Windowed "still posting" share at each age; has its own min-cohort
+    # guard, so an empty checkpoint list just means nothing to show.
+    if 'retention' in report_types and days >= 30:
+        funnel = db.get_activation_funnel(guild_id)
+        checkpoints = funnel.get('checkpoints') if funnel else None
+        if checkpoints:
+            embed.description += t('report.funnel_header', lang)
+            for cp in checkpoints:
+                embed.description += t(
+                    'report.funnel_line', lang,
+                    label=cp['label'], rate=cp['rate'],
+                    active=cp['active'], matured=cp['matured']
+                )
+            if funnel.get('largest_dropoff'):
+                frm, to = funnel['largest_dropoff']
+                embed.description += t('report.funnel_dropoff', lang, from_label=frm, to_label=to)
+            embed.description += "\n"
+
     # Top contributors
     if top_users:
         embed.description += t('report.top_contributors_header', lang)

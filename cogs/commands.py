@@ -41,6 +41,38 @@ def sanitize_csv_value(value) -> str:
     return value
 
 
+def build_activity_sparkline(trend: list, days: int = 30) -> str:
+    """Render a per-day message-activity strip as a monospace sparkline.
+
+    `trend` is a get_message_activity_trend() result: sparse rows of
+    {'date': <UTC day-start>, 'message_count': n}. We fill the gaps so every
+    one of the last `days` days is represented, most recent on the right.
+    Silent days show as '·' so genuine inactivity reads as visible gaps; active
+    days scale ▁..█ relative to the member's own busiest day in the window.
+    """
+    counts = {row['date']: row['message_count'] for row in trend}
+
+    now = datetime.now(timezone.utc)
+    today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+
+    series = [counts.get(today_start - (offset * 86400), 0)
+              for offset in range(days - 1, -1, -1)]
+
+    peak = max(series)
+    if peak == 0:
+        return "·" * days
+
+    ramp = "▁▂▃▄▅▆▇█"
+    chars = []
+    for count in series:
+        if count == 0:
+            chars.append("·")
+        else:
+            level = (count * (len(ramp) - 1) + peak - 1) // peak
+            chars.append(ramp[level])
+    return "".join(chars)
+
+
 class PaginationView(discord.ui.View):
     """Interactive pagination view for navigating through multiple pages."""
 
@@ -459,6 +491,14 @@ class CommandsCog(commands.Cog):
                 embed.description += t("commands.whois.profile_header", lang)
                 embed.description += t("commands.whois.profile_active_days", lang,
                                        active=profile['active_days'], total=profile['window_days'])
+
+                # 30-day activity strip: shows whether absences are constant or
+                # occasional at a glance. Built from message activity only.
+                trend = await asyncio.to_thread(
+                    self.db.get_message_activity_trend, guild_id, member_data['user_id'], 30
+                )
+                embed.description += t("commands.whois.profile_timeline", lang,
+                                       sparkline=build_activity_sparkline(trend, 30))
 
                 # Suppress the pattern lines on thin data — a "most active day"
                 # off a handful of messages is noise, not a profile.
@@ -2234,8 +2274,9 @@ class UserStatsView(discord.ui.View):
         
         try:
             cohorts = await asyncio.to_thread(self.db.get_retention_cohorts, self.guild_id)
+            funnel = await asyncio.to_thread(self.db.get_activation_funnel, self.guild_id)
             lifespan = await asyncio.to_thread(self.db.get_departure_lifespan, self.guild_id)
-            embed = self._create_retention_embed(cohorts, lifespan)
+            embed = self._create_retention_embed(cohorts, funnel, lifespan)
             
             # Create view with back button
             view = discord.ui.View(timeout=300)
@@ -2462,8 +2503,8 @@ class UserStatsView(discord.ui.View):
             logger.error(f"Failed to export stats: {e}", exc_info=True)
             await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
 
-    def _create_retention_embed(self, cohorts: dict, lifespan: dict) -> discord.Embed:
-        """Create retention report embed (join cohorts + departed-member lifespan)."""
+    def _create_retention_embed(self, cohorts: dict, funnel: dict, lifespan: dict) -> discord.Embed:
+        """Create retention report embed (join cohorts + activation funnel + departed-member lifespan)."""
         lang = self.lang
         embed = create_embed(t("commands.stats_view.retention_title", lang), discord.Color.purple())
 
@@ -2489,6 +2530,31 @@ class UserStatsView(discord.ui.View):
 
         if not cohorts or all(c['total_joined'] == 0 for c in cohorts.values()):
             embed.description = t("commands.stats_view.retention_no_data", lang)
+
+        # New-member activation funnel: share of recent joiners who posted during
+        # each successive era after joining (windowed "still around", not cumulative).
+        checkpoints = funnel.get('checkpoints') if funnel else None
+        if checkpoints:
+            chart_lines = []
+            for cp in checkpoints:
+                filled = int((cp['rate'] / 100) * 20)
+                bar = "█" * filled + "░" * (20 - filled)
+                chart_lines.append(f"{cp['label']:<4}{bar} {cp['rate']:>3.0f}%  (n={cp['matured']:,})")
+
+            value = t("commands.stats_view.funnel_intro", lang)
+            value += "\n```\n" + "\n".join(chart_lines) + "\n```"
+            if funnel.get('largest_dropoff'):
+                frm, to = funnel['largest_dropoff']
+                value += t("commands.stats_view.funnel_dropoff", lang, from_label=frm, to_label=to)
+            embed.add_field(
+                name=t("commands.stats_view.funnel_title", lang), value=value, inline=False
+            )
+        else:
+            embed.add_field(
+                name=t("commands.stats_view.funnel_title", lang),
+                value=t("commands.stats_view.funnel_no_data", lang),
+                inline=False
+            )
 
         # Departed-member lifespan: how long members who left actually stayed —
         # the churn side of retention. Labels are fixed (like the last-seen chart).

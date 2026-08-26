@@ -4,6 +4,7 @@ import sqlite3
 import json
 import logging
 import threading
+from collections import defaultdict
 from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -2710,6 +2711,117 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get retention cohorts for guild {guild_id}: {e}")
             return {}
+
+    # Windowed activation eras as (label, first_day_offset, last_day_offset) from
+    # the member's join day, inclusive and non-overlapping. Each checkpoint asks
+    # "did they post *during* this stretch?" — the still-around reading, not a
+    # cumulative "ever posted by day N".
+    _ACTIVATION_ERAS = (('D1', 0, 1), ('D7', 2, 7), ('D30', 8, 30), ('D90', 31, 90))
+    # Below this many recent joiners the percentages are too noisy to show.
+    _ACTIVATION_MIN_COHORT = 5
+
+    def get_activation_funnel(self, guild_id: int) -> Dict[str, Any]:
+        """
+        Windowed new-member activation funnel built from message activity.
+
+        For members who joined within the guild's message-retention horizon,
+        measures the share who *posted a message* during each successive era
+        after joining (see _ACTIVATION_ERAS). Each checkpoint's denominator is
+        only members old enough to have lived through the end of that era
+        ("matured"); bounding the cohort to join_date within the retention
+        window guarantees no era's activity rows have been pruned, so the curve
+        is unbiased. message_activity is the only signal here — a lurker who
+        never posts reads as not activated, by design.
+
+        Returns:
+            {
+              'cohort_size': int,                 # joiners inside the window
+              'checkpoints': [                    # only eras with matured members
+                  {'label': str, 'active': int, 'matured': int, 'rate': float}, ...
+              ],
+              'largest_dropoff': (from_label, to_label) | None,
+            }
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+
+                cursor.execute(
+                    "SELECT message_retention_days FROM guilds WHERE guild_id = ?",
+                    (guild_id,),
+                )
+                row = cursor.fetchone()
+                retention_days = (row['message_retention_days'] if row and row['message_retention_days'] else 365)
+                cutoff = now - retention_days * SECONDS_PER_DAY
+
+                # Cohort: joiners inside the retention window. join_date floored to
+                # its UTC day-start so it lines up with message_activity.date
+                # (which is stored as start-of-day UTC).
+                cursor.execute("""
+                    SELECT user_id, join_date FROM members
+                    WHERE guild_id = ? AND join_date IS NOT NULL AND join_date >= ?
+                """, (guild_id, cutoff))
+                join_day: Dict[int, int] = {}
+                for r in cursor.fetchall():
+                    jd = r['join_date']
+                    join_day[r['user_id']] = jd - (jd % SECONDS_PER_DAY)
+
+                cohort_size = len(join_day)
+                empty = {'cohort_size': cohort_size, 'checkpoints': [], 'largest_dropoff': None}
+                if cohort_size < self._ACTIVATION_MIN_COHORT:
+                    return empty
+
+                # Every activity day for cohort members, in one pass.
+                cursor.execute("""
+                    SELECT ma.user_id, ma.date
+                    FROM message_activity ma
+                    JOIN members m ON m.guild_id = ma.guild_id AND m.user_id = ma.user_id
+                    WHERE ma.guild_id = ? AND m.join_date >= ? AND ma.date >= ?
+                """, (guild_id, cutoff, cutoff))
+                activity: Dict[int, list] = defaultdict(list)
+                for r in cursor.fetchall():
+                    activity[r['user_id']].append(r['date'])
+
+                active = {label: 0 for label, _, _ in self._ACTIVATION_ERAS}
+                matured = {label: 0 for label, _, _ in self._ACTIVATION_ERAS}
+                for user_id, jday in join_day.items():
+                    dates = activity.get(user_id, ())
+                    for label, ws, we in self._ACTIVATION_ERAS:
+                        win_start = jday + ws * SECONDS_PER_DAY
+                        win_end = jday + we * SECONDS_PER_DAY
+                        if now < win_end:  # era not finished yet — not matured
+                            continue
+                        matured[label] += 1
+                        if any(win_start <= d <= win_end for d in dates):
+                            active[label] += 1
+
+                checkpoints = []
+                for label, _, _ in self._ACTIVATION_ERAS:
+                    if matured[label] > 0:
+                        checkpoints.append({
+                            'label': label,
+                            'active': active[label],
+                            'matured': matured[label],
+                            'rate': active[label] / matured[label] * 100,
+                        })
+
+                largest_dropoff = None
+                worst = 0.0
+                for prev, cur in zip(checkpoints, checkpoints[1:]):
+                    drop = prev['rate'] - cur['rate']
+                    if drop > worst:
+                        worst = drop
+                        largest_dropoff = (prev['label'], cur['label'])
+
+                return {
+                    'cohort_size': cohort_size,
+                    'checkpoints': checkpoints,
+                    'largest_dropoff': largest_dropoff,
+                }
+        except Exception as e:
+            logger.error(f"Failed to get activation funnel for guild {guild_id}: {e}")
+            return {'cohort_size': 0, 'checkpoints': [], 'largest_dropoff': None}
 
     def get_departure_lifespan(self, guild_id: int) -> Dict[str, Any]:
         """
