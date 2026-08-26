@@ -328,7 +328,7 @@ class CommandsCog(commands.Cog):
         search_term = parse_user_mention(user)
 
         # Find member in database
-        member_data = self.db.find_member_by_name(guild_id, search_term)
+        member_data = await asyncio.to_thread(self.db.find_member_by_name, guild_id, search_term)
 
         if not member_data:
             await interaction.followup.send(
@@ -341,7 +341,7 @@ class CommandsCog(commands.Cog):
         member = interaction.guild.get_member(member_data['user_id'])
 
         # Check if caller is admin - get bot admin role name from guild config
-        guild_config = self.db.get_guild_config(guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, guild_id)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
         is_admin = has_bot_admin_role(interaction.user, bot_admin_role_name)
 
@@ -435,7 +435,7 @@ class CommandsCog(commands.Cog):
         embed.description += "\n"
 
         # ===== MESSAGE ACTIVITY SECTION =====
-        activity_stats = self.db.get_message_activity_period(guild_id, member_data['user_id'], days=30)
+        activity_stats = await asyncio.to_thread(self.db.get_message_activity_period, guild_id, member_data['user_id'], days=30)
         if activity_stats and (activity_stats['total'] > 0 or activity_stats['today'] >= 0):
             embed.description += t("commands.whois.activity_header", lang)
             embed.description += t("commands.whois.activity_today", lang, count=activity_stats['today'])
@@ -468,7 +468,7 @@ class CommandsCog(commands.Cog):
         search_term = parse_user_mention(user)
 
         # Find member in database
-        member_data = self.db.find_member_by_name(guild_id, search_term)
+        member_data = await asyncio.to_thread(self.db.find_member_by_name, guild_id, search_term)
 
         if not member_data:
             await interaction.followup.send(
@@ -569,7 +569,7 @@ class CommandsCog(commands.Cog):
             return
 
         # Check if user is admin
-        guild_config = self.db.get_guild_config(interaction.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
         
         if not has_bot_admin_role(interaction.user, bot_admin_role_name):
@@ -585,7 +585,7 @@ class CommandsCog(commands.Cog):
         search_term = parse_user_mention(user)
 
         # Find member in database
-        member_data = self.db.find_member_by_name(guild_id, search_term)
+        member_data = await asyncio.to_thread(self.db.find_member_by_name, guild_id, search_term)
 
         if not member_data:
             await interaction.followup.send(
@@ -595,7 +595,7 @@ class CommandsCog(commands.Cog):
             return
 
         # Get role history
-        role_changes = self.db.get_role_history(guild_id, member_data['user_id'], limit=20)
+        role_changes = await asyncio.to_thread(self.db.get_role_history, guild_id, member_data['user_id'], limit=20)
 
         if not role_changes:
             embed = create_embed(t("commands.role_history.title", lang, username=member_data['username']), discord.Color.blue())
@@ -650,7 +650,7 @@ class CommandsCog(commands.Cog):
             return
 
         # Admin-only: listing inactive members is a server-management action
-        guild_config = self.db.get_guild_config(interaction.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
         if not has_bot_admin_role(interaction.user, bot_admin_role_name):
             await interaction.response.send_message(
@@ -685,7 +685,7 @@ class CommandsCog(commands.Cog):
 
         # Get inactive members, then restrict to the guild's track_only_roles
         # filter (applied at read time — every member is stored regardless).
-        inactive_members = self.db.get_inactive_members(guild_id, inactive_days)
+        inactive_members = await asyncio.to_thread(self.db.get_inactive_members, guild_id, inactive_days)
         tracked = await asyncio.to_thread(self.db.get_tracked_user_ids, guild_id)
         if tracked is not None:
             tracked_set = set(tracked)
@@ -751,7 +751,7 @@ class CommandsCog(commands.Cog):
         
         # If no user provided, show guild-wide stats
         if user is None:
-            stats = self.db.get_guild_message_activity_stats(guild_id, days=365)
+            stats = await asyncio.to_thread(self.db.get_guild_message_activity_stats, guild_id, days=365)
             
             if stats['total_365d'] == 0:
                 embed = create_embed(t("commands.chat_history.server_title", lang, guild=interaction.guild.name), discord.Color.blue())
@@ -802,7 +802,7 @@ class CommandsCog(commands.Cog):
         search_term = parse_user_mention(user)
 
         # Find member in database
-        member_data = self.db.find_member_by_name(guild_id, search_term)
+        member_data = await asyncio.to_thread(self.db.find_member_by_name, guild_id, search_term)
 
         if not member_data:
             await interaction.followup.send(
@@ -815,7 +815,7 @@ class CommandsCog(commands.Cog):
         username = member_data['username'] if member_data['username'] else t("common.unknown", lang)
 
         # Get 365 days of message activity
-        activity_trend = self.db.get_message_activity_trend(guild_id, user_id, days=365)
+        activity_trend = await asyncio.to_thread(self.db.get_message_activity_trend, guild_id, user_id, days=365)
 
         if not activity_trend:
             embed = create_embed(t("commands.chat_history.user_title", lang, username=username), discord.Color.blue())
@@ -832,8 +832,8 @@ class CommandsCog(commands.Cog):
         min_day_str = format_timestamp(min_day['date'], 'D', guild_id, self.db, lang)
 
         # Get summary statistics
-        activity_stats_30 = self.db.get_message_activity_period(guild_id, user_id, days=30)
-        activity_stats_90 = self.db.get_message_activity_period(guild_id, user_id, days=90)
+        activity_stats_30 = await asyncio.to_thread(self.db.get_message_activity_period, guild_id, user_id, days=30)
+        activity_stats_90 = await asyncio.to_thread(self.db.get_message_activity_period, guild_id, user_id, days=90)
 
         # Create main embed with statistics
         embed = create_embed(t("commands.chat_history.user_title", lang, username=username), discord.Color.blue())
@@ -991,7 +991,7 @@ class CommandsCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
-        lang = guild_language(self.db.get_guild_config(interaction.guild_id))
+        lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id))
         embed = create_embed(t("commands.forgetme.confirm_title", lang), discord.Color.orange())
         embed.description = t("commands.forgetme.confirm_desc", lang)
         view = ForgetMeConfirmView(self.bot, self.db, interaction.user.id, lang)
@@ -1009,7 +1009,7 @@ class CommandsCog(commands.Cog):
             interaction: Discord interaction
         """
         user_id = interaction.user.id
-        lang = guild_language(self.db.get_guild_config(interaction.guild_id))
+        lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id))
 
         if user_id not in self.bot.opted_out_users:
             await interaction.response.send_message(
@@ -1189,7 +1189,7 @@ class CommandsCog(commands.Cog):
     ):
         """Advanced member search with filtering and export."""
         # Check admin permission
-        guild_config = self.db.get_guild_config(interaction.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         lang = guild_language(guild_config)
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
         if not has_bot_admin_role(interaction.user, bot_admin_role_name):
@@ -1248,11 +1248,11 @@ class CommandsCog(commands.Cog):
 
         # Get all members from database. A departed filter targets members who
         # have left, so those rows must be included in the fetch.
-        db_members = self.db.get_guild_members(guild_id, include_left='departed' in filters)
+        db_members = await asyncio.to_thread(self.db.get_guild_members, guild_id, include_left='departed' in filters)
 
         # Restrict to the guild's track_only_roles filter (applied at read time;
         # all members are stored regardless of the filter).
-        tracked = self.db.get_tracked_user_ids(guild_id)
+        tracked = await asyncio.to_thread(self.db.get_tracked_user_ids, guild_id)
         if tracked is not None:
             tracked_set = set(tracked)
             db_members = [m for m in db_members if m['user_id'] in tracked_set]
@@ -1261,26 +1261,32 @@ class CommandsCog(commands.Cog):
         # so this may be partial shortly after startup — misses are tolerated below)
         discord_members = {m.id: m for m in guild.members}
 
-        # Apply filters
-        filtered = []
-        cache_misses = 0
-        
-        for member_data in db_members:
-            discord_member = discord_members.get(member_data['user_id'])
-            
-            if not discord_member:
-                cache_misses += 1
-                # Member not in cache (left server or cache incomplete)
-                if filters.get('status') or filters.get('roles'):
-                    # Skip - these filters require Discord data
-                    continue
-                # Database-only filters still work
-                if self._matches_db_filters(member_data, filters):
-                    filtered.append(self._create_db_only_result(member_data, lang))
-            else:
-                # Full Discord data available
-                if self._matches_all_filters(member_data, discord_member, filters):
-                    filtered.append(self._enrich_member_data(member_data, discord_member, lang))
+        # Apply filters. Enrichment and the activity filter hit the DB per
+        # member, so the whole loop runs off the event loop in one batch.
+        def _apply_filters() -> tuple[list, int]:
+            results = []
+            misses = 0
+
+            for member_data in db_members:
+                discord_member = discord_members.get(member_data['user_id'])
+
+                if not discord_member:
+                    misses += 1
+                    # Member not in cache (left server or cache incomplete)
+                    if filters.get('status') or filters.get('roles'):
+                        # Skip - these filters require Discord data
+                        continue
+                    # Database-only filters still work
+                    if self._matches_db_filters(member_data, filters):
+                        results.append(self._create_db_only_result(member_data, lang))
+                else:
+                    # Full Discord data available
+                    if self._matches_all_filters(member_data, discord_member, filters):
+                        results.append(self._enrich_member_data(member_data, discord_member, lang))
+
+            return results, misses
+
+        filtered, cache_misses = await asyncio.to_thread(_apply_filters)
 
         # Log cache misses. A departed search always misses (left members are
         # never in the Discord cache), so the warning is only noise there.
@@ -1324,7 +1330,7 @@ class CommandsCog(commands.Cog):
             interaction: Discord interaction
         """
         # Admin-only: server-wide analytics is a server-management action
-        guild_config = self.db.get_guild_config(interaction.guild_id)
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
         lang = guild_language(guild_config)
 
         bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
@@ -1351,7 +1357,7 @@ class CommandsCog(commands.Cog):
 
         try:
             # Get overview statistics
-            stats = self.db.get_server_snapshot_stats(interaction.guild_id)
+            stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, interaction.guild_id)
 
             if not stats:
                 await interaction.followup.send(
@@ -1361,14 +1367,14 @@ class CommandsCog(commands.Cog):
                 return
 
             # Get previous month stats for comparison
-            prev_stats = self.db.get_member_growth_stats(interaction.guild_id, days=60)
+            prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, interaction.guild_id, days=60)
             growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
             # Add guild_id to stats for distribution chart
             stats['guild_id'] = interaction.guild_id
 
-            # Create overview embed
-            embed = self._create_stats_overview_embed(stats, growth_rate, lang)
+            # Create overview embed (helper makes its own DB queries, so off-loop)
+            embed = await asyncio.to_thread(self._create_stats_overview_embed, stats, growth_rate, lang)
 
             # Create interactive view
             view = UserStatsView(interaction.guild_id, self.db, lang)
@@ -2184,8 +2190,8 @@ class UserStatsView(discord.ui.View):
         await interaction.response.defer()
         
         try:
-            cohorts = self.db.get_retention_cohorts(self.guild_id)
-            lifespan = self.db.get_departure_lifespan(self.guild_id)
+            cohorts = await asyncio.to_thread(self.db.get_retention_cohorts, self.guild_id)
+            lifespan = await asyncio.to_thread(self.db.get_departure_lifespan, self.guild_id)
             embed = self._create_retention_embed(cohorts, lifespan)
             
             # Create view with back button
@@ -2194,14 +2200,14 @@ class UserStatsView(discord.ui.View):
             
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
-                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
                 stats['guild_id'] = self.guild_id
-                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
                 # Get the parent cog to access _create_stats_overview_embed
                 cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
                 overview_view = UserStatsView(self.guild_id, self.db, self.lang)
                 
                 await interaction.edit_original_response(embed=overview_embed, view=overview_view)
@@ -2222,9 +2228,9 @@ class UserStatsView(discord.ui.View):
         
         try:
             # Get growth data for multiple periods
-            growth_30d = self.db.get_member_growth_stats(self.guild_id, days=30)
-            growth_90d = self.db.get_member_growth_stats(self.guild_id, days=90)
-            growth_365d = self.db.get_member_growth_stats(self.guild_id, days=365)
+            growth_30d = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=30)
+            growth_90d = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=90)
+            growth_365d = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=365)
             
             embed = self._create_growth_embed(growth_30d, growth_90d, growth_365d)
             
@@ -2234,13 +2240,13 @@ class UserStatsView(discord.ui.View):
             
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
-                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
                 stats['guild_id'] = self.guild_id
-                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
                 cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
                 overview_view = UserStatsView(self.guild_id, self.db, self.lang)
                 
                 await interaction.edit_original_response(embed=overview_embed, view=overview_view)
@@ -2276,8 +2282,8 @@ class UserStatsView(discord.ui.View):
         await interaction.response.defer()
         
         try:
-            day_activity = self.db.get_activity_by_day(self.guild_id, days=30)
-            hour_activity = self.db.get_activity_by_hour(self.guild_id, days=30)
+            day_activity = await asyncio.to_thread(self.db.get_activity_by_day, self.guild_id, days=30)
+            hour_activity = await asyncio.to_thread(self.db.get_activity_by_hour, self.guild_id, days=30)
             embed = self._create_heatmap_embed(day_activity, hour_activity)
             
             # Create view with back button
@@ -2286,13 +2292,13 @@ class UserStatsView(discord.ui.View):
             
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
-                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
                 stats['guild_id'] = self.guild_id
-                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
                 cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
                 overview_view = UserStatsView(self.guild_id, self.db, self.lang)
                 
                 await interaction.edit_original_response(embed=overview_embed, view=overview_view)
@@ -2312,9 +2318,9 @@ class UserStatsView(discord.ui.View):
         await interaction.response.defer()
 
         try:
-            lurkers = self.db.get_lurkers(self.guild_id, window_days=30, limit=15)
-            ghosts = self.db.get_ghosts(self.guild_id, window_days=30, limit=15)
-            segments = self.db.get_participation_segments(self.guild_id, window_days=30)
+            lurkers = await asyncio.to_thread(self.db.get_lurkers, self.guild_id, window_days=30, limit=15)
+            ghosts = await asyncio.to_thread(self.db.get_ghosts, self.guild_id, window_days=30, limit=15)
+            segments = await asyncio.to_thread(self.db.get_participation_segments, self.guild_id, window_days=30)
             embed = self._create_participation_embed(segments, lurkers, ghosts)
 
             view = discord.ui.View(timeout=300)
@@ -2322,13 +2328,13 @@ class UserStatsView(discord.ui.View):
 
             async def back_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
-                stats = self.db.get_server_snapshot_stats(self.guild_id)
+                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
                 stats['guild_id'] = self.guild_id
-                prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
                 growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
                 cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
                 overview_view = UserStatsView(self.guild_id, self.db, self.lang)
 
                 await interaction.edit_original_response(embed=overview_embed, view=overview_view)
@@ -2348,10 +2354,10 @@ class UserStatsView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         
         try:
-            stats = self.db.get_server_snapshot_stats(self.guild_id)
-            growth_30d = self.db.get_member_growth_stats(self.guild_id, days=30)
-            growth_90d = self.db.get_member_growth_stats(self.guild_id, days=90)
-            leaderboard = self.db.get_activity_leaderboard(self.guild_id, days=30, limit=25)
+            stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
+            growth_30d = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=30)
+            growth_90d = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=90)
+            leaderboard = await asyncio.to_thread(self.db.get_activity_leaderboard, self.guild_id, days=30, limit=25)
             
             # Generate text report
             output = StringIO()
@@ -2677,7 +2683,7 @@ class LeaderboardView(discord.ui.View):
 
         embed = create_embed(t("commands.leaderboard.title", lang, period=period_name), discord.Color.gold())
 
-        leaderboard = self.db.get_activity_leaderboard(self.guild_id, days=days, limit=10)
+        leaderboard = await asyncio.to_thread(self.db.get_activity_leaderboard, self.guild_id, days=days, limit=10)
 
         if not leaderboard:
             embed.description = t("commands.leaderboard.no_data", lang)
@@ -2721,13 +2727,13 @@ class LeaderboardView(discord.ui.View):
         await interaction.response.defer()
         
         try:
-            stats = self.db.get_server_snapshot_stats(self.guild_id)
+            stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
             stats['guild_id'] = self.guild_id
-            prev_stats = self.db.get_member_growth_stats(self.guild_id, days=60)
+            prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
             growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
             cog = interaction.client.get_cog('CommandsCog')
-            overview_embed = cog._create_stats_overview_embed(stats, growth_rate, self.lang)
+            overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
             overview_view = UserStatsView(self.guild_id, self.db, self.lang)
             
             await interaction.edit_original_response(embed=overview_embed, view=overview_view)
