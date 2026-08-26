@@ -387,63 +387,85 @@ class TrackingCog(commands.Cog):
             # Get current guild IDs from Discord
             current_guild_ids = {guild.id for guild in self.bot.guilds}
 
-            # Get all guild IDs from database
-            db_guild_ids = set(self.db.get_all_guild_ids())
-
-            # Find stale guilds (in database but not connected)
-            stale_guild_ids = db_guild_ids - current_guild_ids
-
-            if stale_guild_ids:
-                logger.info(f"Found {len(stale_guild_ids)} stale guild(s) in database, removing...")
+            def cleanup_stale_guilds() -> int:
+                """Remove DB guilds the bot is no longer in. Off-loop: several
+                hundred guilds' worth of reads/deletes must not block dispatch."""
+                # Find stale guilds (in database but not connected)
+                stale_guild_ids = set(self.db.get_all_guild_ids()) - current_guild_ids
+                if stale_guild_ids:
+                    logger.info(f"Found {len(stale_guild_ids)} stale guild(s) in database, removing...")
                 for guild_id in stale_guild_ids:
                     if self.db.remove_guild_data(guild_id):
                         logger.info(f"Removed stale guild {guild_id} from database")
                     else:
                         logger.warning(f"Failed to remove stale guild {guild_id}")
+                return len(stale_guild_ids)
 
+            if await asyncio.to_thread(cleanup_stale_guilds):
                 # Run VACUUM in background to reclaim space after deletions
                 logger.info("Scheduling database VACUUM to reclaim space...")
                 asyncio.create_task(self._vacuum_database_background())
 
-        # Ensure all guilds exist in database (handles restart edge case)
-        # This is necessary if the database was cleared or the bot restarted
-        missing_guilds = 0
-        for guild in self.bot.guilds:
-            if not self.db.get_guild_config(guild.id):
-                self.db.add_guild(guild.id, guild.name)
-                missing_guilds += 1
-                logger.info(f"Guild '{guild.name}' (ID: {guild.id}) was added to database (on_ready sync)")
+        # Scan all guilds in one off-loop batch. on_ready re-fires on every
+        # reconnect, and per-guild sync DB calls here (400+ guilds) used to
+        # freeze the event loop exactly while queued gateway events were being
+        # replayed — a prime source of stale-interaction (10062) errors.
+        guilds_snapshot = list(self.bot.guilds)
+        enumerating_snapshot = set(self._enumerating)
+
+        def scan_guilds() -> tuple:
+            # Ensure all guilds exist in database (handles restart edge case)
+            # This is necessary if the database was cleared or the bot restarted
+            missing = 0
+            needs_enumeration = []
+            needs_positions = []
+
+            for guild in guilds_snapshot:
+                if not self.db.get_guild_config(guild.id):
+                    self.db.add_guild(guild.id, guild.name)
+                    missing += 1
+                    logger.info(f"Guild '{guild.name}' (ID: {guild.id}) was added to database (on_ready sync)")
+
+                if guild.id in enumerating_snapshot:
+                    continue  # already scheduled/handled this process
+
+                if not self.db.guild_positions_initialized(guild.id):
+                    # Enumerate members for guilds whose member table is empty.
+                    # on_guild_join only fires for newly joined guilds, so on a
+                    # fresh/cleared database a guild the bot already belongs to
+                    # would otherwise never be populated and message and
+                    # inactivity tracking would silently skip everyone. An empty
+                    # member table alone isn't enough to re-enumerate: a guild
+                    # whose only members are bots or opted-out users is
+                    # legitimately empty and was already scanned
+                    # (_process_guild_members sets positions_initialized when it
+                    # finishes), so this stops it being re-enumerated on every
+                    # restart.
+                    if not self.db.get_all_guild_members(guild.id):
+                        needs_enumeration.append(guild)
+                    else:
+                        needs_positions.append(guild)
+
+            return missing, needs_enumeration, needs_positions
+
+        missing_guilds, needs_enumeration, needs_positions = await asyncio.to_thread(scan_guilds)
 
         if missing_guilds > 0:
             logger.warning(f"Added {missing_guilds} missing guild(s) to database during on_ready sync")
 
-        # Enumerate members for guilds whose member table is empty. on_guild_join
-        # only fires for newly joined guilds, so on a fresh/cleared database a guild
-        # the bot already belongs to would otherwise never be populated and message
-        # and inactivity tracking would silently skip everyone. _process_guild_members
-        # chunks, adds members, and initializes their join positions, so these guilds
-        # are handled entirely here and skipped by the position loop below.
-        for guild in self.bot.guilds:
-            if guild.id in self._enumerating:
-                continue  # already scheduled/handled this process
-            # Enumerate only guilds never successfully scanned. An empty member
-            # table alone isn't enough: a guild whose only members are bots or
-            # opted-out users is legitimately empty and was already scanned
-            # (_process_guild_members sets positions_initialized when it finishes),
-            # so this stops it being re-enumerated on every restart.
-            if not self.db.guild_positions_initialized(guild.id) and not self.db.get_all_guild_members(guild.id):
-                logger.info(f"Guild {guild.name} has no members in database, scheduling member enumeration...")
-                self._start_member_enumeration(guild)
+        # _process_guild_members chunks, adds members, and initializes join
+        # positions itself (force=True), so enumerated guilds are handled
+        # entirely there and skipped by the position tasks below.
+        for guild in needs_enumeration:
+            logger.info(f"Guild {guild.name} has no members in database, scheduling member enumeration...")
+            self._start_member_enumeration(guild)
 
         # Initialize member positions for guilds that haven't been initialized yet
         # This handles the case where the bot restarts or joins existing guilds
         logger.info("Checking for guilds needing member position initialization...")
-        for guild in self.bot.guilds:
-            if guild.id in self._enumerating:
-                continue  # _process_guild_members initializes positions itself (force=True)
-            if not self.db.guild_positions_initialized(guild.id):
-                logger.info(f"Guild {guild.name} needs position initialization, scheduling background task...")
-                asyncio.create_task(self._initialize_member_positions(guild))
+        for guild in needs_positions:
+            logger.info(f"Guild {guild.name} needs position initialization, scheduling background task...")
+            asyncio.create_task(self._initialize_member_positions(guild))
 
         # Bot presence is set and cycled by the rotate_status background loop.
 
@@ -1021,7 +1043,7 @@ class TrackingCog(commands.Cog):
         """
         try:
             logger.info("Starting daily data retention cleanup...")
-            result = self.db.cleanup_all_guilds_message_activity()
+            result = await asyncio.to_thread(self.db.cleanup_all_guilds_message_activity)
             
             if result['daily_deleted'] > 0 or result['hourly_deleted'] > 0:
                 logger.info(
@@ -1265,15 +1287,15 @@ class TrackingCog(commands.Cog):
             if time_since_last_backup >= backup_interval_hours:
                 logger.info(f"Starting database backup (interval: {backup_interval_hours}h)...")
                 
-                # Create backup
-                backup_file = self.db.create_backup(str(self.config.backup_folder))
+                # Create backup (file copy of the whole DB — must not block the loop)
+                backup_file = await asyncio.to_thread(self.db.create_backup, str(self.config.backup_folder))
                 
                 if backup_file:
                     logger.info(f"Database backup completed: {backup_file}")
                     
                     # Cleanup old backups
                     retention_count = self.config.backup_retention_count
-                    deleted = self.db.cleanup_old_backups(str(self.config.backup_folder), retention_count)
+                    deleted = await asyncio.to_thread(self.db.cleanup_old_backups, str(self.config.backup_folder), retention_count)
                     
                     if deleted > 0:
                         logger.info(f"Deleted {deleted} old backup(s), keeping {retention_count} most recent")
