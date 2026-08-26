@@ -102,6 +102,15 @@ class Config:
         # the numeric ID is rejected. Falls back to the numeric ID when unset.
         self.discordbotlist_bot_id = os.getenv('DISCORDBOTLIST_BOT_ID', '').strip()
 
+        # Optional stats push to a LAN webserver via scp. When enabled, the bot
+        # writes a small stats.json (server/user counts) and copies it to the
+        # webserver on a timer. Disabled by default so a dev instance never
+        # overwrites the production listing's stats file. The scp destination
+        # and SSH key are kept in .env (not source) so they never reach git.
+        self.stats_push_enabled = os.getenv('STATS_PUSH_ENABLED', '').strip().lower() in ('1', 'true', 'yes', 'on')
+        self.stats_scp_destination = os.getenv('STATS_SCP_DESTINATION', '').strip()
+        self.stats_ssh_key = os.getenv('STATS_SSH_KEY', '').strip()
+
         logger.info("Configuration loaded successfully")
         logger.info(f"Database file: {self.db_file}")
         logger.info(f"Log level: {logging.getLevelName(self.log_level)}")
@@ -110,6 +119,7 @@ class Config:
         logger.info(f"Shard count: {self.shard_count if self.shard_count else 'auto (Discord recommended)'}")
         logger.info(f"TOP.GG metrics: {'enabled' if self.topgg_token else 'disabled (no TOPGG_TOKEN)'}")
         logger.info(f"DiscordBotList metrics: {'enabled' if self.discordbotlist_token else 'disabled (no DISCORDBOTLIST_TOKEN)'}")
+        logger.info(f"Stats push: {'enabled' if self.stats_push_enabled else 'disabled (STATS_PUSH_ENABLED not set)'}")
 
     def _create_default_env(self):
         """Create a default .env file from template if it doesn't exist."""
@@ -151,6 +161,15 @@ DISCORDBOTLIST_TOKEN=
 # The bot's discordbotlist.com URL slug (e.g. lastseen-2591), NOT the numeric Discord ID.
 # Find it in your bot's discordbotlist.com page URL. Falls back to the numeric ID if unset.
 DISCORDBOTLIST_BOT_ID=
+
+# Stats push (optional): when enabled, the bot writes a small stats.json (server
+# count, user count, timestamp) every 10 minutes and copies it to the LAN
+# webserver via scp. Leave unset/false on dev so it never overwrites the
+# production stats file. Set to true only on the production instance.
+STATS_PUSH_ENABLED=false
+# scp destination (user@host:/remote/path) and the SSH private key to use.
+STATS_SCP_DESTINATION=
+STATS_SSH_KEY=
 
 """
                 self.env_path.write_text(default_content)

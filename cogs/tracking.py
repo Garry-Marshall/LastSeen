@@ -16,6 +16,7 @@ from bot.locale import t, guild_language
 from bot.reports import purge_guild_state
 from bot.topgg import update_topgg_metrics
 from bot.discordbotlist import update_discordbotlist_metrics
+from bot.stats_push import push_stats
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
 WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to checkpoint the SQLite WAL file
 WAL_TRUNCATE_EVERY_N_CHECKPOINTS = 4  # Attempt a full TRUNCATE (file reset) hourly
 STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
+STATS_PUSH_INTERVAL_MINUTES = 10  # How often to push stats.json to the LAN webserver
 RETURN_THRESHOLD_SECONDS = 30 * 86400  # Min absence before a re-appearance counts as a "return"
 
 # Presence write queue: on_presence_update only enqueues; a single consumer
@@ -111,6 +113,11 @@ class TrackingCog(commands.Cog):
         self.backup_database.start()
         self.checkpoint_wal.start()
         self.rotate_status.start()
+
+        # Only run the stats push when explicitly enabled, so a dev instance
+        # never overwrites the production webserver's stats file.
+        if self.config.stats_push_enabled:
+            self.push_stats_loop.start()
 
     async def _initialize_member_positions(self, guild: discord.Guild, force: bool = False) -> bool:
         """
@@ -1193,6 +1200,19 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before setting presence."""
         await self.bot.wait_until_ready()
 
+    @tasks.loop(minutes=STATS_PUSH_INTERVAL_MINUTES)
+    async def push_stats_loop(self):
+        """Push aggregate server/user counts to the LAN webserver (scp).
+
+        Only started when STATS_PUSH_ENABLED is set; see bot.stats_push.
+        """
+        await push_stats(self.bot)
+
+    @push_stats_loop.before_loop
+    async def before_push_stats_loop(self):
+        """Wait for bot to be ready before the first stats push."""
+        await self.bot.wait_until_ready()
+
     @tasks.loop(hours=REPORT_CHECK_INTERVAL_HOURS)
     async def check_scheduled_reports(self):
         """
@@ -1415,6 +1435,7 @@ class TrackingCog(commands.Cog):
         self.backup_database.cancel()
         self.checkpoint_wal.cancel()
         self.rotate_status.cancel()
+        self.push_stats_loop.cancel()  # Safe even if it was never started (disabled)
 
         # Stop the presence consumer. Still-queued events are discarded — they
         # hold at most the last moments before shutdown, equivalent to the bot

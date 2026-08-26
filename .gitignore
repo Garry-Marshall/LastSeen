@@ -48,6 +48,7 @@ CLAUDE.md
 *.db
 *.db-wal
 *.db-shm
+stats.json
 
 # Logs directory
 Logs/
