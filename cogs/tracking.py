@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 FLUSH_INTERVAL = 30  # How often to flush activity buffers
 CLEANUP_INTERVAL_HOURS = 24  # How often to run data cleanup
 REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
-WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to truncate the SQLite WAL file
+WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to checkpoint the SQLite WAL file
+WAL_TRUNCATE_EVERY_N_CHECKPOINTS = 4  # Attempt a full TRUNCATE (file reset) hourly
 STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
 RETURN_THRESHOLD_SECONDS = 30 * 86400  # Min absence before a re-appearance counts as a "return"
 
@@ -1148,14 +1149,19 @@ class TrackingCog(commands.Cog):
 
     @tasks.loop(minutes=WAL_CHECKPOINT_INTERVAL_MINUTES)
     async def checkpoint_wal(self):
-        """Periodically truncate the SQLite WAL file so it doesn't grow unbounded.
+        """Periodically checkpoint the SQLite WAL file so it doesn't grow unbounded.
 
-        On a busy connection pool automatic checkpoints reuse WAL space but
-        never shrink the file on disk. This runs a TRUNCATE checkpoint in a
-        thread to keep the -wal file size bounded.
+        Most runs use PASSIVE mode: it never waits on the constant worker-thread
+        readers, and with journal_size_limit set on the connections a successful
+        pass still shrinks the file. Every N-th run attempts a TRUNCATE for a
+        full file reset — it needs a reader-free window (rare under load), so
+        its failures are expected and logged with frame counts by the DB layer.
         """
         try:
-            await asyncio.to_thread(self.db.checkpoint_wal)
+            truncate_turn = (self.checkpoint_wal.current_loop % WAL_TRUNCATE_EVERY_N_CHECKPOINTS
+                             == WAL_TRUNCATE_EVERY_N_CHECKPOINTS - 1)
+            mode = "TRUNCATE" if truncate_turn else "PASSIVE"
+            await asyncio.to_thread(self.db.checkpoint_wal, mode)
         except Exception as e:
             logger.error(f"Error during WAL checkpoint: {e}", exc_info=True)
 

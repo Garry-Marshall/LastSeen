@@ -1,5 +1,6 @@
 """Database manager for LastSeen bot with proper connection handling."""
 
+import os
 import sqlite3
 import json
 import logging
@@ -58,6 +59,11 @@ class DatabaseManager:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA busy_timeout = 5000")
+        # Cap the -wal file: any successful checkpoint (including SQLite's
+        # automatic passive ones) truncates it back to this size. Without it,
+        # only an uncontended TRUNCATE checkpoint ever shrinks the file, and
+        # with constant concurrent worker-thread readers those rarely win.
+        conn.execute("PRAGMA journal_size_limit = 67108864")  # 64 MB
         return conn
 
     def _initialize_pool(self):
@@ -97,25 +103,49 @@ class DatabaseManager:
                 break
         logger.info("Closed all database connections in pool")
 
-    def checkpoint_wal(self) -> bool:
-        """Checkpoint the WAL into the main database and truncate it on disk.
+    def _wal_size_mb(self) -> float:
+        """Current size of the -wal file in MB (0.0 if absent/unreadable)."""
+        try:
+            return os.path.getsize(f"{self.db_file}-wal") / (1024 * 1024)
+        except OSError:
+            return 0.0
 
-        Automatic (PASSIVE) checkpoints reuse WAL space but never shrink the
-        file. On a busy connection pool the WAL can grow to a large high-water
-        mark and stay there. Running a TRUNCATE checkpoint periodically merges
-        pending frames into the .db and resets the -wal file back to zero.
+    def checkpoint_wal(self, mode: str = "TRUNCATE") -> bool:
+        """Checkpoint the WAL into the main database.
+
+        PASSIVE copies whatever frames it can without waiting on readers or
+        writers — it never blocks, and with journal_size_limit set the file
+        shrinks on success. TRUNCATE additionally waits (up to busy_timeout)
+        for all readers to clear so it can reset the file completely; under
+        constant concurrent worker-thread readers it frequently loses that
+        race, which is why it is only attempted periodically and its failure
+        is logged loudly with the frame counts and file size.
+
+        Args:
+            mode: 'PASSIVE', 'FULL', 'RESTART', or 'TRUNCATE'
 
         Returns:
             bool: True if the checkpoint completed without being blocked.
         """
+        if mode not in ("PASSIVE", "FULL", "RESTART", "TRUNCATE"):
+            raise ValueError(f"Invalid checkpoint mode: {mode}")
+
         conn = self._get_connection_from_pool()
         try:
-            row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            row = conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
             # row = (busy, log_frames, checkpointed_frames); busy=0 means it ran
-            busy = row[0] if row else 1
+            busy, log_frames, checkpointed = (row[0], row[1], row[2]) if row else (1, -1, -1)
             if busy:
-                logger.debug("WAL checkpoint was blocked by an active reader; will retry next cycle")
+                # Expected occasionally for blocking modes; a PASSIVE busy=1
+                # (another checkpoint already running) is unremarkable.
+                log = logger.warning if mode != "PASSIVE" else logger.debug
+                log(
+                    f"WAL {mode} checkpoint blocked "
+                    f"(checkpointed {checkpointed}/{log_frames} frames, wal file {self._wal_size_mb():.1f} MB); "
+                    f"will retry next cycle"
+                )
                 return False
+            logger.debug(f"WAL {mode} checkpoint ok ({checkpointed}/{log_frames} frames, wal file {self._wal_size_mb():.1f} MB)")
             return True
         except Exception as e:
             logger.error(f"WAL checkpoint failed: {e}")
