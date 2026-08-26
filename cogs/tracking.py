@@ -868,14 +868,28 @@ class TrackingCog(commands.Cog):
         # while the bot was offline)
         self._ensure_member_exists(after)
 
+        # Only guilds with a configured watch need the extra bookkeeping below;
+        # for every other guild this is a single set lookup and costs nothing.
+        watched = guild_id in getattr(self.bot, 'watch_guild_ids', ())
+
         if after.status == discord.Status.offline:
             # User went offline - record timestamp
             timestamp = int(datetime.now(timezone.utc).timestamp())
             self.db.update_last_seen(guild_id, user_id, timestamp)
             logger.debug(f"User {after} went offline in {after.guild.name}")
         else:
-            # User came online - set last_seen to 0 (currently active)
+            # User came online - set last_seen to 0 (currently active). When the
+            # guild has watches, capture the prior offline timestamp *before*
+            # overwriting it and hand it to WatchCog: the two presence listeners
+            # race, so the online-return away-duration cannot be read from the DB
+            # afterwards.
+            previous_last_seen = None
+            if watched:
+                existing = self.db.get_member(guild_id, user_id)
+                previous_last_seen = existing['last_seen'] if existing else None
             self.db.update_last_seen(guild_id, user_id, 0)
+            if watched:
+                self.bot.dispatch('lastseen_member_online', after, previous_last_seen)
             logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
 
     @tasks.loop(seconds=30)

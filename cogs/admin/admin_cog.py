@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 import psutil
 import sys
 import os
@@ -60,15 +61,29 @@ class AdminCog(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         logger.info(f"User {interaction.user} opened config panel in guild {interaction.guild.name}")
 
+    # Commands that have a dedicated `/help <command>` detail page. Extend this
+    # list (and add the matching locale keys + a branch below) as detailed help
+    # is written for more commands.
+    DETAILED_HELP = ['watch', 'search']
+
+    async def help_command_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Suggest command names that have a detailed `/help <command>` page."""
+        cur = current.lower().lstrip('/')
+        return [app_commands.Choice(name=c, value=c) for c in self.DETAILED_HELP if cur in c][:25]
+
     @app_commands.command(name="help", description="❓ Show bot information and available commands")
+    @app_commands.describe(command="Optional: a command name for detailed help (e.g. watch)")
+    @app_commands.autocomplete(command=help_command_autocomplete)
     @app_commands.guild_only()
-    async def help(self, interaction: discord.Interaction):
+    async def help(self, interaction: discord.Interaction, command: Optional[str] = None):
         """
         Display bot information and list of available commands.
         Shows all commands for admins, only user commands for 'LastSeen Users' role.
+        With a command argument, shows a detailed help page for that command.
 
         Args:
             interaction: Discord interaction
+            command: Optional command name for a detailed help page
         """
         # Check if user is admin (without auto-responding)
         guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
@@ -82,6 +97,30 @@ class AdminCog(commands.Cog):
         if guild_config and not can_use_bot_commands(interaction.user, guild_config):
             await interaction.response.send_message(
                 embed=create_error_embed(t("errors.no_user_or_admin_permission", lang, role=user_role_name), lang),
+                ephemeral=True
+            )
+            return
+
+        # Detailed help for a specific command. These are all admin-only
+        # commands, so their detail pages require the bot-admin role too.
+        if command:
+            key = command.strip().lstrip('/').lower()
+            detail_builders = {
+                'watch': self._build_watch_help,
+                'search': self._build_search_help,
+            }
+            if key in detail_builders:
+                if not is_admin:
+                    await interaction.response.send_message(
+                        embed=create_error_embed(t("errors.no_permission", lang, role=bot_admin_role_name), lang),
+                        ephemeral=True
+                    )
+                    return
+                await interaction.response.send_message(embed=detail_builders[key](lang), ephemeral=True)
+                logger.info(f"User {interaction.user} viewed /help {key} in guild {interaction.guild.name}")
+                return
+            await interaction.response.send_message(
+                embed=create_error_embed(t("admin.help.detail_unknown", lang, command=key), lang),
                 ephemeral=True
             )
             return
@@ -111,10 +150,58 @@ class AdminCog(commands.Cog):
                 inline=False
             )
 
+            embed.add_field(
+                name=t("admin.help.watch_section_title", lang),
+                value=t("admin.help.watch_section", lang),
+                inline=False
+            )
+
             embed.set_footer(text=t("admin.help.footer_admin", lang, role=bot_admin_role_name))
         else:
             embed.set_footer(text=t("admin.help.footer_user", lang, role=user_role_name))
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"User {interaction.user} viewed help in guild {interaction.guild.name}")
+
+    def _build_watch_help(self, lang: str) -> discord.Embed:
+        """Build the detailed `/help watch` embed."""
+        embed = create_embed(t("admin.help.watch_detail_title", lang), discord.Color.blurple())
+        embed.description = t("admin.help.watch_detail_desc", lang)
+        embed.add_field(
+            name=t("admin.help.watch_detail_commands_title", lang),
+            value=t("admin.help.watch_detail_commands", lang),
+            inline=False
+        )
+        embed.add_field(
+            name=t("admin.help.watch_detail_examples_title", lang),
+            value=t("admin.help.watch_detail_examples", lang),
+            inline=False
+        )
+        embed.add_field(
+            name=t("admin.help.watch_detail_notes_title", lang),
+            value=t("admin.help.watch_detail_notes", lang),
+            inline=False
+        )
+        return embed
+
+    def _build_search_help(self, lang: str) -> discord.Embed:
+        """Build the detailed `/help search` embed."""
+        embed = create_embed(t("admin.help.search_detail_title", lang), discord.Color.blurple())
+        embed.description = t("admin.help.search_detail_desc", lang)
+        embed.add_field(
+            name=t("admin.help.search_detail_filters_title", lang),
+            value=t("admin.help.search_detail_filters", lang),
+            inline=False
+        )
+        embed.add_field(
+            name=t("admin.help.search_detail_examples_title", lang),
+            value=t("admin.help.search_detail_examples", lang),
+            inline=False
+        )
+        embed.add_field(
+            name=t("admin.help.search_detail_notes_title", lang),
+            value=t("admin.help.search_detail_notes", lang),
+            inline=False
+        )
+        return embed
 

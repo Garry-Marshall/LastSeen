@@ -2,7 +2,7 @@
 call venv\Scripts\activate.bat
 
 :loop
-python main.py
+venv\Scripts\python main.py
 set EXIT_CODE=%ERRORLEVEL%
 
 REM Exit code 2 = config error, do not restart

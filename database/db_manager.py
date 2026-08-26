@@ -380,6 +380,56 @@ class DatabaseManager:
                 )
             """)
 
+            # Watchlists: admin-configured presence alerts. Stores only alert
+            # config plus minimal fire-state (never presence history). All
+            # timing decisions read the existing single members.last_seen column.
+            #   target_type: 'user' (target_id = user_id) | 'role' (target_id = role_id)
+            #   alert_type : 'online_return' (edge-triggered) | 'offline_for' (swept)
+            #   threshold_seconds: online_return = optional minimum-away gate;
+            #                      offline_for = required offline duration
+            #   channel_id : where alerts post (the channel the watch was created in)
+            #   state      : offline_for user watches — 'armed' | 'triggered'
+            #   fired_targets: JSON user_id list already alerted (role offline_for dedupe)
+            #   last_fired_at: online_return cooldown bookkeeping
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS watchlists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    seq INTEGER,
+                    guild_id INTEGER NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id INTEGER NOT NULL,
+                    alert_type TEXT NOT NULL,
+                    threshold_seconds INTEGER,
+                    channel_id INTEGER,
+                    state TEXT DEFAULT 'armed',
+                    fired_targets TEXT,
+                    created_by INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(guild_id, target_type, target_id, alert_type),
+                    FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_watchlists_guild
+                ON watchlists(guild_id)
+            """)
+
+            # Migration: per-guild display number (`seq`). Databases created
+            # before this column show the raw global autoincrement id (which
+            # never resets or reuses removed numbers). Add the column and
+            # backfill each guild's watches as compact 1..N by creation order.
+            cursor.execute("PRAGMA table_info(watchlists)")
+            watch_cols = [row[1] for row in cursor.fetchall()]
+            if 'seq' not in watch_cols:
+                cursor.execute("ALTER TABLE watchlists ADD COLUMN seq INTEGER")
+                cursor.execute("SELECT id, guild_id FROM watchlists ORDER BY guild_id, id")
+                counters: Dict[int, int] = {}
+                for wid, gid in cursor.fetchall():
+                    counters[gid] = counters.get(gid, 0) + 1
+                    cursor.execute("UPDATE watchlists SET seq = ? WHERE id = ?", (counters[gid], wid))
+                logger.info("Backfilled per-guild seq numbers for existing watches")
+
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
 
@@ -2864,6 +2914,14 @@ class DatabaseManager:
                 # Deleting the member rows cascades to the dependent tables
                 cursor.execute("DELETE FROM members WHERE user_id = ?", (user_id,))
 
+                # Remove any watches that target this user directly. Watchlists
+                # have no FK to members (a watch can target a role), so the
+                # cascade above does not reach them — delete them explicitly so
+                # /forgetme and opt-out fully sever tracking of this user.
+                cursor.execute("""
+                    DELETE FROM watchlists WHERE target_type = 'user' AND target_id = ?
+                """, (user_id,))
+
                 logger.info(
                     f"Purged user {user_id}: {counts['members']} member records, "
                     f"{counts['role_changes']} role changes, "
@@ -2874,6 +2932,190 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to purge data for user {user_id}: {e}")
             return None
+
+    # ==================== Watchlist Operations ====================
+
+    def add_watch(self, guild_id: int, target_type: str, target_id: int,
+                  alert_type: str, threshold_seconds: Optional[int],
+                  channel_id: Optional[int], created_by: int) -> Optional[int]:
+        """Create or update a watch, returning its per-guild display number (seq).
+
+        Re-adding an identical (guild, target, alert_type) watch updates its
+        threshold/channel and resets fire-state (keeping its existing seq), so an
+        admin can re-issue the command to change settings. New watches get the
+        smallest per-guild number not currently in use, so removed numbers are
+        reused and each guild stays a compact 1..N. Returns None on failure.
+
+        Note: internal operations (remove, fire-state) key on the row `id` from
+        get_guild_watches — seq is purely the user-facing number.
+        """
+        now = int(datetime.now(timezone.utc).timestamp())
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                # Smallest per-guild number not already taken (reuses gaps left by
+                # removed watches). Admin-initiated and low-concurrency, so the
+                # read-then-insert here needs no extra locking.
+                cursor.execute("SELECT seq FROM watchlists WHERE guild_id = ?", (guild_id,))
+                used = {r[0] for r in cursor.fetchall() if r[0] is not None}
+                seq = 1
+                while seq in used:
+                    seq += 1
+                cursor.execute("""
+                    INSERT INTO watchlists
+                    (guild_id, seq, target_type, target_id, alert_type, threshold_seconds,
+                     channel_id, state, fired_targets, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'armed', NULL, ?, ?)
+                    ON CONFLICT(guild_id, target_type, target_id, alert_type) DO UPDATE SET
+                        threshold_seconds = excluded.threshold_seconds,
+                        channel_id = excluded.channel_id,
+                        state = 'armed',
+                        fired_targets = NULL
+                """, (guild_id, seq, target_type, target_id, alert_type,
+                      threshold_seconds, channel_id, created_by, now))
+                # Re-read to return the true seq (the INSERT's seq is discarded on
+                # the conflict/update path, which keeps the existing one).
+                cursor.execute("""
+                    SELECT seq FROM watchlists
+                    WHERE guild_id = ? AND target_type = ? AND target_id = ? AND alert_type = ?
+                """, (guild_id, target_type, target_id, alert_type))
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Failed to add watch in guild {guild_id}: {e}")
+            return None
+
+    def remove_watch(self, guild_id: int, watch_id: int) -> bool:
+        """Delete a watch by id, scoped to its guild. False if it didn't exist."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM watchlists WHERE guild_id = ? AND id = ?",
+                    (guild_id, watch_id)
+                )
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to remove watch {watch_id} in guild {guild_id}: {e}")
+            return False
+
+    def get_guild_watches(self, guild_id: int) -> List[Dict[str, Any]]:
+        """All watches configured in a guild, ordered by display number (for /watch list)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM watchlists WHERE guild_id = ? ORDER BY seq",
+                    (guild_id,)
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get watches for guild {guild_id}: {e}")
+            return []
+
+    def count_guild_watches(self, guild_id: int) -> int:
+        """Number of watches in a guild (used to enforce the per-guild cap)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM watchlists WHERE guild_id = ?", (guild_id,)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count watches for guild {guild_id}: {e}")
+            return 0
+
+    def get_watch_guild_ids(self) -> set:
+        """Set of guild_ids that have at least one watch (in-memory hot-path index)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT DISTINCT guild_id FROM watchlists")
+                return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Failed to get watch guild ids: {e}")
+            return set()
+
+    def get_offline_watches(self) -> List[Dict[str, Any]]:
+        """All 'offline_for' watches across guilds, for the periodic sweep."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM watchlists WHERE alert_type = 'offline_for'"
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get offline watches: {e}")
+            return []
+
+    def get_watches_for_member(self, guild_id: int, user_id: int,
+                               role_ids: List[int], alert_type: str) -> List[Dict[str, Any]]:
+        """Watches in a guild that match a member — by user target or any of
+        the member's role targets — for the given alert_type.
+
+        Used on presence-online to find both the online_return watches to fire
+        and the offline_for watches to re-arm.
+        """
+        try:
+            role_clause = ""
+            params: list = [guild_id, alert_type, user_id]
+            if role_ids:
+                placeholders = ",".join("?" * len(role_ids))
+                role_clause = f" OR (target_type = 'role' AND target_id IN ({placeholders}))"
+                params.extend(role_ids)
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    SELECT * FROM watchlists
+                    WHERE guild_id = ? AND alert_type = ?
+                    AND ((target_type = 'user' AND target_id = ?){role_clause})
+                """, params)
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get watches for member {user_id} in guild {guild_id}: {e}")
+            return []
+
+    def get_members_last_seen(self, guild_id: int, user_ids: List[int]) -> Dict[int, Optional[int]]:
+        """Batch-read last_seen for a set of members (role offline_for sweep)."""
+        if not user_ids:
+            return {}
+        try:
+            placeholders = ",".join("?" * len(user_ids))
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    SELECT user_id, last_seen FROM members
+                    WHERE guild_id = ? AND user_id IN ({placeholders})
+                """, (guild_id, *user_ids))
+                return {row['user_id']: row['last_seen'] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Failed to batch-read last_seen for guild {guild_id}: {e}")
+            return {}
+
+    def update_watch_fire_state(self, watch_id: int, *, state: Optional[str] = None,
+                                fired_targets: Optional[str] = None) -> bool:
+        """Update whichever fire-state columns are provided for one watch."""
+        sets, params = [], []
+        if state is not None:
+            sets.append("state = ?"); params.append(state)
+        if fired_targets is not None:
+            sets.append("fired_targets = ?"); params.append(fired_targets)
+        if not sets:
+            return False
+        params.append(watch_id)
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE watchlists SET {', '.join(sets)} WHERE id = ?", params
+                )
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to update fire-state for watch {watch_id}: {e}")
+            return False
 
     # ==================== Database Backup Operations ====================
 

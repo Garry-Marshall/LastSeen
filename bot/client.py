@@ -77,6 +77,11 @@ def create_bot(config) -> commands.Bot:
     # whenever bot.db does; kept in memory because it is checked on hot event
     # paths (presence updates, messages).
     bot.opted_out_users = bot.db.get_opted_out_user_ids()
+    # Guild ids that have at least one watch (see cogs/watch.py). Kept in memory
+    # so the presence hot path can skip watch work for the vast majority of
+    # guilds with a single set lookup. Populated/maintained by WatchCog; seeded
+    # here so it exists before any presence event fires.
+    bot.watch_guild_ids = bot.db.get_watch_guild_ids()
     bot.start_time = None  # Will be set in on_ready
     bot.commands_synced = False  # Guard: sync commands only once per process
     bot.chunk_task = None  # Background guild-chunking task, started in on_ready
@@ -249,7 +254,8 @@ async def load_cogs(bot: commands.Bot):
     cogs = [
         'cogs.tracking',
         'cogs.commands',
-        'cogs.admin'
+        'cogs.admin',
+        'cogs.watch'
     ]
 
     for cog in cogs:

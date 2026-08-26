@@ -17,6 +17,9 @@ Know exactly when members were last online. Track presence changes, join/leave t
 ### 💤 Inactive Members
 Instantly identify members who've been offline beyond your threshold. Perfect for engagement campaigns, role cleanup, or understanding server health.
 
+### 👀 Watchlists & Activity Alerts
+Get pinged automatically when specific members — or a whole role — come back online or go quiet. Watch a user or role for a return to online (optionally only after a long absence), or for crossing an offline threshold (e.g. "alert me if any staff member hasn't been seen in 48h"). Alerts post to the channel you set them up in. See `/help watch` in-app for full details.
+
 ### 👤 WhoIs (Member Profiles)
 Comprehensive member information at a glance: join date, roles, nickname history, last seen, and message activity stats.
 
@@ -36,6 +39,7 @@ Configurable database backups with automatic retention management. Set your back
 - **Multi-Guild Support**: Works across multiple Discord servers simultaneously
 - **User Tracking**: Monitors joins, leaves, nickname changes, and role updates
 - **Presence Monitoring**: Tracks when users go offline/online
+- **Watchlists & Alerts**: Admin-configured alerts when a user or role returns online or crosses an offline threshold
 - **Activity Statistics**: Detailed server activity metrics with visual charts
 - **Scheduled Reports**: Automated weekly/monthly reports with activity, new members, and departures
 - **Timezone Support**: Guild-specific timezone configuration for accurate timestamp display
@@ -65,7 +69,7 @@ Configurable database backups with automatic retention management. Set your back
 - `/mystats` - View your own activity statistics (always private/ephemeral)
 - `/forgetme` - Delete your tracked data and opt out of tracking
 - `/optin` - Re-enable activity tracking after a `/forgetme` opt-out
-- `/help` - Show available commands
+- `/help [command]` - Show available commands, or detailed help for one (e.g. `/help watch`)
 - `/about` - Show bot information and system resources
 
 ### Admin Commands (Requires "LastSeen Admin" role or Administrator permission)
@@ -98,9 +102,15 @@ Configurable database backups with automatic retention management. Set your back
   - Search with multiple filters: roles, status, inactive days, activity, join date, username
   - Export results to CSV or TXT format
   - Paginated results with interactive navigation
+- `/watch` - Watchlists & activity alerts (post to the channel you run them in)
+  - `/watch online <user|role> [after] [channel]` - Alert when the target comes back online (add `after`, e.g. `7d`, to only alert after a long absence)
+  - `/watch offline <user|role> <duration> [channel]` - Alert when the target has been offline for `<duration>` (e.g. `48h`, `7d`)
+  - `/watch list` - List this server's watches and their ids
+  - `/watch remove <id>` - Remove a watch by id
+  - Durations use `m`/`h`/`d`; online alerts have a 1-hour per-member cooldown; opted-out members can't be watched; up to 50 watches per server
 - `/role-history <user>` - Show the last 20 role changes for a member
 - `/health` - Check bot health status (uptime, latency, database, guild stats)
-- `/help` - Show available commands
+- `/help [command]` - Show available commands, or detailed help for one command (e.g. `/help watch`)
 
 ## Installation
 
@@ -335,6 +345,7 @@ lastseen_bot/
 │   ├── __init__.py
 │   ├── tracking.py        # Event listeners (join/leave/update)
 │   ├── commands.py        # User commands (whois/lastseen/inactive)
+│   ├── watch.py           # Watchlists & activity alerts
 │   └── admin/             # Admin cog (modular structure)
 │       ├── __init__.py            # Package setup & exports
 │       ├── admin_cog.py           # Admin slash commands
@@ -441,6 +452,43 @@ Combine multiple filters for precise results:
 - Export buttons in pagination view for CSV or TXT
 - Results are ephemeral (only visible to you)
 - Supports up to 1000 results with warning
+
+### Watchlists & activity alerts (Admin only)
+
+Get alerted about member activity. A target can be a **user or a role**, and each alert is posted to the channel where you created the watch.
+
+**Alert when someone comes back online:**
+```
+/watch online @Alice
+```
+
+**Alert only when they return after a long absence** (e.g. a member who's been gone 7+ days):
+```
+/watch online @Alice after:7d
+```
+
+**Alert when someone has been offline for a while:**
+```
+/watch offline @Bob 7d
+```
+
+**Alert when any member of a role goes quiet** (e.g. staff not seen in 48h):
+```
+/watch offline @Staff 48h
+```
+
+**Manage watches:**
+```
+/watch list
+/watch remove 3
+```
+
+**Notes:**
+- Durations use `m`/`h`/`d` — e.g. `30m`, `48h`, `7d`
+- Online alerts have a 1-hour per-member cooldown to avoid spam
+- Members who opted out with `/forgetme` can't be watched
+- Up to 50 watches per server
+- Reads only the existing "last seen" data — no presence history is stored
 
 ### View server statistics and analytics (Admin only)
 ```
