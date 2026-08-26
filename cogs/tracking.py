@@ -27,6 +27,13 @@ WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to truncate the SQLite WAL fil
 STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
 RETURN_THRESHOLD_SECONDS = 30 * 86400  # Min absence before a re-appearance counts as a "return"
 
+# Presence write queue: on_presence_update only enqueues; a single consumer
+# applies events to the DB off-loop in arrival order (FIFO), so an offline
+# write and the online write that follows it for the same member can never
+# invert, and the hottest event path never waits on the DB.
+PRESENCE_QUEUE_MAX = 10000  # Beyond this, events are dropped with a warning
+PRESENCE_BATCH_MAX = 500    # Max events applied per worker-thread batch
+
 # Presence messages cycled by rotate_status, as (emoji, text) pairs. Shown as a
 # custom status (no "Playing/Watching" header). The emoji is prepended into the
 # text because Discord ignores the emoji field for bots. Set emoji to None to
@@ -89,6 +96,11 @@ class TrackingCog(commands.Cog):
 
         # Endless cycle over STATUS_MESSAGES for the presence rotation loop.
         self._status_cycle = itertools.cycle(STATUS_MESSAGES)
+
+        # Presence write queue and its consumer task (see _drain_presence_queue)
+        self._presence_queue: asyncio.Queue = asyncio.Queue(maxsize=PRESENCE_QUEUE_MAX)
+        self._presence_dropped = 0
+        self._presence_writer_task = asyncio.create_task(self._drain_presence_queue())
 
         # Start background tasks
         self.flush_activity_buffer.start()
@@ -893,38 +905,89 @@ class TrackingCog(commands.Cog):
         if after.id in self.bot.opted_out_users:
             return
 
-        guild_id = after.guild.id
-        user_id = after.id
+        # This is the hottest event path in the bot, so it never touches the
+        # DB directly — a single write here can wait up to busy_timeout on the
+        # event loop. Events are queued and applied by _drain_presence_queue
+        # in arrival order; the timestamp is captured now so queue latency
+        # never skews the recorded last_seen.
+        went_offline = after.status == discord.Status.offline
+        timestamp = int(datetime.now(timezone.utc).timestamp())
+        try:
+            self._presence_queue.put_nowait((after, went_offline, timestamp))
+        except asyncio.QueueFull:
+            self._presence_dropped += 1
+            if self._presence_dropped % 1000 == 1:
+                logger.warning(f"Presence queue full; dropped {self._presence_dropped} presence update(s) so far")
+        logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
 
-        # Ensure member exists in database (safety net for members who joined
-        # while the bot was offline)
-        self._ensure_member_exists(after)
+    def _apply_presence_batch(self, batch: list) -> list:
+        """Apply queued presence events in FIFO order. Runs in a worker thread.
 
-        # Only guilds with a configured watch need the extra bookkeeping below;
-        # for every other guild this is a single set lookup and costs nothing.
-        watched = guild_id in getattr(self.bot, 'watch_guild_ids', ())
+        Returns [(member, previous_last_seen, event_ts), ...] for online
+        transitions, which need loop-side post-processing (returning-member
+        capture and watch dispatch). previous_last_seen comes from the atomic
+        read-and-overwrite: a timestamp (was offline), 0 (already online), or
+        None (no row).
+        """
+        online_results = []
+        for member, went_offline, event_ts in batch:
+            try:
+                # Re-checked here: /forgetme may have run since the event was queued
+                if member.id in self.bot.opted_out_users:
+                    continue
 
-        if after.status == discord.Status.offline:
-            # User went offline - record timestamp
-            timestamp = int(datetime.now(timezone.utc).timestamp())
-            self.db.update_last_seen(guild_id, user_id, timestamp)
-            logger.debug(f"User {after} went offline in {after.guild.name}")
-        else:
-            # User came online. Read the prior offline timestamp and set last_seen
-            # to 0 in one step — the value is destroyed the moment it is overwritten,
-            # and the two presence listeners race, so it cannot be re-read afterwards.
-            # previous_last_seen: a timestamp (was offline), 0 (already online), or
-            # None (no row). It powers both the returning-member capture below and,
-            # for watched guilds, the online-return alert.
-            previous_last_seen = self.db.update_last_seen_and_get_previous(guild_id, user_id)
-            if previous_last_seen and previous_last_seen > 0:
-                now_ts = int(datetime.now(timezone.utc).timestamp())
-                away = now_ts - previous_last_seen
-                if away >= RETURN_THRESHOLD_SECONDS:
-                    self.return_buffer.append((guild_id, user_id, away, now_ts))
-            if watched:
-                self.bot.dispatch('lastseen_member_online', after, previous_last_seen)
-            logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
+                # Ensure member exists in database (safety net for members who
+                # joined while the bot was offline)
+                self._ensure_member_exists(member)
+
+                if went_offline:
+                    # User went offline - record timestamp
+                    self.db.update_last_seen(member.guild.id, member.id, event_ts)
+                else:
+                    # User came online. Read the prior offline timestamp and set
+                    # last_seen to 0 in one step — the value is destroyed the
+                    # moment it is overwritten, so it cannot be re-read afterwards.
+                    previous = self.db.update_last_seen_and_get_previous(member.guild.id, member.id)
+                    online_results.append((member, previous, event_ts))
+            except Exception as e:
+                logger.error(f"Failed to apply presence update for {member.id} in guild {member.guild.id}: {e}")
+        return online_results
+
+    async def _drain_presence_queue(self):
+        """Single consumer for the presence write queue.
+
+        Waits for at least one event, opportunistically drains whatever else
+        has accumulated (up to PRESENCE_BATCH_MAX), and applies the batch in
+        one worker-thread call. The single-consumer FIFO design is what makes
+        offloading these writes safe: racing per-event threads could apply an
+        offline write after the online write that followed it, leaving a user
+        permanently marked offline.
+        """
+        await self.bot.wait_until_ready()
+        while True:
+            batch = [await self._presence_queue.get()]
+            while len(batch) < PRESENCE_BATCH_MAX:
+                try:
+                    batch.append(self._presence_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+
+            try:
+                online_results = await asyncio.to_thread(self._apply_presence_batch, batch)
+
+                # Post-processing stays on the event loop: return_buffer is
+                # only ever touched from the loop, and dispatch must run there.
+                for member, previous_last_seen, event_ts in online_results:
+                    if previous_last_seen and previous_last_seen > 0:
+                        away = event_ts - previous_last_seen
+                        if away >= RETURN_THRESHOLD_SECONDS:
+                            self.return_buffer.append((member.guild.id, member.id, away, event_ts))
+                    # Only guilds with a configured watch need the alert; for
+                    # every other guild this is a single set lookup.
+                    if member.guild.id in getattr(self.bot, 'watch_guild_ids', ()):
+                        self.bot.dispatch('lastseen_member_online', member, previous_last_seen)
+            except Exception as e:
+                logger.error(f"Error applying presence update batch: {e}", exc_info=True)
 
     @tasks.loop(seconds=30)
     async def flush_activity_buffer(self):
@@ -1325,6 +1388,14 @@ class TrackingCog(commands.Cog):
         self.backup_database.cancel()
         self.checkpoint_wal.cancel()
         self.rotate_status.cancel()
+
+        # Stop the presence consumer. Still-queued events are discarded — they
+        # hold at most the last moments before shutdown, equivalent to the bot
+        # having gone offline that much earlier.
+        self._presence_writer_task.cancel()
+        pending = self._presence_queue.qsize()
+        if pending:
+            logger.info(f"Discarding {pending} queued presence update(s) on unload")
 
         # Schedule async flush task to run in the event loop
         # This avoids blocking the shutdown process
