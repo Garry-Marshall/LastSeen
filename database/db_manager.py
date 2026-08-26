@@ -438,6 +438,27 @@ class DatabaseManager:
                 ON member_returns(guild_id, returned_at DESC)
             """)
 
+            # Health snapshots: one guild-level aggregate row per UTC day,
+            # written by the nightly snapshot task. Deliberately holds no
+            # per-user data — only counts — so it can outlive message
+            # retention pruning without touching data-minimization promises.
+            # `date` is the UTC midnight the rolling 7-day window ends at.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS health_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    date INTEGER NOT NULL,
+                    active_members INTEGER NOT NULL,
+                    posters_7d INTEGER NOT NULL,
+                    messages_7d INTEGER NOT NULL,
+                    joins_7d INTEGER NOT NULL,
+                    leaves_7d INTEGER NOT NULL,
+                    returns_7d INTEGER NOT NULL,
+                    UNIQUE(guild_id, date),
+                    FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE
+                )
+            """)
+
             # Migration: per-guild display number (`seq`). Databases created
             # before this column show the raw global autoincrement id (which
             # never resets or reuses removed numbers). Add the column and
@@ -2889,6 +2910,249 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get departure lifespan for guild {guild_id}: {e}")
             return result
+
+    # Deltas only make sense once the prior window is fully covered by data,
+    # so weekly comparisons need 2x7 days of history and monthly ones 2x30.
+    _HEALTH_WEEK_HISTORY_DAYS = 14
+    _HEALTH_MONTH_HISTORY_DAYS = 60
+
+    def get_server_health(self, guild_id: int) -> Dict[str, Any]:
+        """
+        Server vitals for the health panel: each metric for the current window
+        and the immediately preceding one, so the caller can render deltas.
+        No scoring — just the raw window-vs-window numbers.
+
+        Message-derived windows (posters, messages, breadth, activation) are
+        aligned to complete UTC days ending at the last UTC midnight, so both
+        windows are the same length and today's partial day never skews the
+        comparison. Event-derived windows (joins, leaves, returns) use raw
+        timestamps back from now.
+
+        Returns {} on error. Otherwise:
+            days_of_data        days since the bot was added to the guild
+            weekly_comparable   prior 7d window fully covered by data
+            monthly_comparable  prior 30d window fully covered by data
+            posters_7d / posters_prev_7d       distinct posters per week window
+            messages_7d / messages_prev_7d     message totals per week window
+            posters_30d / posters_prev_30d     distinct posters per 30d window
+            messages_30d / messages_prev_30d   message totals per 30d window
+            active_members                     current tracked member count
+            joins_30d / joins_prev_30d         joins per 30d window
+            leaves_30d / leaves_prev_30d       departures per 30d window
+            returns_30d / returns_prev_30d     30+ day comebacks per window
+            activation_cur / activation_prev   {'matured', 'activated', 'rate'}
+                for month-apart join cohorts (posted within 7 days of joining),
+                or None when the cohort is too small / data can't cover it
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = int(datetime.now(timezone.utc).timestamp())
+                now_dt = datetime.now(timezone.utc)
+                today_start = int(datetime(now_dt.year, now_dt.month, now_dt.day, tzinfo=timezone.utc).timestamp())
+                d = SECONDS_PER_DAY
+
+                cursor.execute("""
+                    SELECT added_at, message_retention_days FROM guilds WHERE guild_id = ?
+                """, (guild_id,))
+                row = cursor.fetchone()
+                added_at = row['added_at'] if row else now
+                retention_days = (row['message_retention_days'] if row and row['message_retention_days'] else 365)
+                days_of_data = max(0, (now - added_at) // d)
+
+                result: Dict[str, Any] = {
+                    'days_of_data': days_of_data,
+                    'weekly_comparable': added_at <= today_start - self._HEALTH_WEEK_HISTORY_DAYS * d,
+                    'monthly_comparable': added_at <= now - self._HEALTH_MONTH_HISTORY_DAYS * d,
+                }
+
+                # Distinct posters and message totals per day-aligned window.
+                def message_window(start: int, end: int) -> tuple:
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT user_id) AS posters,
+                               COALESCE(SUM(message_count), 0) AS messages
+                        FROM message_activity
+                        WHERE guild_id = ? AND date >= ? AND date < ?
+                    """, (guild_id, start, end))
+                    r = cursor.fetchone()
+                    return r['posters'], r['messages']
+
+                result['posters_7d'], result['messages_7d'] = message_window(today_start - 7 * d, today_start)
+                result['posters_prev_7d'], result['messages_prev_7d'] = message_window(today_start - 14 * d, today_start - 7 * d)
+                result['posters_30d'], result['messages_30d'] = message_window(today_start - 30 * d, today_start)
+                result['posters_prev_30d'], result['messages_prev_30d'] = message_window(today_start - 60 * d, today_start - 30 * d)
+
+                cursor.execute("""
+                    SELECT COUNT(*) AS n FROM members WHERE guild_id = ? AND is_active = 1
+                """, (guild_id,))
+                result['active_members'] = cursor.fetchone()['n'] or 0
+
+                def count_window(sql: str, start: int, end: int) -> int:
+                    cursor.execute(sql, (guild_id, start, end))
+                    return cursor.fetchone()['n'] or 0
+
+                joins_sql = """
+                    SELECT COUNT(*) AS n FROM members
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ?
+                """
+                leaves_sql = """
+                    SELECT COUNT(*) AS n FROM members
+                    WHERE guild_id = ? AND is_active = 0
+                      AND left_date IS NOT NULL AND left_date >= ? AND left_date < ?
+                """
+                returns_sql = """
+                    SELECT COUNT(*) AS n FROM member_returns
+                    WHERE guild_id = ? AND returned_at >= ? AND returned_at < ?
+                """
+                result['joins_30d'] = count_window(joins_sql, now - 30 * d, now + 1)
+                result['joins_prev_30d'] = count_window(joins_sql, now - 60 * d, now - 30 * d)
+                result['leaves_30d'] = count_window(leaves_sql, now - 30 * d, now + 1)
+                result['leaves_prev_30d'] = count_window(leaves_sql, now - 60 * d, now - 30 * d)
+                result['returns_30d'] = count_window(returns_sql, now - 30 * d, now + 1)
+                result['returns_prev_30d'] = count_window(returns_sql, now - 60 * d, now - 30 * d)
+
+                # First-week activation for two month-apart join cohorts. A
+                # cohort member is "matured" once their first 7 days are over
+                # (join_date < now - 7d). join_date >= added_at keeps out
+                # members whose first week predates message tracking, and the
+                # retention check guarantees the older cohort's activity rows
+                # haven't been pruned.
+                def activation_cohort(start: int, end: int) -> Optional[Dict[str, Any]]:
+                    if start < now - retention_days * d:
+                        return None
+                    cursor.execute("""
+                        SELECT COUNT(*) AS matured,
+                               COALESCE(SUM(CASE WHEN EXISTS (
+                                   SELECT 1 FROM message_activity ma
+                                   WHERE ma.guild_id = m.guild_id AND ma.user_id = m.user_id
+                                     AND ma.date >= (m.join_date - m.join_date % ?)
+                                     AND ma.date <= (m.join_date - m.join_date % ?) + 7 * ?
+                               ) THEN 1 ELSE 0 END), 0) AS activated
+                        FROM members m
+                        WHERE m.guild_id = ? AND m.join_date >= ? AND m.join_date < ? AND m.join_date >= ?
+                    """, (d, d, d, guild_id, start, end, added_at))
+                    r = cursor.fetchone()
+                    if r['matured'] < self._ACTIVATION_MIN_COHORT:
+                        return None
+                    return {
+                        'matured': r['matured'],
+                        'activated': r['activated'],
+                        'rate': r['activated'] / r['matured'] * 100,
+                    }
+
+                result['activation_cur'] = activation_cohort(now - 37 * d, now - 7 * d)
+                result['activation_prev'] = activation_cohort(now - 67 * d, now - 37 * d)
+
+                return result
+        except Exception as e:
+            logger.error(f"Failed to get server health for guild {guild_id}: {e}")
+            return {}
+
+    def record_health_snapshots(self) -> int:
+        """
+        Write one health snapshot per guild for the UTC day that just ended.
+
+        Every count covers the day-aligned rolling window [midnight-7d,
+        midnight), so re-running any time during the same UTC day produces the
+        same row — INSERT OR REPLACE on (guild_id, date) makes the task safe to
+        run at startup and again on its daily tick. Days the bot was fully
+        offline are simply absent; get_health_history() tolerates the gaps.
+
+        Returns the number of guilds snapshotted.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now_dt = datetime.now(timezone.utc)
+                day = int(datetime(now_dt.year, now_dt.month, now_dt.day, tzinfo=timezone.utc).timestamp())
+                start = day - 7 * SECONDS_PER_DAY
+
+                cursor.execute("SELECT guild_id FROM guilds")
+                guild_ids = [row['guild_id'] for row in cursor.fetchall()]
+
+                for guild_id in guild_ids:
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT user_id) AS posters,
+                               COALESCE(SUM(message_count), 0) AS messages
+                        FROM message_activity
+                        WHERE guild_id = ? AND date >= ? AND date < ?
+                    """, (guild_id, start, day))
+                    row = cursor.fetchone()
+                    posters, messages = row['posters'], row['messages']
+
+                    cursor.execute("""
+                        SELECT COUNT(*) AS n FROM members WHERE guild_id = ? AND is_active = 1
+                    """, (guild_id,))
+                    active_members = cursor.fetchone()['n'] or 0
+
+                    cursor.execute("""
+                        SELECT COUNT(*) AS n FROM members
+                        WHERE guild_id = ? AND join_date >= ? AND join_date < ?
+                    """, (guild_id, start, day))
+                    joins = cursor.fetchone()['n'] or 0
+
+                    cursor.execute("""
+                        SELECT COUNT(*) AS n FROM members
+                        WHERE guild_id = ? AND is_active = 0
+                          AND left_date IS NOT NULL AND left_date >= ? AND left_date < ?
+                    """, (guild_id, start, day))
+                    leaves = cursor.fetchone()['n'] or 0
+
+                    cursor.execute("""
+                        SELECT COUNT(*) AS n FROM member_returns
+                        WHERE guild_id = ? AND returned_at >= ? AND returned_at < ?
+                    """, (guild_id, start, day))
+                    returns = cursor.fetchone()['n'] or 0
+
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO health_snapshots
+                            (guild_id, date, active_members, posters_7d, messages_7d,
+                             joins_7d, leaves_7d, returns_7d)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (guild_id, day, active_members, posters, messages, joins, leaves, returns))
+
+                conn.commit()
+                return len(guild_ids)
+        except Exception as e:
+            logger.error(f"Failed to record health snapshots: {e}")
+            return 0
+
+    def get_health_history(self, guild_id: int, points: int = 12, step_days: int = 7) -> List[Dict[str, Any]]:
+        """
+        Sample health snapshots at step_days intervals for trend charting.
+
+        Walks back from the newest snapshot, picking the first available row at
+        or before each step so days the bot was offline are skipped rather than
+        breaking the series. Returns up to `points` rows, oldest first.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT date, active_members, posters_7d, messages_7d,
+                           joins_7d, leaves_7d, returns_7d
+                    FROM health_snapshots
+                    WHERE guild_id = ?
+                    ORDER BY date DESC
+                    LIMIT ?
+                """, (guild_id, points * step_days))
+                rows = [dict(row) for row in cursor.fetchall()]
+
+            if not rows:
+                return []
+
+            selected = [rows[0]]
+            target = rows[0]['date'] - step_days * SECONDS_PER_DAY
+            for row in rows[1:]:
+                if len(selected) >= points:
+                    break
+                if row['date'] <= target:
+                    selected.append(row)
+                    target = row['date'] - step_days * SECONDS_PER_DAY
+            return list(reversed(selected))
+        except Exception as e:
+            logger.error(f"Failed to get health history for guild {guild_id}: {e}")
+            return []
 
     def get_activity_leaderboard(self, guild_id: int, days: int = 30, limit: int = 10) -> List[Dict[str, Any]]:
         """

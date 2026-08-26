@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Dict
 from database import DatabaseManager
-from bot.utils import create_embed
+from bot.utils import create_embed, format_health_delta
 from bot.locale import t, guild_language, weekday_name
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,33 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
             indicator = "📈" if rate > 0 else "📉" if rate < 0 else "➡️"
             embed.description += t('report.growth_rate', lang, indicator=indicator, rate=abs(rate))
         embed.description += "\n"
+
+    # Trends: the health-panel deltas, matched to the report cadence (weekly
+    # reports compare weeks, monthly reports compare months). Only rendered
+    # once the prior window is fully covered by data, so a young guild's
+    # report never shows misleading deltas.
+    health = db.get_server_health(guild_id)
+    if health:
+        if days <= 7 and health['weekly_comparable']:
+            embed.description += t('report.trends_header_weekly', lang)
+            embed.description += t('report.trends_posters', lang, cur=health['posters_7d'],
+                                   delta=format_health_delta(health['posters_7d'], health['posters_prev_7d'], lang))
+            embed.description += t('report.trends_messages', lang, cur=health['messages_7d'],
+                                   delta=format_health_delta(health['messages_7d'], health['messages_prev_7d'], lang))
+            embed.description += "\n"
+        elif days >= 30 and health['monthly_comparable']:
+            embed.description += t('report.trends_header_monthly', lang)
+            embed.description += t('report.trends_posters', lang, cur=health['posters_30d'],
+                                   delta=format_health_delta(health['posters_30d'], health['posters_prev_30d'], lang))
+            embed.description += t('report.trends_messages', lang, cur=health['messages_30d'],
+                                   delta=format_health_delta(health['messages_30d'], health['messages_prev_30d'], lang))
+            embed.description += t('report.trends_joins', lang, cur=health['joins_30d'],
+                                   delta=format_health_delta(health['joins_30d'], health['joins_prev_30d'], lang))
+            embed.description += t('report.trends_leaves', lang, cur=health['leaves_30d'],
+                                   delta=format_health_delta(health['leaves_30d'], health['leaves_prev_30d'], lang))
+            embed.description += t('report.trends_returns', lang, cur=health['returns_30d'],
+                                   delta=format_health_delta(health['returns_30d'], health['returns_prev_30d'], lang))
+            embed.description += "\n"
 
     # Participation gap: present-but-silent (lurkers) and never-active (ghosts)
     segments = db.get_participation_segments(guild_id, window_days=days)

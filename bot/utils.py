@@ -272,3 +272,21 @@ def truncate_string(text: str, max_length: int, suffix: str = "...") -> str:
     if max_length < len(suffix):
         return text[:max(max_length, 0)]
     return text[:max_length - len(suffix)] + suffix
+
+
+def format_health_delta(cur: int, prev: int, lang: str = 'en') -> str:
+    """
+    Localized change indicator vs a previous window (e.g. '📉 -14% (was 49)').
+    Shared by the /user-stats health panel and the scheduled-report trends
+    section so both render deltas identically.
+    """
+    if prev > 0:
+        pct = (cur - prev) / prev * 100
+        if round(pct) > 0:
+            return t("commands.stats_view.health_delta_up", lang, pct=round(pct), prev=prev)
+        if round(pct) < 0:
+            return t("commands.stats_view.health_delta_down", lang, pct=abs(round(pct)), prev=prev)
+        return t("commands.stats_view.health_delta_flat", lang, prev=prev)
+    if cur > 0:
+        return t("commands.stats_view.health_delta_new", lang)
+    return t("commands.stats_view.health_delta_flat", lang, prev=prev)

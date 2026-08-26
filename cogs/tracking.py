@@ -105,6 +105,7 @@ class TrackingCog(commands.Cog):
         # Start background tasks
         self.flush_activity_buffer.start()
         self.cleanup_old_data.start()
+        self.record_health_snapshots.start()
         self.check_scheduled_reports.start()
         self.backup_database.start()
         self.checkpoint_wal.start()
@@ -1126,6 +1127,25 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before starting the cleanup loop."""
         await self.bot.wait_until_ready()
 
+    @tasks.loop(hours=24)
+    async def record_health_snapshots(self):
+        """
+        Daily guild-level health snapshot (aggregate counts only, no per-user
+        data). Runs once at startup and every 24h after; the write is
+        idempotent per UTC day, so the double-run on a same-day restart is
+        harmless.
+        """
+        try:
+            count = await asyncio.to_thread(self.db.record_health_snapshots)
+            logger.info(f"Recorded health snapshots for {count} guilds")
+        except Exception as e:
+            logger.error(f"Error recording health snapshots: {e}", exc_info=True)
+
+    @record_health_snapshots.before_loop
+    async def before_record_health_snapshots(self):
+        """Wait for bot to be ready before starting the snapshot loop."""
+        await self.bot.wait_until_ready()
+
     @tasks.loop(minutes=WAL_CHECKPOINT_INTERVAL_MINUTES)
     async def checkpoint_wal(self):
         """Periodically truncate the SQLite WAL file so it doesn't grow unbounded.
@@ -1384,6 +1404,7 @@ class TrackingCog(commands.Cog):
         logger.info("TrackingCog unloading, flushing remaining buffers...")
         self.flush_activity_buffer.cancel()
         self.cleanup_old_data.cancel()
+        self.record_health_snapshots.cancel()
         self.check_scheduled_reports.cancel()
         self.backup_database.cancel()
         self.checkpoint_wal.cancel()

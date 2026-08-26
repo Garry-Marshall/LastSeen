@@ -21,7 +21,8 @@ from bot.utils import (
     chunk_list,
     can_use_bot_commands,
     is_channel_allowed,
-    has_bot_admin_role
+    has_bot_admin_role,
+    format_health_delta
 )
 from bot.locale import t, guild_language, weekday_name
 
@@ -2263,6 +2264,7 @@ class UserStatsView(discord.ui.View):
         self.retention_button.label = t("commands.stats_view.btn_retention", lang)
         self.growth_button.label = t("commands.stats_view.btn_growth", lang)
         self.leaderboard_button.label = t("commands.stats_view.btn_leaderboard", lang)
+        self.health_button.label = t("commands.stats_view.btn_health", lang)
         self.heatmap_button.label = t("commands.stats_view.btn_heatmap", lang)
         self.participation_button.label = t("commands.stats_view.btn_participation", lang)
         self.export_button.label = t("commands.stats_view.btn_export", lang)
@@ -2358,6 +2360,42 @@ class UserStatsView(discord.ui.View):
             
         except Exception as e:
             logger.error(f"Failed to show leaderboard: {e}", exc_info=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
+
+    @discord.ui.button(label="🩺 Server Health", style=discord.ButtonStyle.primary, row=0)
+    async def health_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show server health vitals (window-vs-window deltas, no scoring)."""
+        await interaction.response.defer()
+
+        try:
+            health = await asyncio.to_thread(self.db.get_server_health, self.guild_id)
+            history = await asyncio.to_thread(self.db.get_health_history, self.guild_id)
+            embed = self._create_health_embed(health, history)
+
+            # Create view with back button
+            view = discord.ui.View(timeout=300)
+            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
+
+            async def back_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
+                stats['guild_id'] = self.guild_id
+                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
+                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+
+                cog = interaction.client.get_cog('CommandsCog')
+                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
+                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
+
+                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+
+            back_button.callback = back_callback
+            view.add_item(back_button)
+
+            await interaction.edit_original_response(embed=embed, view=view)
+
+        except Exception as e:
+            logger.error(f"Failed to show server health: {e}", exc_info=True)
             await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="🔥 Activity Heatmap", style=discord.ButtonStyle.primary, row=1)
@@ -2797,6 +2835,127 @@ class UserStatsView(discord.ui.View):
                 inline=False
             )
 
+        return embed
+
+    def _create_health_embed(self, health: dict, history: list = None) -> discord.Embed:
+        """Create the server-health embed: current vs previous window for each
+        vital, deltas only rendered once the prior window is fully covered."""
+        lang = self.lang
+        embed = create_embed(t("commands.stats_view.health_title", lang), discord.Color.teal())
+
+        if not health:
+            embed.description = t("commands.stats_view.health_no_data", lang)
+            return embed
+
+        embed.description = t("commands.stats_view.health_desc", lang)
+        weekly_ok = health['weekly_comparable']
+        monthly_ok = health['monthly_comparable']
+
+        def with_delta(cur: int, prev: int, comparable: bool) -> str:
+            return format_health_delta(cur, prev, lang) if comparable else ""
+
+        # This week vs last week (message-derived, complete UTC days)
+        week_lines = [
+            t("commands.stats_view.health_posters_line", lang,
+              cur=health['posters_7d'], delta=with_delta(health['posters_7d'], health['posters_prev_7d'], weekly_ok)),
+            t("commands.stats_view.health_messages_line", lang,
+              cur=health['messages_7d'], delta=with_delta(health['messages_7d'], health['messages_prev_7d'], weekly_ok)),
+        ]
+        if not weekly_ok:
+            week_lines.append(t("commands.stats_view.health_no_compare", lang,
+                                need=14, days=health['days_of_data']))
+        embed.add_field(
+            name=t("commands.stats_view.health_week_title", lang),
+            value="\n".join(week_lines),
+            inline=False
+        )
+
+        # Membership flow: joins vs departures, 30d vs prior 30d
+        flow_lines = [
+            t("commands.stats_view.health_joins_line", lang,
+              cur=health['joins_30d'], delta=with_delta(health['joins_30d'], health['joins_prev_30d'], monthly_ok)),
+            t("commands.stats_view.health_leaves_line", lang,
+              cur=health['leaves_30d'], delta=with_delta(health['leaves_30d'], health['leaves_prev_30d'], monthly_ok)),
+            t("commands.stats_view.health_net_line", lang,
+              net=health['joins_30d'] - health['leaves_30d']),
+        ]
+        if not monthly_ok:
+            flow_lines.append(t("commands.stats_view.health_no_compare", lang,
+                                need=60, days=health['days_of_data']))
+        embed.add_field(
+            name=t("commands.stats_view.health_flow_title", lang),
+            value="\n".join(flow_lines),
+            inline=False
+        )
+
+        # Participation breadth: share of tracked members who posted
+        members = health['active_members']
+        breadth_pct = (health['posters_30d'] / members * 100) if members > 0 else 0
+        embed.add_field(
+            name=t("commands.stats_view.health_breadth_title", lang),
+            value=t("commands.stats_view.health_breadth_line", lang,
+                    cur=health['posters_30d'], members=members, pct=breadth_pct,
+                    delta=with_delta(health['posters_30d'], health['posters_prev_30d'], monthly_ok)),
+            inline=False
+        )
+
+        # New-member activation: first-week posting rate, cohort vs prior cohort
+        cur_cohort = health.get('activation_cur')
+        if cur_cohort:
+            value = t("commands.stats_view.health_activation_line", lang,
+                      rate=cur_cohort['rate'], matured=cur_cohort['matured'])
+            prev_cohort = health.get('activation_prev')
+            if prev_cohort:
+                pts = round(cur_cohort['rate'] - prev_cohort['rate'])
+                if pts > 0:
+                    pts_text = t("commands.stats_view.health_pts_up", lang, pts=pts)
+                elif pts < 0:
+                    pts_text = t("commands.stats_view.health_pts_down", lang, pts=abs(pts))
+                else:
+                    pts_text = t("commands.stats_view.health_pts_flat", lang)
+                value += t("commands.stats_view.health_activation_prev", lang,
+                           rate=prev_cohort['rate'], delta=pts_text)
+        else:
+            value = t("commands.stats_view.health_activation_no_data", lang)
+        embed.add_field(
+            name=t("commands.stats_view.health_activation_title", lang),
+            value=value,
+            inline=False
+        )
+
+        # Returning members — 30+ day comebacks, window vs window
+        embed.add_field(
+            name=t("commands.stats_view.health_returns_title", lang),
+            value=t("commands.stats_view.health_returns_line", lang,
+                    cur=health['returns_30d'],
+                    delta=with_delta(health['returns_30d'], health['returns_prev_30d'], monthly_ok)),
+            inline=False
+        )
+
+        # Long-range trend from the nightly snapshots: weekly posters as bars,
+        # member count alongside. Needs at least two sampled weeks to be a
+        # trend; before that the section explains it's still collecting.
+        if history and len(history) >= 2:
+            max_posters = max(row['posters_7d'] for row in history) or 1
+            chart_lines = []
+            for row in history:
+                label = datetime.fromtimestamp(row['date'], tz=timezone.utc).strftime('%m-%d')
+                filled = int((row['posters_7d'] / max_posters) * 12)
+                bar = "█" * filled + "░" * (12 - filled)
+                chart_lines.append(f"{label} {bar} {row['posters_7d']:>5,} │ {row['active_members']:>6,}")
+            embed.add_field(
+                name=t("commands.stats_view.health_trend_title", lang),
+                value="```\n" + "\n".join(chart_lines) + "\n```",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name=t("commands.stats_view.health_trend_title", lang),
+                value=t("commands.stats_view.health_trend_no_data", lang),
+                inline=False
+            )
+
+        embed.set_footer(text=t("commands.stats_view.health_footer", lang))
         return embed
 
 
