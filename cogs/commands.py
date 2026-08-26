@@ -2321,7 +2321,12 @@ class UserStatsView(discord.ui.View):
             lurkers = await asyncio.to_thread(self.db.get_lurkers, self.guild_id, window_days=30, limit=15)
             ghosts = await asyncio.to_thread(self.db.get_ghosts, self.guild_id, window_days=30, limit=15)
             segments = await asyncio.to_thread(self.db.get_participation_segments, self.guild_id, window_days=30)
-            embed = self._create_participation_embed(segments, lurkers, ghosts)
+            # Returning members (30+ day comebacks) share this panel — rare, so the
+            # section only renders when there's something to show (see the embed helper).
+            since_ts = int(datetime.now(timezone.utc).timestamp()) - (30 * 86400)
+            returns_count = await asyncio.to_thread(self.db.count_returns, self.guild_id, since_ts)
+            returns = await asyncio.to_thread(self.db.get_recent_returns, self.guild_id, since_ts, 5)
+            embed = self._create_participation_embed(segments, lurkers, ghosts, returns_count, returns)
 
             view = discord.ui.View(timeout=300)
             back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
@@ -2584,15 +2589,17 @@ class UserStatsView(discord.ui.View):
 
         return embed
 
-    def _create_participation_embed(self, segments: dict, lurkers: list, ghosts: list) -> discord.Embed:
-        """Create the participation-gap embed (lurkers and ghosts)."""
+    def _create_participation_embed(self, segments: dict, lurkers: list, ghosts: list,
+                                    returns_count: int = 0, returns: list = None) -> discord.Embed:
+        """Create the participation-gap embed (lurkers, ghosts, and returning members)."""
         lang = self.lang
         embed = create_embed(t("commands.stats_view.participation_title", lang), discord.Color.dark_grey())
 
         lurker_count = segments.get('lurkers', 0)
         ghost_count = segments.get('ghosts', 0)
+        returns = returns or []
 
-        if not lurker_count and not ghost_count:
+        if not lurker_count and not ghost_count and not returns:
             embed.description = t("commands.stats_view.participation_no_data", lang)
             return embed
 
@@ -2636,6 +2643,23 @@ class UserStatsView(discord.ui.View):
             value="".join(ghost_lines) if ghost_lines else t("commands.stats_view.participation_none", lang),
             inline=False
         )
+
+        # Returning members — only rendered when someone actually came back from a
+        # 30+ day absence, so the common (empty) case adds nothing to the panel.
+        if returns:
+            return_lines = []
+            for r in returns:
+                display = r['nickname'] if r.get('nickname') else r['username']
+                days = r['away_seconds'] // 86400
+                returned = format_timestamp(r['returned_at'], 'R', self.guild_id, self.db, lang)
+                return_lines.append(t("commands.stats_view.returns_line", lang, name=display, days=days, returned=returned))
+            if returns_count > len(returns):
+                return_lines.append(t("commands.stats_view.returns_more", lang, count=returns_count - len(returns)))
+            embed.add_field(
+                name=t("commands.stats_view.returns_title", lang),
+                value="".join(return_lines),
+                inline=False
+            )
 
         return embed
 

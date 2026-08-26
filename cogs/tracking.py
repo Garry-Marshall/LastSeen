@@ -25,6 +25,7 @@ CLEANUP_INTERVAL_HOURS = 24  # How often to run data cleanup
 REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
 WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to truncate the SQLite WAL file
 STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
+RETURN_THRESHOLD_SECONDS = 30 * 86400  # Min absence before a re-appearance counts as a "return"
 
 # Presence messages cycled by rotate_status, as (emoji, text) pairs. Shown as a
 # custom status (no "Playing/Watching" header). The emoji is prepended into the
@@ -64,6 +65,12 @@ class TrackingCog(commands.Cog):
         # Failed writes buffer for retry
         self.failed_daily_writes: Dict[Tuple[int, int, int], int] = defaultdict(int)
         self.failed_hourly_writes: Dict[Tuple[int, int, int, int], int] = defaultdict(int)
+
+        # Returning-member captures pending flush. Each entry:
+        # (guild_id, user_id, away_seconds, returned_at). Rare (only 30+ day
+        # absences qualify), so a plain list flushed on the activity loop keeps
+        # the insert off the synchronous presence path.
+        self.return_buffer: list = []
 
         # Flush when buffer reaches this size to cap memory usage between flush intervals
         self.MAX_BUFFER_SIZE = 10000
@@ -259,6 +266,8 @@ class TrackingCog(commands.Cog):
                        self.failed_daily_writes, self.failed_hourly_writes):
             for key in [k for k in buffer if k[1] == user_id]:
                 del buffer[key]
+        # return_buffer holds (guild_id, user_id, away, ts) tuples; drop this user's
+        self.return_buffer = [r for r in self.return_buffer if r[1] != user_id]
 
     async def _vacuum_database_background(self):
         """
@@ -494,6 +503,7 @@ class TrackingCog(commands.Cog):
                 del self.failed_daily_writes[k]
             for k in [k for k in self.failed_hourly_writes if k[0] == guild.id]:
                 del self.failed_hourly_writes[k]
+            self.return_buffer = [r for r in self.return_buffer if r[0] != guild.id]
             if daily_purged or hourly_purged:
                 logger.info(f"Purged {daily_purged} daily and {hourly_purged} hourly buffered activity entries for guild {guild.id}")
 
@@ -878,16 +888,18 @@ class TrackingCog(commands.Cog):
             self.db.update_last_seen(guild_id, user_id, timestamp)
             logger.debug(f"User {after} went offline in {after.guild.name}")
         else:
-            # User came online - set last_seen to 0 (currently active). When the
-            # guild has watches, capture the prior offline timestamp *before*
-            # overwriting it and hand it to WatchCog: the two presence listeners
-            # race, so the online-return away-duration cannot be read from the DB
-            # afterwards.
-            previous_last_seen = None
-            if watched:
-                existing = self.db.get_member(guild_id, user_id)
-                previous_last_seen = existing['last_seen'] if existing else None
-            self.db.update_last_seen(guild_id, user_id, 0)
+            # User came online. Read the prior offline timestamp and set last_seen
+            # to 0 in one step — the value is destroyed the moment it is overwritten,
+            # and the two presence listeners race, so it cannot be re-read afterwards.
+            # previous_last_seen: a timestamp (was offline), 0 (already online), or
+            # None (no row). It powers both the returning-member capture below and,
+            # for watched guilds, the online-return alert.
+            previous_last_seen = self.db.update_last_seen_and_get_previous(guild_id, user_id)
+            if previous_last_seen and previous_last_seen > 0:
+                now_ts = int(datetime.now(timezone.utc).timestamp())
+                away = now_ts - previous_last_seen
+                if away >= RETURN_THRESHOLD_SECONDS:
+                    self.return_buffer.append((guild_id, user_id, away, now_ts))
             if watched:
                 self.bot.dispatch('lastseen_member_online', after, previous_last_seen)
             logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
@@ -916,7 +928,7 @@ class TrackingCog(commands.Cog):
             daily_count = len(self.daily_activity_buffer)
             hourly_count = len(self.hourly_activity_buffer)
             
-            if daily_count == 0 and hourly_count == 0:
+            if daily_count == 0 and hourly_count == 0 and not self.return_buffer:
                 return  # Nothing to flush
             
             logger.debug(f"Flushing activity buffers: {daily_count} daily entries, {hourly_count} hourly entries")
@@ -976,7 +988,23 @@ class TrackingCog(commands.Cog):
             if hourly_failed:
                 logger.warning(f"Failed to flush {len(hourly_failed)}/{hourly_count} hourly entries, will retry")
             logger.debug(f"Flushed {hourly_success}/{hourly_count} hourly activity entries")
-            
+
+            # Flush returning-member captures. Rare and non-critical, so unlike the
+            # activity buffers a failed insert is dropped rather than retried.
+            if self.return_buffer:
+                returns_to_flush = list(self.return_buffer)
+                self.return_buffer.clear()
+
+                def flush_returns():
+                    ok = 0
+                    for (gid, uid, away, ts) in returns_to_flush:
+                        if self.db.add_member_return(gid, uid, away, ts):
+                            ok += 1
+                    return ok
+
+                returns_ok = await asyncio.to_thread(flush_returns)
+                logger.debug(f"Flushed {returns_ok}/{len(returns_to_flush)} returning-member records")
+
         except Exception as e:
             logger.error(f"Error flushing activity buffers: {e}", exc_info=True)
 

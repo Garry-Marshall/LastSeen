@@ -415,6 +415,28 @@ class DatabaseManager:
                 ON watchlists(guild_id)
             """)
 
+            # Returning members: one row per time a member came back online after
+            # being offline for at least the return threshold (30 days). This is
+            # the only place a past absence length is persisted — members.last_seen
+            # is single-column and overwritten to 0 the moment they return, so the
+            # away duration is captured here at the transition or lost forever.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS member_returns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    away_seconds INTEGER NOT NULL,
+                    returned_at INTEGER NOT NULL,
+                    FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE,
+                    FOREIGN KEY (guild_id, user_id) REFERENCES members(guild_id, user_id) ON DELETE CASCADE
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_member_returns_guild_time
+                ON member_returns(guild_id, returned_at DESC)
+            """)
+
             # Migration: per-guild display number (`seq`). Databases created
             # before this column show the raw global autoincrement id (which
             # never resets or reuses removed numbers). Add the column and
@@ -1046,6 +1068,36 @@ class DatabaseManager:
             logger.error(f"Failed to update last_seen for {user_id} in guild {guild_id}: {e}")
             return False
 
+    def update_last_seen_and_get_previous(self, guild_id: int, user_id: int) -> Optional[int]:
+        """Zero a member's last_seen (mark online) and return its previous value.
+
+        Read-and-overwrite in a single transaction so the away duration — needed
+        for the returning-member capture and the online-return watch alert — is
+        never lost to the race between the two presence listeners. Returns the
+        prior last_seen (a timestamp, or 0 if already online), or None if the
+        member row does not exist. Replaces a get_member() + update_last_seen(0)
+        pair with one lighter round-trip (no SELECT *, no roles JSON parse).
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT last_seen FROM members WHERE guild_id = ? AND user_id = ?",
+                    (guild_id, user_id)
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    return None
+                previous = row['last_seen']
+                cursor.execute(
+                    "UPDATE members SET last_seen = 0 WHERE guild_id = ? AND user_id = ?",
+                    (guild_id, user_id)
+                )
+                return previous
+        except Exception as e:
+            logger.error(f"Failed to update/read last_seen for {user_id} in guild {guild_id}: {e}")
+            return None
+
     def set_member_inactive(self, guild_id: int, user_id: int) -> bool:
         """Mark a member as inactive (left the guild)."""
         try:
@@ -1106,6 +1158,66 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get member {user_id} from guild {guild_id}: {e}")
             return None
+
+    def add_member_return(self, guild_id: int, user_id: int, away_seconds: int, returned_at: int) -> bool:
+        """Record that a member came back online after a long absence."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO member_returns (guild_id, user_id, away_seconds, returned_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (guild_id, user_id, away_seconds, returned_at)
+                )
+                return True
+        except Exception as e:
+            # Best-effort: a lost return record (e.g. member left before the flush,
+            # tripping the FK) is not worth retrying. Log and drop.
+            logger.error(f"Failed to record member return for {user_id} in guild {guild_id}: {e}")
+            return False
+
+    def count_returns(self, guild_id: int, since_ts: int) -> int:
+        """Count returning members recorded for a guild since a timestamp."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM member_returns WHERE guild_id = ? AND returned_at >= ?",
+                    (guild_id, since_ts)
+                )
+                return cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Failed to count returns for guild {guild_id}: {e}")
+            return 0
+
+    def get_recent_returns(self, guild_id: int, since_ts: int, limit: int = 10) -> List[Dict[str, Any]]:
+        """Recent returning members (most recent first), joined to current names.
+
+        Only rows whose member still exists are returned (INNER JOIN); a member
+        who has since left and been purged is dropped from the view.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT r.user_id, r.away_seconds, r.returned_at,
+                           m.username, m.nickname
+                    FROM member_returns r
+                    JOIN members m
+                      ON m.guild_id = r.guild_id AND m.user_id = r.user_id
+                    WHERE r.guild_id = ? AND r.returned_at >= ?
+                    ORDER BY r.returned_at DESC
+                    LIMIT ?
+                    """,
+                    (guild_id, since_ts, limit)
+                )
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get recent returns for guild {guild_id}: {e}")
+            return []
 
     def find_member_by_name(self, guild_id: int, search_term: str) -> Optional[Dict[str, Any]]:
         """
