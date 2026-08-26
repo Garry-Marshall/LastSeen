@@ -2842,57 +2842,27 @@ class DatabaseManager:
             logger.error(f"Failed to get activity leaderboard for guild {guild_id}: {e}")
             return []
 
-    def get_activity_by_hour(self, guild_id: int, days: int = 30) -> Dict[int, int]:
-        """
-        Get message activity distribution by hour of day.
-
-        Args:
-            guild_id: Guild ID
-            days: Number of days to look back
-
-        Returns:
-            Dictionary mapping hour (0-23) to message count
-        """
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                now = int(datetime.now(timezone.utc).timestamp())
-                period_start = now - (days * SECONDS_PER_DAY)
-                
-                cursor.execute("""
-                    SELECT hour, SUM(message_count) as total
-                    FROM message_activity_hourly
-                    WHERE guild_id = ? AND timestamp >= ?
-                    GROUP BY hour
-                    ORDER BY hour
-                """, (guild_id, period_start))
-                
-                rows = cursor.fetchall()
-                
-                # Initialize all hours with 0
-                activity = {hour: 0 for hour in range(24)}
-                
-                # Fill in actual data
-                for row in rows:
-                    activity[row['hour']] = row['total']
-                
-                return activity
-        except Exception as e:
-            logger.error(f"Failed to get hourly activity for guild {guild_id}: {e}", exc_info=True)
-            return {hour: 0 for hour in range(24)}
-
-    def get_activity_by_day(self, guild_id: int, days: int = 30, user_ids: Optional[List[int]] = None) -> Dict[str, int]:
+    def get_activity_by_day(self, guild_id: int, days: int = 30, user_ids: Optional[List[int]] = None, tz_str: str = 'UTC') -> Dict[str, int]:
         """
         Get message activity distribution by day of week.
 
         Args:
             guild_id: Guild ID
             days: Number of days to look back
+            user_ids: Optional member filter (track_only_roles scope)
+            tz_str: Timezone name for local-day bucketing (default UTC), so the
+                weekday matches the guild's own clock like the /user-stats heatmap
 
         Returns:
             Dictionary mapping day name to message count
         """
+        import pytz
         try:
+            try:
+                tz = pytz.timezone(tz_str) if tz_str in pytz.all_timezones else pytz.UTC
+            except Exception:
+                tz = pytz.UTC
+
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 fclause, fparams = self._member_filter_clause(user_ids)
@@ -2905,19 +2875,122 @@ class DatabaseManager:
                     WHERE guild_id = ? AND date >= ?{fclause}
                     GROUP BY date
                 """, (guild_id, period_start, *fparams))
-                
-                day_counts = {'Monday': 0, 'Tuesday': 0, 'Wednesday': 0, 'Thursday': 0, 
+
+                day_counts = {'Monday': 0, 'Tuesday': 0, 'Wednesday': 0, 'Thursday': 0,
                              'Friday': 0, 'Saturday': 0, 'Sunday': 0}
-                
+
                 for row in cursor.fetchall():
-                    date_dt = datetime.fromtimestamp(row['date'], tz=timezone.utc)
+                    date_dt = datetime.fromtimestamp(row['date'], tz=timezone.utc).astimezone(tz)
                     day_name = date_dt.strftime('%A')
                     day_counts[day_name] += row['count'] or 0
-                
+
                 return day_counts
         except Exception as e:
             logger.error(f"Failed to get activity by day for guild {guild_id}: {e}")
             return {}
+
+    def get_server_activity_windows(self, guild_id: int, days: int = 30, tz_str: str = 'UTC') -> Dict[str, Any]:
+        """Aggregate guild-wide message activity into local-time weekday/hour windows.
+
+        Reads message_activity_hourly only (never presence), re-bucketing every
+        hourly record into the guild's timezone per-row so DST and sub-hour
+        offsets are handled correctly. The local weekday and hour are derived
+        from each row's timestamp rather than the stored UTC hour column —
+        required for an actionable "best time to reach the community"
+        recommendation in the guild's own clock.
+
+        Args:
+            guild_id: Discord guild ID
+            days: Look-back window in days (default 30)
+            tz_str: Guild timezone name for local-time bucketing (default UTC)
+
+        Returns:
+            Dict with 'total', 'active_days', 'by_weekday' (0=Mon..6=Sun ->
+            count), 'by_hour' (0-23 -> count), 'best_weekday' (0-6 or None),
+            'peak_hour' (0-23 or None), 'recommend' and 'quiet'. The latter two
+            are (weekday, start_hour, end_hour) tuples or None, with an
+            exclusive end hour — e.g. (5, 19, 22) means Saturday 19:00-22:00.
+            All hours are local to tz_str.
+        """
+        import pytz
+        BAND = 3  # width in hours of the recommended / quietest window
+
+        empty = {
+            'total': 0, 'active_days': 0,
+            'by_weekday': {i: 0 for i in range(7)},
+            'by_hour': {h: 0 for h in range(24)},
+            'best_weekday': None, 'peak_hour': None,
+            'recommend': None, 'quiet': None,
+        }
+        try:
+            try:
+                tz = pytz.timezone(tz_str) if tz_str in pytz.all_timezones else pytz.UTC
+            except Exception:
+                tz = pytz.UTC
+
+            now = int(datetime.now(timezone.utc).timestamp())
+            period_start = now - (days * SECONDS_PER_DAY)
+
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT timestamp, message_count
+                    FROM message_activity_hourly
+                    WHERE guild_id = ? AND timestamp >= ?
+                """, (guild_id, period_start))
+                rows = cursor.fetchall()
+
+            if not rows:
+                return empty
+
+            by_weekday = {i: 0 for i in range(7)}
+            by_hour = {h: 0 for h in range(24)}
+            grid = {(d, h): 0 for d in range(7) for h in range(24)}
+            active_dates = set()
+            total = 0
+
+            for row in rows:
+                cnt = row['message_count'] or 0
+                if cnt <= 0:
+                    continue
+                local = datetime.fromtimestamp(row['timestamp'], tz=timezone.utc).astimezone(tz)
+                d, h = local.weekday(), local.hour
+                by_weekday[d] += cnt
+                by_hour[h] += cnt
+                grid[(d, h)] += cnt
+                active_dates.add(local.date())
+                total += cnt
+
+            if total == 0:
+                return empty
+
+            best_weekday = max(by_weekday, key=by_weekday.get)
+            peak_hour = max(by_hour, key=by_hour.get)
+
+            # Busiest / quietest contiguous BAND-hour window on a single weekday.
+            # Non-wrapping (start capped at 24 - BAND) so a window never straddles
+            # midnight into a different weekday, keeping the recommendation literal.
+            best_band = None
+            best_sum = -1
+            quiet_band = None
+            quiet_sum = None
+            for d in range(7):
+                for start in range(0, 24 - BAND + 1):
+                    s = sum(grid[(d, start + k)] for k in range(BAND))
+                    if s > best_sum:
+                        best_sum, best_band = s, (d, start, start + BAND)
+                    if quiet_sum is None or s < quiet_sum:
+                        quiet_sum, quiet_band = s, (d, start, start + BAND)
+
+            return {
+                'total': total, 'active_days': len(active_dates),
+                'by_weekday': by_weekday, 'by_hour': by_hour,
+                'best_weekday': best_weekday, 'peak_hour': peak_hour,
+                'recommend': best_band, 'quiet': quiet_band,
+            }
+        except Exception as e:
+            logger.error(f"Failed to build server activity windows for guild {guild_id}: {e}")
+            return empty
 
     # ==================== Scheduled Reports Operations ====================
 

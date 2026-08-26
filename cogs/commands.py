@@ -2325,9 +2325,10 @@ class UserStatsView(discord.ui.View):
         await interaction.response.defer()
         
         try:
-            day_activity = await asyncio.to_thread(self.db.get_activity_by_day, self.guild_id, days=30)
-            hour_activity = await asyncio.to_thread(self.db.get_activity_by_hour, self.guild_id, days=30)
-            embed = self._create_heatmap_embed(day_activity, hour_activity)
+            guild_config = await asyncio.to_thread(self.db.get_guild_config, self.guild_id)
+            tz_str = guild_config.get('timezone', 'UTC') if guild_config else 'UTC'
+            windows = await asyncio.to_thread(self.db.get_server_activity_windows, self.guild_id, 30, tz_str)
+            embed = self._create_heatmap_embed(windows, tz_str)
             
             # Create view with back button
             view = discord.ui.View(timeout=300)
@@ -2547,31 +2548,37 @@ class UserStatsView(discord.ui.View):
 
         return embed
 
-    def _create_heatmap_embed(self, day_activity: dict, hour_activity: dict) -> discord.Embed:
-        """Create activity heatmap embed."""
+    def _create_heatmap_embed(self, windows: dict, tz_str: str = 'UTC') -> discord.Embed:
+        """Create activity heatmap embed.
+
+        `windows` is a get_server_activity_windows() result: message activity
+        bucketed into the guild's local weekday/hour, so every hour shown here
+        (and the peak/recommendation below) is in the guild's own clock.
+        """
         lang = self.lang
         embed = create_embed(t("commands.stats_view.heatmap_title", lang), discord.Color.orange())
 
-        if not day_activity or sum(day_activity.values()) == 0:
+        if not windows or windows.get('total', 0) == 0:
             embed.description = t("commands.stats_view.heatmap_no_data", lang)
             return embed
-        
-        # Day of week breakdown. days_order stays English for the day_activity
-        # lookups; only the displayed name is localized. The column is padded to
-        # the widest localized name so the monospace chart stays aligned in any
-        # language (English's widest is "Wednesday" = 9, matching the old width).
-        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        max_day_count = max(day_activity.values()) if day_activity.values() else 1
-        localized_days = {day: weekday_name(day, lang) for day in days_order}
+
+        by_weekday = windows['by_weekday']
+        by_hour = windows['by_hour']
+
+        # Day of week breakdown. Weekday keys are Monday=0..Sunday=6 ints; only
+        # the displayed name is localized. The column is padded to the widest
+        # localized name so the monospace chart stays aligned in any language.
+        max_day_count = max(by_weekday.values()) if by_weekday else 1
+        localized_days = {d: weekday_name(d, lang) for d in range(7)}
         name_width = max(len(n) for n in localized_days.values())
 
         chart_lines = []
-        for day in days_order:
-            count = day_activity.get(day, 0)
+        for d in range(7):
+            count = by_weekday.get(d, 0)
             bar_length = int((count / max_day_count) * 20) if max_day_count > 0 else 0
             bar = "█" * bar_length + "░" * (20 - bar_length)
-            chart_lines.append(f"{localized_days[day]:<{name_width}} {bar} {count:>6,}")
-        
+            chart_lines.append(f"{localized_days[d]:<{name_width}} {bar} {count:>6,}")
+
         # Wrap in code block for monospaced alignment
         embed.add_field(
             name=t("commands.stats_view.heatmap_day_title", lang),
@@ -2580,20 +2587,19 @@ class UserStatsView(discord.ui.View):
         )
 
         # Peak day
-        if day_activity:
-            peak_day = max(day_activity, key=day_activity.get)
-            peak_count = day_activity[peak_day]
+        if windows['best_weekday'] is not None:
+            peak_day = windows['best_weekday']
             embed.add_field(
                 name=t("commands.stats_view.heatmap_peak_day_title", lang),
-                value=t("commands.stats_view.heatmap_peak_value", lang, label=weekday_name(peak_day, lang), count=peak_count),
+                value=t("commands.stats_view.heatmap_peak_value", lang, label=weekday_name(peak_day, lang), count=by_weekday[peak_day]),
                 inline=True
             )
-        
+
         # Hour of day breakdown
-        if hour_activity and sum(hour_activity.values()) > 0:
-            max_hour_count = max(hour_activity.values())
+        if sum(by_hour.values()) > 0:
+            max_hour_count = max(by_hour.values())
             hour_lines = []
-            
+
             # Group hours into 6-hour blocks for better readability. The hour
             # ranges are fixed; only the displayed label is localized, padded to
             # the widest label so the monospace chart stays aligned in any
@@ -2608,11 +2614,11 @@ class UserStatsView(discord.ui.View):
             block_width = max(len(label) for label in block_labels)
 
             for (key, hour_range), label in zip(time_blocks, block_labels):
-                block_total = sum(hour_activity.get(h, 0) for h in hour_range)
+                block_total = sum(by_hour.get(h, 0) for h in hour_range)
                 bar_length = int((block_total / (max_hour_count * 6)) * 15) if max_hour_count > 0 else 0
                 bar = "█" * bar_length + "░" * (15 - bar_length)
                 hour_lines.append(f"{label:<{block_width}} {bar} {block_total:>5,}")
-            
+
             # Wrap in code block for monospaced alignment
             embed.add_field(
                 name=t("commands.stats_view.heatmap_time_title", lang),
@@ -2621,14 +2627,35 @@ class UserStatsView(discord.ui.View):
             )
 
             # Peak hour
-            peak_hour = max(hour_activity, key=hour_activity.get)
-            peak_hour_count = hour_activity[peak_hour]
+            peak_hour = windows['peak_hour']
             time_label = f"{peak_hour:02d}:00-{(peak_hour+1)%24:02d}:00"
             embed.add_field(
                 name=t("commands.stats_view.heatmap_peak_hour_title", lang),
-                value=t("commands.stats_view.heatmap_peak_value", lang, label=time_label, count=peak_hour_count),
+                value=t("commands.stats_view.heatmap_peak_value", lang, label=time_label, count=by_hour[peak_hour]),
                 inline=True
             )
+
+        # Actionable recommendation. Gated behind a minimum sample so a whole-
+        # server suggestion is never drawn off a handful of messages; the
+        # busiest and quietest bands are only meaningful with real coverage.
+        if windows['total'] >= 50 and windows['active_days'] >= 7 and windows['recommend']:
+            rd, rs, re_ = windows['recommend']
+            embed.add_field(
+                name=t("commands.stats_view.heatmap_recommend_title", lang),
+                value=t("commands.stats_view.heatmap_recommend_value", lang,
+                        day=weekday_name(rd, lang),
+                        start=f"{rs:02d}:00", end=f"{re_ % 24:02d}:00", tz=tz_str),
+                inline=False
+            )
+            if windows['quiet']:
+                qd, qs, qe = windows['quiet']
+                embed.add_field(
+                    name=t("commands.stats_view.heatmap_quiet_title", lang),
+                    value=t("commands.stats_view.heatmap_quiet_value", lang,
+                            day=weekday_name(qd, lang),
+                            start=f"{qs:02d}:00", end=f"{qe % 24:02d}:00"),
+                    inline=True
+                )
 
         return embed
 

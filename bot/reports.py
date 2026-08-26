@@ -43,7 +43,11 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         Discord embed with activity summary
     """
     guild_id = int(guild.id)
-    lang = guild_language(db.get_guild_config(guild_id))
+    guild_config = db.get_guild_config(guild_id)
+    lang = guild_language(guild_config)
+    # Guild timezone so "when is the server active" numbers are in its own clock,
+    # matching the /user-stats heatmap rather than raw UTC.
+    guild_tz = guild_config.get('timezone', 'UTC') if guild_config else 'UTC'
 
     # Restrict the whole report to the guild's track_only_roles filter (read-time;
     # all members are stored regardless). None => no filter (everyone in scope).
@@ -57,7 +61,7 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
     top_users = db.get_top_active_users_period(guild_id, days, limit=5, user_ids=tracked)
 
     # Get daily activity for peak day
-    daily_activity = db.get_activity_by_day(guild_id, days, user_ids=tracked)
+    daily_activity = db.get_activity_by_day(guild_id, days, user_ids=tracked, tz_str=guild_tz)
     # Validate daily_activity is not None and not empty before calling max()
     if daily_activity and isinstance(daily_activity, dict) and len(daily_activity) > 0:
         peak_day = max(daily_activity.items(), key=lambda x: x[1])
@@ -88,13 +92,15 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
         # peak_day[0] is a day name (e.g., 'Monday'), not a timestamp
         embed.description += t('report.peak_day', lang, day=weekday_name(peak_day[0], lang), count=peak_day[1])
 
-    # Peak hour of day (UTC, period-scoped). No track_only_roles filter — the
-    # hourly table is guild-wide, matching the /user-stats heatmap.
-    hour_activity = db.get_activity_by_hour(guild_id, days)
-    if hour_activity and sum(hour_activity.values()) > 0:
-        peak_hour = max(hour_activity, key=hour_activity.get)
+    # Peak hour of day (guild timezone, period-scoped). Sourced from
+    # get_server_activity_windows so the report agrees with the /user-stats
+    # heatmap. No track_only_roles filter — the hourly table is guild-wide,
+    # matching that heatmap.
+    windows = db.get_server_activity_windows(guild_id, days, guild_tz)
+    peak_hour = windows['peak_hour']
+    if peak_hour is not None and windows['by_hour'][peak_hour] > 0:
         hour_label = f"{peak_hour:02d}:00-{(peak_hour + 1) % 24:02d}:00"
-        embed.description += t('report.peak_hour', lang, hour=hour_label, count=hour_activity[peak_hour])
+        embed.description += t('report.peak_hour', lang, hour=hour_label, count=windows['by_hour'][peak_hour])
 
     embed.description += "\n"
 
