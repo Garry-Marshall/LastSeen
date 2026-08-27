@@ -173,6 +173,25 @@ class DatabaseManager:
         finally:
             self._return_connection_to_pool(conn)
 
+    @contextmanager
+    def _borrow(self, conn: Optional[sqlite3.Connection]):
+        """Yield a connection, reusing `conn` if given or borrowing one otherwise.
+
+        Lets a read-only query method either open its own pooled connection (the
+        default) or run on a caller-supplied connection so several such methods
+        can share a single round-trip. A borrowed connection is returned to the
+        pool here; a supplied one is left for the caller to manage. Read-only, so
+        no commit is issued in either case.
+        """
+        if conn is not None:
+            yield conn
+        else:
+            own = self._get_connection_from_pool()
+            try:
+                yield own
+            finally:
+                self._return_connection_to_pool(own)
+
     def _initialize_database(self):
         """Create tables if they don't exist."""
         with self.get_connection() as conn:
@@ -2160,7 +2179,8 @@ class DatabaseManager:
             logger.error(f"Failed to get message activity for user {user_id}: {e}")
             return {'total': 0, 'today': 0, 'this_week': 0, 'this_month': 0, 'avg_per_day': 0}
 
-    def get_activity_percentile(self, guild_id: int, user_id: int, days: int = 30) -> Optional[Dict[str, Any]]:
+    def get_activity_percentile(self, guild_id: int, user_id: int, days: int = 30,
+                                conn: Optional[sqlite3.Connection] = None) -> Optional[Dict[str, Any]]:
         """
         Rank a member's message activity against all active members over a period.
 
@@ -2189,7 +2209,7 @@ class DatabaseManager:
             today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
             cutoff_date = today_start - (days * SECONDS_PER_DAY)
 
-            with self.get_connection() as conn:
+            with self._borrow(conn) as conn:
                 cursor = conn.cursor()
 
                 cursor.execute("""
@@ -2239,7 +2259,8 @@ class DatabaseManager:
             logger.error(f"Failed to get activity percentile for user {user_id} in guild {guild_id}: {e}")
             return None
 
-    def get_message_activity_trend(self, guild_id: int, user_id: int, days: int = 365) -> List[Dict[str, Any]]:
+    def get_message_activity_trend(self, guild_id: int, user_id: int, days: int = 365,
+                                   conn: Optional[sqlite3.Connection] = None) -> List[Dict[str, Any]]:
         """
         Get detailed daily message breakdown for trend analysis.
 
@@ -2252,16 +2273,16 @@ class DatabaseManager:
             List of daily activity records, newest first
         """
         try:
-            with self.get_connection() as conn:
+            with self._borrow(conn) as conn:
                 cursor = conn.cursor()
-                
+
                 # Get today's date (start of day UTC)
                 now = datetime.now(timezone.utc)
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
-                
+
                 # Calculate cutoff date
                 cutoff_date = today_start - (days * SECONDS_PER_DAY)
-                
+
                 cursor.execute("""
                     SELECT date, message_count
                     FROM message_activity
@@ -2281,7 +2302,8 @@ class DatabaseManager:
             logger.error(f"Failed to get message activity trend for user {user_id}: {e}")
             return []
 
-    def get_activity_profile(self, guild_id: int, user_id: int, days: int = 30, tz_str: str = 'UTC') -> Dict[str, Any]:
+    def get_activity_profile(self, guild_id: int, user_id: int, days: int = 30, tz_str: str = 'UTC',
+                             conn: Optional[sqlite3.Connection] = None) -> Dict[str, Any]:
         """Build a per-member activity profile from message activity (never presence).
 
         Aggregates the member's hourly message buckets over the window into
@@ -2322,7 +2344,7 @@ class DatabaseManager:
             now = int(datetime.now(timezone.utc).timestamp())
             period_start = now - (days * SECONDS_PER_DAY)
 
-            with self.get_connection() as conn:
+            with self._borrow(conn) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT timestamp, message_count
@@ -2395,6 +2417,27 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to build activity profile for user {user_id} in guild {guild_id}: {e}")
             return empty
+
+    def get_whois_activity_panel(self, guild_id: int, user_id: int, days: int = 30,
+                                 tz_str: str = 'UTC') -> Dict[str, Any]:
+        """Bundle the three per-member activity reads /whois needs into one round-trip.
+
+        Runs the profile, the daily trend (for the sparkline) and — only when the
+        profile clears the same thin-data gate the embed uses — the percentile,
+        all on a single borrowed connection instead of three. Returns
+        {'profile', 'trend', 'percentile'} with the same shapes the individual
+        methods return ('percentile' is None when skipped or unavailable).
+        """
+        with self._borrow(None) as conn:
+            profile = self.get_activity_profile(guild_id, user_id, days, tz_str, conn=conn)
+            trend = self.get_message_activity_trend(guild_id, user_id, days, conn=conn)
+            # Match the embed's gate so the population-wide percentile query is
+            # skipped on thin data exactly as before.
+            if profile['total'] >= 15 and profile['active_days'] >= 5:
+                percentile = self.get_activity_percentile(guild_id, user_id, days, conn=conn)
+            else:
+                percentile = None
+        return {'profile': profile, 'trend': trend, 'percentile': percentile}
 
     def get_guild_message_activity_stats(self, guild_id: int, days: int = 365, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """

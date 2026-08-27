@@ -484,9 +484,10 @@ class CommandsCog(commands.Cog):
         show_profile = is_admin or interaction.user.id == member_data['user_id']
         if show_profile:
             guild_tz = guild_config.get('timezone', 'UTC') if guild_config else 'UTC'
-            profile = await asyncio.to_thread(
-                self.db.get_activity_profile, guild_id, member_data['user_id'], 30, guild_tz
+            panel = await asyncio.to_thread(
+                self.db.get_whois_activity_panel, guild_id, member_data['user_id'], 30, guild_tz
             )
+            profile = panel['profile']
             if profile['total'] > 0:
                 embed.description += "\n"
                 embed.description += t("commands.whois.profile_header", lang)
@@ -495,11 +496,8 @@ class CommandsCog(commands.Cog):
 
                 # 30-day activity strip: shows whether absences are constant or
                 # occasional at a glance. Built from message activity only.
-                trend = await asyncio.to_thread(
-                    self.db.get_message_activity_trend, guild_id, member_data['user_id'], 30
-                )
                 embed.description += t("commands.whois.profile_timeline", lang,
-                                       sparkline=build_activity_sparkline(trend, 30))
+                                       sparkline=build_activity_sparkline(panel['trend'], 30))
 
                 # Suppress the pattern lines on thin data — a "most active day"
                 # off a handful of messages is noise, not a profile.
@@ -519,9 +517,7 @@ class CommandsCog(commands.Cog):
                     if trend_key:
                         embed.description += t(trend_key, lang)
 
-                    percentile = await asyncio.to_thread(
-                        self.db.get_activity_percentile, guild_id, member_data['user_id'], 30
-                    )
+                    percentile = panel['percentile']
                     if percentile:
                         filled = round(percentile['percentile'] / 10)
                         bar = "█" * filled + "░" * (10 - filled)
