@@ -307,7 +307,7 @@
   "commands.inactive.no_guild_config": "Configuration du serveur introuvable. Veuillez contacter un administrateur.",
   "commands.inactive.empty_title": "Membres inactifs",
   "commands.inactive.empty_desc": "Aucun membre n'a été inactif pendant plus de {days} jours.\n\n**Remarque :** Le bot ne peut suivre l'heure de dernière connexion d'un membre qu'après l'avoir observé se déconnecter au moins une fois. Les membres déjà hors ligne lorsque le bot a rejoint, et qui ne se sont pas connectés depuis, n'apparaîtront pas encore ici.",
-  "commands.inactive.page_title": "Membres inactifs (>{days} jours) - Page {page}/{total}",
+  "commands.inactive.page_title": "Membres inactifs (>{days} jours) - {count} trouvés - Page {page}/{total}",
   "commands.inactive.member_info": "**Surnom :** {nickname}\n**Dernière connexion :** {last_seen}",
 
   "commands.chat_history.server_title": "📊 Historique de discussion du serveur - {guild}",

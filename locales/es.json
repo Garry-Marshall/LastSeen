@@ -307,7 +307,7 @@
   "commands.inactive.no_guild_config": "Configuración del servidor no encontrada. Contacta con un administrador.",
   "commands.inactive.empty_title": "Miembros inactivos",
   "commands.inactive.empty_desc": "Ningún miembro ha estado inactivo durante más de {days} días.\n\n**Nota:** El bot solo puede rastrear la hora de última conexión de un miembro después de observarlo desconectarse al menos una vez. Los miembros que ya estaban desconectados cuando el bot se unió, y que no se han conectado desde entonces, aún no aparecerán aquí.",
-  "commands.inactive.page_title": "Miembros inactivos (>{days} días) - Página {page}/{total}",
+  "commands.inactive.page_title": "Miembros inactivos (>{days} días) - {count} encontrados - Página {page}/{total}",
   "commands.inactive.member_info": "**Apodo:** {nickname}\n**Última conexión:** {last_seen}",
 
   "commands.chat_history.server_title": "📊 Historial de chat del servidor - {guild}",

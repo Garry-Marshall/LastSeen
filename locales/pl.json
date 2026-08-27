@@ -307,7 +307,7 @@
   "commands.inactive.no_guild_config": "Nie znaleziono konfiguracji serwera. Skontaktuj się z administratorem.",
   "commands.inactive.empty_title": "Nieaktywni członkowie",
   "commands.inactive.empty_desc": "Żaden członek nie był nieaktywny dłużej niż {days} dni.\n\n**Uwaga:** Bot może śledzić czas ostatniej obecności członka dopiero po zaobserwowaniu jego przejścia w tryb offline co najmniej raz. Członkowie, którzy byli już offline, gdy bot dołączył, i od tego czasu nie pojawili się online, jeszcze się tutaj nie pojawią.",
-  "commands.inactive.page_title": "Nieaktywni członkowie (>{days} dni) - Strona {page}/{total}",
+  "commands.inactive.page_title": "Nieaktywni członkowie (>{days} dni) - znaleziono {count} - Strona {page}/{total}",
   "commands.inactive.member_info": "**Pseudonim:** {nickname}\n**Ostatnio widziany:** {last_seen}",
 
   "commands.chat_history.server_title": "📊 Historia czatu serwera - {guild}",

@@ -786,7 +786,7 @@ class CommandsCog(commands.Cog):
 
         for i, chunk in enumerate(chunks):
             embed = create_embed(
-                t("commands.inactive.page_title", lang, days=inactive_days, page=i + 1, total=len(chunks)),
+                t("commands.inactive.page_title", lang, days=inactive_days, count=len(inactive_members), page=i + 1, total=len(chunks)),
                 discord.Color.blue()
             )
 

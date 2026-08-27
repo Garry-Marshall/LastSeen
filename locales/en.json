@@ -307,7 +307,7 @@
   "commands.inactive.no_guild_config": "Guild configuration not found. Please contact an administrator.",
   "commands.inactive.empty_title": "Inactive Members",
   "commands.inactive.empty_desc": "No members have been inactive for more than {days} days.\n\n**Note:** The bot can only track a member's last seen time after observing them go offline at least once. Members who were already offline when the bot joined, and haven't gone online since, will not appear here yet.",
-  "commands.inactive.page_title": "Inactive Members (>{days} days) - Page {page}/{total}",
+  "commands.inactive.page_title": "Inactive Members (>{days} days) - {count} found - Page {page}/{total}",
   "commands.inactive.member_info": "**Nickname:** {nickname}\n**Last Seen:** {last_seen}",
 
   "commands.chat_history.server_title": "📊 Server Chat History - {guild}",
