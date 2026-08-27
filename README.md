@@ -109,7 +109,6 @@ Configurable database backups with automatic retention management. Set your back
   - `/watch remove <id>` - Remove a watch by id
   - Durations use `m`/`h`/`d`; online alerts have a 1-hour per-member cooldown; opted-out members can't be watched; up to 50 watches per server
 - `/role-history <user>` - Show the last 20 role changes for a member
-- `/health` - Check bot health status (uptime, latency, database, guild stats)
 - `/help [command]` - Show available commands, or detailed help for one command (e.g. `/help watch`)
 
 ## Installation
