@@ -1452,6 +1452,42 @@ class DatabaseManager:
             logger.error(f"Failed to find member '{search_term}' in guild {guild_id}: {e}")
             return None
 
+    def search_members_by_name(self, guild_id: int, query: str, limit: int = 25) -> List[Dict[str, Any]]:
+        """Substring name search for autocomplete.
+
+        Deliberately lightweight: matches username/nickname substrings in SQL
+        and stops at `limit` rows, selecting only the two columns autocomplete
+        needs. This runs on every keystroke, so unlike get_guild_members it
+        never materializes the whole guild or parses roles JSON per row. The
+        leading-wildcard LIKE can't use an index, but the LIMIT bounds the scan.
+
+        Args:
+            guild_id: Discord guild ID
+            query: Substring to match against username or nickname
+            limit: Maximum rows to return (Discord caps autocomplete at 25)
+
+        Returns:
+            List of {'username', 'nickname'} dicts for active members
+        """
+        try:
+            # Escape LIKE wildcards in user input so a typed % or _ is literal.
+            escaped = query.lower().replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            like = f"%{escaped}%"
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT username, nickname FROM members
+                    WHERE guild_id = ? AND is_active = 1 AND (
+                        LOWER(username) LIKE ? ESCAPE '\\' OR
+                        LOWER(nickname) LIKE ? ESCAPE '\\'
+                    )
+                    LIMIT ?
+                """, (guild_id, like, like, limit))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to search members '{query}' in guild {guild_id}: {e}")
+            return []
+
     def get_inactive_members(self, guild_id: int, inactive_days: int) -> List[Dict[str, Any]]:
         """
         Get all members who have been inactive for more than the specified days.

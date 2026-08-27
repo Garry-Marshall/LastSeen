@@ -314,28 +314,24 @@ class CommandsCog(commands.Cog):
         """
         if not interaction.guild:
             return []
-        
-        # Get all members from database for this guild
-        members = await asyncio.to_thread(self.db.get_guild_members, interaction.guild_id, False)
-        
-        # Filter based on current input (case-insensitive)
-        current_lower = current.lower()
+
+        # Fires on every keystroke and cannot be deferred, so keep it cheap.
+        # Skip the DB lookup until there are enough characters to narrow on —
+        # a 0-1 char query matches a huge slice of a large guild for no benefit.
+        if len(current) < 2:
+            return []
+
+        # SQL does the substring match and the 25-row cap; no full-guild fetch.
+        members = await asyncio.to_thread(self.db.search_members_by_name, interaction.guild_id, current, 25)
+
         matches = []
-        
         for member in members:
             username = member.get('username', '')
             nickname = member.get('nickname', '')
-            
-            # Match on username or nickname
-            if current_lower in username.lower() or (nickname and current_lower in nickname.lower()):
-                # Show nickname if available, otherwise username
-                display_name = nickname if nickname else username
-                matches.append(app_commands.Choice(name=display_name[:100], value=username[:100]))
-                
-            # Limit to 25 choices (Discord limit)
-            if len(matches) >= 25:
-                break
-        
+            # Show nickname if available, otherwise username
+            display_name = nickname if nickname else username
+            matches.append(app_commands.Choice(name=display_name[:100], value=username[:100]))
+
         return matches
 
     @app_commands.command(name="whois", description="👤 Get information about a user")
