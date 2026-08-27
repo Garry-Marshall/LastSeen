@@ -2247,18 +2247,25 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # First, ensure the member exists in the database
-                if not self.member_exists(guild_id, user_id):
+                # Member existence + "first message of this day" in one
+                # round-trip, on the shared cursor — avoids borrowing a second
+                # pooled connection (member_exists) and a separate is_new_day
+                # SELECT. A row absent for this date means it's the member's
+                # first message of a new active day (the transition the journey
+                # summary folds on), detected before the upsert creates the row.
+                # Both subqueries hit existing indexes (members PK,
+                # message_activity's UNIQUE(guild_id,user_id,date)).
+                cursor.execute("""
+                    SELECT
+                        EXISTS(SELECT 1 FROM members
+                               WHERE guild_id = ? AND user_id = ?),
+                        EXISTS(SELECT 1 FROM message_activity
+                               WHERE guild_id = ? AND user_id = ? AND date = ?)
+                """, (guild_id, user_id, guild_id, user_id, date))
+                member_present, has_today = cursor.fetchone()
+                if not member_present:
                     return False
-
-                # A row absent for this date means it's the member's first
-                # message of a new active day — the transition the journey
-                # summary folds on. Detected before the upsert creates the row.
-                cursor.execute(
-                    "SELECT 1 FROM message_activity WHERE guild_id = ? AND user_id = ? AND date = ?",
-                    (guild_id, user_id, date)
-                )
-                is_new_day = cursor.fetchone() is None
+                is_new_day = not has_today
 
                 # INSERT OR REPLACE approach: if record exists, increment; if not, create with count
                 cursor.execute("""

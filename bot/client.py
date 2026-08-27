@@ -4,6 +4,7 @@ import asyncio
 import discord
 from discord.ext import commands
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from database import DatabaseManager
@@ -21,6 +22,15 @@ CHUNK_CONCURRENCY = 4
 # task would otherwise hang forever and the done() guard in on_ready would
 # never allow another chunking pass.
 CHUNK_TIMEOUT = 120
+
+# Size of the shared thread pool used for all off-loop database work, and the
+# matching DB connection-pool size. asyncio.to_thread defaults to an executor
+# of up to min(32, cpu+4) threads; left unbounded it can exceed the connection
+# pool during bursts, forcing throwaway connections to be opened (re-running
+# every PRAGMA) and closed. Pinning both to the same number keeps hot
+# connections reused and caps concurrent writers contending on SQLite's single
+# write lock. Nearly every to_thread call in this bot is DB work.
+DB_WORKER_THREADS = 8
 
 
 class LastSeenBot(commands.AutoShardedBot):
@@ -72,7 +82,7 @@ def create_bot(config) -> commands.Bot:
 
     # Attach configuration and database to bot
     bot.config = config
-    bot.db = DatabaseManager(config.db_file)
+    bot.db = DatabaseManager(config.db_file, pool_size=DB_WORKER_THREADS)
     # Global privacy opt-out list (/forgetme). Initialized here so it exists
     # whenever bot.db does; kept in memory because it is checked on hot event
     # paths (presence updates, messages).
@@ -273,6 +283,13 @@ async def setup_bot(bot: commands.Bot):
     Args:
         bot: Bot instance
     """
+    # Bound the default thread-pool executor that backs every asyncio.to_thread
+    # DB call to the connection-pool size, so the two can't drift under load
+    # (see DB_WORKER_THREADS). Runs here because it needs the running loop.
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=DB_WORKER_THREADS, thread_name_prefix="db-worker")
+    )
+
     # Load all cogs
     await load_cogs(bot)
 

@@ -863,11 +863,14 @@ class TrackingCog(commands.Cog):
         user_id = message.author.id
         
         try:
-            # Ensure member exists in database
-            if not self.db.member_exists(guild_id, user_id):
-                logger.debug(f"User {message.author} not tracked in guild {message.guild.name}, skipping message activity")
-                return
-            
+            # Membership is deliberately NOT checked here. This is the hottest
+            # event path in the bot, so it never touches the DB — a synchronous
+            # read on every message stalls the event loop. Entries for members
+            # who aren't tracked (or have since left) are dropped at flush time,
+            # where member_is_missing already gates every write (see
+            # flush_activity_buffer); the brief buffering until then is bounded
+            # by MAX_BUFFER_SIZE.
+
             # Get today's date (start of day UTC)
             now = datetime.now(timezone.utc)
             today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
