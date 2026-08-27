@@ -2360,6 +2360,35 @@ class UserStatsView(discord.ui.View):
         self.lifecycle_button.label = t("commands.stats_view.btn_lifecycle", lang)
         self.export_button.label = t("commands.stats_view.btn_export", lang)
 
+    def _make_back_view(self) -> discord.ui.View:
+        """Build a one-button view that returns to the stats overview.
+
+        Every sub-panel shares this, so the overview-rebuild logic lives in a
+        single place instead of being copy-pasted into each button handler.
+        """
+        view = discord.ui.View(timeout=300)
+        back_button = discord.ui.Button(
+            label=t("commands.stats_view.btn_back", self.lang),
+            style=discord.ButtonStyle.secondary
+        )
+        back_button.callback = self._return_to_overview
+        view.add_item(back_button)
+        return view
+
+    async def _return_to_overview(self, interaction: discord.Interaction):
+        """Rebuild and show the stats overview (the Back button's callback)."""
+        await interaction.response.defer()
+        stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
+        stats['guild_id'] = self.guild_id
+        prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
+        growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+
+        cog = interaction.client.get_cog('CommandsCog')
+        overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
+        overview_view = UserStatsView(self.guild_id, self.db, self.lang)
+
+        await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+
     @discord.ui.button(label="📊 Retention Report", style=discord.ButtonStyle.primary, row=0)
     async def retention_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Show retention cohort analysis."""
@@ -2370,30 +2399,9 @@ class UserStatsView(discord.ui.View):
             funnel = await asyncio.to_thread(self.db.get_activation_funnel, self.guild_id)
             lifespan = await asyncio.to_thread(self.db.get_departure_lifespan, self.guild_id)
             embed = self._create_retention_embed(cohorts, funnel, lifespan)
-            
-            # Create view with back button
-            view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
-            
-            async def back_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
-                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
-                stats['guild_id'] = self.guild_id
-                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
-                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
-                # Get the parent cog to access _create_stats_overview_embed
-                cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
-                
-                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
-            
-            back_button.callback = back_callback
-            view.add_item(back_button)
-            
-            await interaction.edit_original_response(embed=embed, view=view)
-            
+            await interaction.edit_original_response(embed=embed, view=self._make_back_view())
+
         except Exception as e:
             logger.error(f"Failed to show retention report: {e}", exc_info=True)
             await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
@@ -2410,34 +2418,14 @@ class UserStatsView(discord.ui.View):
             growth_365d = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=365)
             
             embed = self._create_growth_embed(growth_30d, growth_90d, growth_365d)
-            
-            # Create view with back button
-            view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
-            
-            async def back_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
-                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
-                stats['guild_id'] = self.guild_id
-                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
-                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
-                cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
-                
-                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
-            
-            back_button.callback = back_callback
-            view.add_item(back_button)
-            
-            await interaction.edit_original_response(embed=embed, view=view)
-            
+            await interaction.edit_original_response(embed=embed, view=self._make_back_view())
+
         except Exception as e:
             logger.error(f"Failed to show growth report: {e}", exc_info=True)
             await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
-    @discord.ui.button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🏆 Leaderboard", style=discord.ButtonStyle.primary, row=1)
     async def leaderboard_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Show activity leaderboard."""
         await interaction.response.defer()
@@ -2463,27 +2451,7 @@ class UserStatsView(discord.ui.View):
             history = await asyncio.to_thread(self.db.get_health_history, self.guild_id)
             embed = self._create_health_embed(health, history)
 
-            # Create view with back button
-            view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
-
-            async def back_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
-                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
-                stats['guild_id'] = self.guild_id
-                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
-                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-
-                cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
-
-                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
-
-            back_button.callback = back_callback
-            view.add_item(back_button)
-
-            await interaction.edit_original_response(embed=embed, view=view)
+            await interaction.edit_original_response(embed=embed, view=self._make_back_view())
 
         except Exception as e:
             logger.error(f"Failed to show server health: {e}", exc_info=True)
@@ -2499,29 +2467,9 @@ class UserStatsView(discord.ui.View):
             tz_str = guild_config.get('timezone', 'UTC') if guild_config else 'UTC'
             windows = await asyncio.to_thread(self.db.get_server_activity_windows, self.guild_id, 30, tz_str)
             embed = self._create_heatmap_embed(windows, tz_str)
-            
-            # Create view with back button
-            view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
-            
-            async def back_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
-                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
-                stats['guild_id'] = self.guild_id
-                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
-                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
-                cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
-                
-                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
-            
-            back_button.callback = back_callback
-            view.add_item(back_button)
-            
-            await interaction.edit_original_response(embed=embed, view=view)
-            
+            await interaction.edit_original_response(embed=embed, view=self._make_back_view())
+
         except Exception as e:
             logger.error(f"Failed to show activity heatmap: {e}", exc_info=True)
             await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
@@ -2542,26 +2490,7 @@ class UserStatsView(discord.ui.View):
             returns = await asyncio.to_thread(self.db.get_recent_returns, self.guild_id, since_ts, 5)
             embed = self._create_participation_embed(segments, lurkers, ghosts, returns_count, returns)
 
-            view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
-
-            async def back_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
-                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
-                stats['guild_id'] = self.guild_id
-                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
-                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-
-                cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
-
-                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
-
-            back_button.callback = back_callback
-            view.add_item(back_button)
-
-            await interaction.edit_original_response(embed=embed, view=view)
+            await interaction.edit_original_response(embed=embed, view=self._make_back_view())
 
         except Exception as e:
             logger.error(f"Failed to show participation report: {e}", exc_info=True)
@@ -2576,26 +2505,7 @@ class UserStatsView(discord.ui.View):
             segments = await asyncio.to_thread(self.db.get_lifecycle_segments, self.guild_id)
             embed = self._create_lifecycle_embed(segments)
 
-            view = discord.ui.View(timeout=300)
-            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
-
-            async def back_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
-                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
-                stats['guild_id'] = self.guild_id
-                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
-                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
-
-                cog = interaction.client.get_cog('CommandsCog')
-                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
-
-                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
-
-            back_button.callback = back_callback
-            view.add_item(back_button)
-
-            await interaction.edit_original_response(embed=embed, view=view)
+            await interaction.edit_original_response(embed=embed, view=self._make_back_view())
 
         except Exception as e:
             logger.error(f"Failed to show lifecycle report: {e}", exc_info=True)
@@ -3029,23 +2939,9 @@ class UserStatsView(discord.ui.View):
             inline=False
         )
 
-        # Membership flow: joins vs departures, 30d vs prior 30d
-        flow_lines = [
-            t("commands.stats_view.health_joins_line", lang,
-              cur=health['joins_30d'], delta=with_delta(health['joins_30d'], health['joins_prev_30d'], monthly_ok)),
-            t("commands.stats_view.health_leaves_line", lang,
-              cur=health['leaves_30d'], delta=with_delta(health['leaves_30d'], health['leaves_prev_30d'], monthly_ok)),
-            t("commands.stats_view.health_net_line", lang,
-              net=health['joins_30d'] - health['leaves_30d']),
-        ]
-        if not monthly_ok:
-            flow_lines.append(t("commands.stats_view.health_no_compare", lang,
-                                need=60, days=health['days_of_data']))
-        embed.add_field(
-            name=t("commands.stats_view.health_flow_title", lang),
-            value="\n".join(flow_lines),
-            inline=False
-        )
+        # Membership flow (joins/leaves/net) intentionally lives only in the
+        # Server Growth panel now — it owns membership churn across 30/90/365d,
+        # so Community Pulse stays focused on engagement momentum.
 
         # Participation breadth: share of tracked members who posted
         members = health['active_members']
@@ -3058,29 +2954,9 @@ class UserStatsView(discord.ui.View):
             inline=False
         )
 
-        # New-member activation: first-week posting rate, cohort vs prior cohort
-        cur_cohort = health.get('activation_cur')
-        if cur_cohort:
-            value = t("commands.stats_view.health_activation_line", lang,
-                      rate=cur_cohort['rate'], matured=cur_cohort['matured'])
-            prev_cohort = health.get('activation_prev')
-            if prev_cohort:
-                pts = round(cur_cohort['rate'] - prev_cohort['rate'])
-                if pts > 0:
-                    pts_text = t("commands.stats_view.health_pts_up", lang, pts=pts)
-                elif pts < 0:
-                    pts_text = t("commands.stats_view.health_pts_down", lang, pts=abs(pts))
-                else:
-                    pts_text = t("commands.stats_view.health_pts_flat", lang)
-                value += t("commands.stats_view.health_activation_prev", lang,
-                           rate=prev_cohort['rate'], delta=pts_text)
-        else:
-            value = t("commands.stats_view.health_activation_no_data", lang)
-        embed.add_field(
-            name=t("commands.stats_view.health_activation_title", lang),
-            value=value,
-            inline=False
-        )
+        # New-member activation (first-week posting rate) intentionally lives
+        # only in the Retention panel now — its activation funnel covers the same
+        # signal in more detail, so Community Pulse no longer repeats it here.
 
         # Returning members — 30+ day comebacks, window vs window
         embed.add_field(
