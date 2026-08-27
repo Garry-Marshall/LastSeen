@@ -43,11 +43,11 @@ PRESENCE_BATCH_MAX = 500    # Max events applied per worker-thread batch
 # show text only.
 STATUS_MESSAGES = [
     ('', 'Listening to /lastseen'),
-    ('👀', 'Watching you'),
-    ('', 'Watching who\'s online'),
+    ('', 'Watching you'),
     ('', 'Listening to /help'),
     ('', 'Listening to /whois'),
     ('', 'Listening to /mystats'),
+    ('🌐', 'lastseen.bot'),
 ]
 
 

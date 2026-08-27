@@ -1801,6 +1801,76 @@ class DatabaseManager:
             logger.error(f"Failed to get participation segments for guild {guild_id}: {e}")
         return result
 
+    def get_lifecycle_segments(self, guild_id: int, new_days: int = 7,
+                               active_window_days: int = 30, active_min: int = 5,
+                               quiet_window_days: int = 90, return_days: int = 14) -> Dict[str, int]:
+        """Classify active members into behavioural lifecycle stages.
+
+        Hybrid model: combines the presence signal (members.last_seen) with the
+        message signal (message_activity). Every active member lands in exactly
+        one bucket, resolved by the precedence encoded in the CASE below —
+        new → exploring → returned → active → quiet → dormant:
+
+          🐣 new       — joined within new_days, never posted
+          🌱 exploring — joined within new_days, has posted at least once
+          🔄 returned  — reappeared online after a long absence (a member_returns
+                         row within return_days); presence-based, not posting-based
+          🔥 active    — >= active_min messages within active_window_days
+          😴 quiet     — not active, but seen (presence) within active_window_days
+                         or posted within quiet_window_days
+          👻 dormant   — no recent presence and no recent posting
+
+        Read-time only — writes nothing. One aggregate pass over this guild's
+        message_activity (idx_message_activity_user_date) joined to members plus a
+        small member_returns lookup, so it stays cheap enough for the stats view.
+
+        Returns:
+            Dict mapping each bucket name to its member count.
+        """
+        result = {'new': 0, 'exploring': 0, 'returned': 0, 'active': 0, 'quiet': 0, 'dormant': 0}
+        try:
+            now_ts = int(datetime.now(timezone.utc).timestamp())
+            new_win = now_ts - new_days * SECONDS_PER_DAY
+            ret_win = now_ts - return_days * SECONDS_PER_DAY
+            active_win = self._participation_window_start(active_window_days)
+            quiet_win = self._participation_window_start(quiet_window_days)
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT
+                        CASE
+                            WHEN m.join_date >= ? AND agg.last_post IS NULL         THEN 'new'
+                            WHEN m.join_date >= ?                                   THEN 'exploring'
+                            WHEN ret.user_id IS NOT NULL                            THEN 'returned'
+                            WHEN COALESCE(agg.msgs_recent, 0) >= ?                  THEN 'active'
+                            WHEN (m.last_seen = 0 OR m.last_seen >= ?)
+                              OR (agg.last_post IS NOT NULL AND agg.last_post >= ?) THEN 'quiet'
+                            ELSE 'dormant'
+                        END AS bucket,
+                        COUNT(*)
+                    FROM members m
+                    LEFT JOIN (
+                        SELECT user_id,
+                               MAX(date) AS last_post,
+                               SUM(CASE WHEN date >= ? THEN message_count ELSE 0 END) AS msgs_recent
+                        FROM message_activity
+                        WHERE guild_id = ?
+                        GROUP BY user_id
+                    ) agg ON agg.user_id = m.user_id
+                    LEFT JOIN (
+                        SELECT DISTINCT user_id FROM member_returns
+                        WHERE guild_id = ? AND returned_at >= ?
+                    ) ret ON ret.user_id = m.user_id
+                    WHERE m.guild_id = ? AND m.is_active = 1
+                    GROUP BY bucket
+                """, (new_win, new_win, active_min, active_win, quiet_win,
+                      active_win, guild_id, guild_id, ret_win, guild_id))
+                for bucket, count in cursor.fetchall():
+                    result[bucket] = count
+        except Exception as e:
+            logger.error(f"Failed to get lifecycle segments for guild {guild_id}: {e}")
+        return result
+
     def get_lurkers(self, guild_id: int, window_days: int = 30, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Active members seen within the window but with zero messages in it.
 

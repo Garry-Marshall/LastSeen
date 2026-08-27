@@ -2263,6 +2263,7 @@ class UserStatsView(discord.ui.View):
         self.health_button.label = t("commands.stats_view.btn_health", lang)
         self.heatmap_button.label = t("commands.stats_view.btn_heatmap", lang)
         self.participation_button.label = t("commands.stats_view.btn_participation", lang)
+        self.lifecycle_button.label = t("commands.stats_view.btn_lifecycle", lang)
         self.export_button.label = t("commands.stats_view.btn_export", lang)
 
     @discord.ui.button(label="📊 Retention Report", style=discord.ButtonStyle.primary, row=0)
@@ -2470,6 +2471,40 @@ class UserStatsView(discord.ui.View):
 
         except Exception as e:
             logger.error(f"Failed to show participation report: {e}", exc_info=True)
+            await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
+
+    @discord.ui.button(label="🔄 Lifecycle", style=discord.ButtonStyle.primary, row=1)
+    async def lifecycle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Show the member activity lifecycle breakdown (behaviour-based stages)."""
+        await interaction.response.defer()
+
+        try:
+            segments = await asyncio.to_thread(self.db.get_lifecycle_segments, self.guild_id)
+            embed = self._create_lifecycle_embed(segments)
+
+            view = discord.ui.View(timeout=300)
+            back_button = discord.ui.Button(label=t("commands.stats_view.btn_back", self.lang), style=discord.ButtonStyle.secondary)
+
+            async def back_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
+                stats['guild_id'] = self.guild_id
+                prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
+                growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
+
+                cog = interaction.client.get_cog('CommandsCog')
+                overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
+                overview_view = UserStatsView(self.guild_id, self.db, self.lang)
+
+                await interaction.edit_original_response(embed=overview_embed, view=overview_view)
+
+            back_button.callback = back_callback
+            view.add_item(back_button)
+
+            await interaction.edit_original_response(embed=embed, view=view)
+
+        except Exception as e:
+            logger.error(f"Failed to show lifecycle report: {e}", exc_info=True)
             await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
     @discord.ui.button(label="📋 Export Report", style=discord.ButtonStyle.green, row=1)
@@ -2831,6 +2866,27 @@ class UserStatsView(discord.ui.View):
                 inline=False
             )
 
+        return embed
+
+    def _create_lifecycle_embed(self, segments: dict) -> discord.Embed:
+        """Create the member-lifecycle embed: behaviour-based activity stages."""
+        lang = self.lang
+        embed = create_embed(t("commands.stats_view.lifecycle_title", lang), discord.Color.blurple())
+
+        total = sum(segments.values())
+        if total == 0:
+            embed.description = t("commands.stats_view.lifecycle_no_data", lang)
+            return embed
+
+        # Fixed display order (join → active → fading, with Returned last),
+        # independent of the counts so the panel reads the same every time.
+        order = ['new', 'exploring', 'active', 'quiet', 'dormant', 'returned']
+        lines = []
+        for bucket in order:
+            label = t(f"commands.stats_view.lifecycle_{bucket}", lang)
+            lines.append(t("commands.stats_view.lifecycle_line", lang, label=label, count=segments.get(bucket, 0)))
+        embed.description = t("commands.stats_view.lifecycle_desc", lang) + "\n\n" + "\n".join(lines)
+        embed.set_footer(text=t("commands.stats_view.lifecycle_footer", lang, total=total))
         return embed
 
     def _create_health_embed(self, health: dict, history: list = None) -> discord.Embed:
