@@ -67,7 +67,7 @@
   "commands.about.privacy_title": "🔐 Confidentialité",
   "commands.about.privacy_value": "Ce bot ne stocke **pas** et ne lit **pas** le contenu des messages. Seules les métadonnées nécessaires au suivi de l'activité sont enregistrées.\nUtilisez `/forgetme` pour supprimer vos données et vous désinscrire du suivi.\n[Politique de confidentialité](https://lastseen.bot/privacy-policy/)",
   "commands.about.help_title": "🔗 Besoin d'aide / Des suggestions ?",
-  "commands.about.help_value": "[Rejoignez notre serveur communautaire](https://discord.gg/d3N5sd58fh)",
+  "commands.about.help_value": "[Rejoignez notre serveur communautaire](https://discord.gg/d3N5sd58fh)\n[Référence des commandes](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "commands.about.footer": "Utilisez /help pour voir les commandes disponibles",
 
   "commands.search.admin_required": "❌ Cette commande nécessite des permissions d'administrateur.",

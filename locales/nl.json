@@ -67,7 +67,7 @@
   "commands.about.privacy_title": "🔐 Privacy",
   "commands.about.privacy_value": "Deze bot slaat berichtinhoud **niet** op en leest deze **niet**. Alleen metadata die nodig is voor activiteitstracking wordt vastgelegd.\nGebruik `/forgetme` om je gegevens te verwijderen en je af te melden voor tracking.\n[Privacybeleid](https://lastseen.bot/privacy-policy/)",
   "commands.about.help_title": "🔗 Hulp nodig / Suggesties?",
-  "commands.about.help_value": "[Word lid van onze communityserver](https://discord.gg/d3N5sd58fh)",
+  "commands.about.help_value": "[Word lid van onze communityserver](https://discord.gg/d3N5sd58fh)\n[Commando-overzicht](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "commands.about.footer": "Gebruik /help om beschikbare commando's te zien",
 
   "commands.search.admin_required": "❌ Dit commando vereist beheerdersrechten.",
