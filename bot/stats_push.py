@@ -40,9 +40,16 @@ async def push_stats(bot):
         )
         return
 
+    # Use the same DB-backed counts as /about (tracked, active, non-bot members)
+    # so the public number matches what the bot reports in-app. Runs in a worker
+    # thread so the cross-guild full scan never blocks the event loop. The DB
+    # layer caches for 5 min, but at a 10-min cadence the cache is usually cold
+    # here, so most pushes do a fresh scan — cheap and infrequent enough not to
+    # matter.
+    stats = await asyncio.to_thread(bot.db.get_bot_statistics)
     data = {
-        "servers": len(bot.guilds),
-        "users": sum((g.member_count or 0) for g in bot.guilds),
+        "servers": stats["total_guilds"],
+        "users": stats["total_users"],
         "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
