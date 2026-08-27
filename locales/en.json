@@ -336,6 +336,8 @@
 
   "admin.help.title": "LastSeen Bot - Help",
   "admin.help.description": "Track member activity, monitor server statistics, and automate reports.\n\n**Quick Start:**\n• Check when someone was last online: `/lastseen @user`\n• View member details: `/whois @user`",
+  "admin.help.links_title": "🔗 Links",
+  "admin.help.links": "[Command reference](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "admin.help.user_commands_title": "👥 User Commands",
   "admin.help.user_commands": "`/whois <user>` - Show user info, roles, join date, last seen\n`/lastseen <user>` or `/seen <user>` - When user was last online\n`/chat-history <user>` - Show message posting stats for the last year\n`/mystats` - View your own activity statistics (only visible to you)\n`/forgetme` - Delete your data and opt out of tracking\n`/optin` - Re-enable tracking after opting out\n",
   "admin.help.admin_commands_title": "⚙️ Admin Commands",

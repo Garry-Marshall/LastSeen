@@ -336,6 +336,8 @@
 
   "admin.help.title": "LastSeen Bot - Help",
   "admin.help.description": "Houd ledenactiviteit bij, monitor serverstatistieken en automatiseer rapporten.\n\n**Snelstart:**\n• Bekijk wanneer iemand voor het laatst online was: `/lastseen @gebruiker`\n• Bekijk ledendetails: `/whois @gebruiker`",
+  "admin.help.links_title": "🔗 Links",
+  "admin.help.links": "[Commando-overzicht](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "admin.help.user_commands_title": "👥 Gebruikerscommando's",
   "admin.help.user_commands": "`/whois <gebruiker>` - Toon gebruikersinfo, rollen, lidmaatschapsdatum, laatst gezien\n`/lastseen <gebruiker>` of `/seen <gebruiker>` - Wanneer de gebruiker voor het laatst online was\n`/chat-history <gebruiker>` - Toon berichtstatistieken van het afgelopen jaar\n`/mystats` - Bekijk je eigen activiteitsstatistieken (alleen voor jou zichtbaar)\n`/forgetme` - Verwijder je gegevens en meld je af voor tracking\n`/optin` - Tracking opnieuw inschakelen na afmelden\n",
   "admin.help.admin_commands_title": "⚙️ Beheerderscommando's",

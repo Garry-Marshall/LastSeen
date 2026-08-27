@@ -129,6 +129,13 @@ class AdminCog(commands.Cog):
         embed = create_embed(t("admin.help.title", lang), discord.Color.blue())
         embed.description = t("admin.help.description", lang)
 
+        # Links (shown to everyone)
+        embed.add_field(
+            name=t("admin.help.links_title", lang),
+            value=t("admin.help.links", lang),
+            inline=False
+        )
+
         # User Commands (shown to both admin and users)
         embed.add_field(
             name=t("admin.help.user_commands_title", lang),

@@ -336,6 +336,8 @@
 
   "admin.help.title": "LastSeen Bot - Aide",
   "admin.help.description": "Suivez l'activité des membres, surveillez les statistiques du serveur et automatisez les rapports.\n\n**Démarrage rapide :**\n• Vérifiez quand quelqu'un était en ligne pour la dernière fois : `/lastseen @utilisateur`\n• Voir les détails d'un membre : `/whois @utilisateur`",
+  "admin.help.links_title": "🔗 Liens",
+  "admin.help.links": "[Référence des commandes](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "admin.help.user_commands_title": "👥 Commandes utilisateur",
   "admin.help.user_commands": "`/whois <utilisateur>` - Affiche les infos, rôles, date d'arrivée, dernière connexion\n`/lastseen <utilisateur>` ou `/seen <utilisateur>` - Quand l'utilisateur était en ligne pour la dernière fois\n`/chat-history <utilisateur>` - Affiche les statistiques de messages de l'année écoulée\n`/mystats` - Voir vos propres statistiques d'activité (visibles uniquement par vous)\n`/forgetme` - Supprimez vos données et désinscrivez-vous du suivi\n`/optin` - Réactivez le suivi après désinscription\n",
   "admin.help.admin_commands_title": "⚙️ Commandes d'administrateur",
