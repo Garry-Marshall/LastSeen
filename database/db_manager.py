@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 SECONDS_PER_DAY = 86400
 SECONDS_PER_HOUR = 3600
 
+# How many days of health_snapshots to keep. The Community Pulse trend chart
+# only ever reads the newest ~84 days (get_health_history samples 12 points at
+# 7-day steps), so 120 keeps the chart fully intact with margin while capping
+# the table's otherwise-unbounded daily growth.
+HEALTH_SNAPSHOT_RETENTION_DAYS = 120
+
 # How long global /about statistics stay cached (seconds)
 BOT_STATS_CACHE_TTL = 300
 
@@ -507,6 +513,126 @@ class DatabaseManager:
                     FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE
                 )
             """)
+
+            # Member activity summary: one durable rollup row per member that
+            # powers the Member Journey view. Every field folds forward as an
+            # O(1) update at the member's first message of a new day (see
+            # increment_message_activity), so the raw per-day message_activity
+            # rows can keep being pruned on the normal retention schedule
+            # without losing lifetime streaks/gaps. Like health_snapshots and
+            # member_returns, this holds only derived counts — no presence, no
+            # per-day history — so it costs nothing against data-minimization.
+            #   first_active/last_active: UTC day-start of first/most-recent
+            #     active day (matches message_activity.date granularity)
+            #   current_streak: running consecutive-active-day count (bookkeeping
+            #     needed to extend longest_streak); longest_gap is in whole days
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS member_activity_summary (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    first_active INTEGER,
+                    last_active INTEGER,
+                    total_messages INTEGER NOT NULL DEFAULT 0,
+                    active_days INTEGER NOT NULL DEFAULT 0,
+                    current_streak INTEGER NOT NULL DEFAULT 0,
+                    longest_streak INTEGER NOT NULL DEFAULT 0,
+                    longest_gap INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (guild_id, user_id),
+                    FOREIGN KEY (guild_id) REFERENCES guilds(guild_id) ON DELETE CASCADE,
+                    FOREIGN KEY (guild_id, user_id) REFERENCES members(guild_id, user_id) ON DELETE CASCADE
+                )
+            """)
+
+            # One-time backfill: seed the summary from whatever message_activity
+            # rows still exist (bounded by each guild's retention). Members whose
+            # true first message predates the retained window can't be
+            # reconstructed — their journey reads "since tracking began", exact
+            # from here forward. Guarded on an empty table so it runs once.
+            #
+            # Join through members and guilds: production can hold orphaned
+            # message_activity rows (member/guild gone while FK enforcement was
+            # off at some past point), and INSERT OR IGNORE does NOT suppress
+            # foreign-key violations — an orphan would abort the whole migration.
+            # A member with no activity simply won't get a summary row until they
+            # next post, which is fine.
+            # One-time sweep of legacy orphaned activity: rows whose member no
+            # longer exists. These date from a ~1-month window in early 2026
+            # (message_activity was introduced 2026-01-21 with cascade FKs, but
+            # PRAGMA foreign_keys=ON wasn't set until 2026-02-23), during which
+            # member/guild deletions didn't cascade. Enforcement has been on
+            # since, so no new orphans are produced — this is a one-time sweep,
+            # a no-op on clean databases. It is tracked by PRAGMA user_version
+            # (NOT the summary-backfill guard below): the two are independent
+            # migrations, and the backfill may already have run on an earlier
+            # startup, which would leave a summary-guarded cleanup stranded.
+            # (member.guild_id references guilds, so a surviving member implies a
+            # surviving guild; missing member is the meaningful orphan here.)
+            cursor.execute("PRAGMA user_version")
+            if cursor.fetchone()[0] < 1:
+                orphan_daily = cursor.execute("""
+                    DELETE FROM message_activity
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM members m
+                        WHERE m.guild_id = message_activity.guild_id
+                          AND m.user_id = message_activity.user_id
+                    )
+                """).rowcount
+                orphan_hourly = cursor.execute("""
+                    DELETE FROM message_activity_hourly
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM members m
+                        WHERE m.guild_id = message_activity_hourly.guild_id
+                          AND m.user_id = message_activity_hourly.user_id
+                    )
+                """).rowcount
+                if orphan_daily or orphan_hourly:
+                    logger.info(
+                        f"Cleaned up orphaned activity rows: {orphan_daily} daily, "
+                        f"{orphan_hourly} hourly"
+                    )
+                cursor.execute("PRAGMA user_version = 1")
+
+            cursor.execute("SELECT COUNT(*) FROM member_activity_summary")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    SELECT ma.guild_id, ma.user_id, ma.date, ma.message_count
+                    FROM message_activity ma
+                    JOIN members m ON m.guild_id = ma.guild_id AND m.user_id = ma.user_id
+                    JOIN guilds g ON g.guild_id = ma.guild_id
+                    ORDER BY ma.guild_id, ma.user_id, ma.date
+                """)
+                summaries: Dict[tuple, Dict[str, int]] = {}
+                for gid, uid, date, mc in cursor.fetchall():
+                    s = summaries.get((gid, uid))
+                    if s is None:
+                        summaries[(gid, uid)] = {
+                            'first': date, 'last': date, 'total': mc,
+                            'days': 1, 'cur': 1, 'best': 1, 'gap': 0,
+                        }
+                        continue
+                    s['total'] += mc
+                    gap = (date - s['last']) // SECONDS_PER_DAY - 1
+                    if gap <= 0:
+                        s['cur'] += 1
+                    else:
+                        if gap > s['gap']:
+                            s['gap'] = gap
+                        s['cur'] = 1
+                    if s['cur'] > s['best']:
+                        s['best'] = s['cur']
+                    s['days'] += 1
+                    s['last'] = date
+                for (gid, uid), s in summaries.items():
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO member_activity_summary
+                            (guild_id, user_id, first_active, last_active,
+                             total_messages, active_days, current_streak,
+                             longest_streak, longest_gap)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (gid, uid, s['first'], s['last'], s['total'],
+                          s['days'], s['cur'], s['best'], s['gap']))
+                if summaries:
+                    logger.info(f"Backfilled member_activity_summary for {len(summaries)} member(s)")
 
             # Migration: per-guild display number (`seq`). Databases created
             # before this column show the raw global autoincrement id (which
@@ -2124,7 +2250,16 @@ class DatabaseManager:
                 # First, ensure the member exists in the database
                 if not self.member_exists(guild_id, user_id):
                     return False
-                
+
+                # A row absent for this date means it's the member's first
+                # message of a new active day — the transition the journey
+                # summary folds on. Detected before the upsert creates the row.
+                cursor.execute(
+                    "SELECT 1 FROM message_activity WHERE guild_id = ? AND user_id = ? AND date = ?",
+                    (guild_id, user_id, date)
+                )
+                is_new_day = cursor.fetchone() is None
+
                 # INSERT OR REPLACE approach: if record exists, increment; if not, create with count
                 cursor.execute("""
                     INSERT INTO message_activity (guild_id, user_id, date, message_count)
@@ -2132,11 +2267,130 @@ class DatabaseManager:
                     ON CONFLICT(guild_id, user_id, date) DO UPDATE SET
                     message_count = message_count + ?
                 """, (guild_id, user_id, date, count, count))
-                
+
+                # Fold the same write into the durable journey rollup, in this
+                # transaction, so the two never drift.
+                self._apply_activity_summary(cursor, guild_id, user_id, date, count, is_new_day)
+
                 return True
         except Exception as e:
             logger.error(f"Failed to increment message activity for user {user_id}: {e}")
             return False
+
+    def _apply_activity_summary(self, cursor, guild_id: int, user_id: int,
+                                date: int, count: int, is_new_day: bool) -> None:
+        """Fold one message write into the member's journey rollup.
+
+        `count` is always added to the lifetime total. When `is_new_day` is set
+        (this is the member's first message on `date`), the active-day count and
+        the streak/gap trackers advance too. Runs on the caller's cursor so it
+        shares the message_activity transaction.
+        """
+        cursor.execute("""
+            SELECT first_active, last_active, total_messages, active_days,
+                   current_streak, longest_streak, longest_gap
+            FROM member_activity_summary
+            WHERE guild_id = ? AND user_id = ?
+        """, (guild_id, user_id))
+        row = cursor.fetchone()
+
+        if row is None:
+            # First message we've ever summarised for this member.
+            cursor.execute("""
+                INSERT INTO member_activity_summary
+                    (guild_id, user_id, first_active, last_active, total_messages,
+                     active_days, current_streak, longest_streak, longest_gap)
+                VALUES (?, ?, ?, ?, ?, 1, 1, 1, 0)
+            """, (guild_id, user_id, date, date, count))
+            return
+
+        first_active, last_active, total, days, cur, best, gap = row
+        total += count
+
+        if is_new_day:
+            if last_active is None or date > last_active:
+                # Normal forward move: measure the closed gap since the last
+                # active day and extend or reset the current streak.
+                closed = (date - last_active) // SECONDS_PER_DAY - 1 if last_active else 0
+                if closed <= 0:
+                    cur += 1
+                else:
+                    if closed > gap:
+                        gap = closed
+                    cur = 1
+                if cur > best:
+                    best = cur
+                days += 1
+                last_active = date
+                if first_active is None:
+                    first_active = date
+            else:
+                # Out-of-order older active day (rare, e.g. a buffer flushed
+                # across midnight): count it, keep first_active earliest, but
+                # don't try to recompute the streak.
+                days += 1
+                if first_active is None or date < first_active:
+                    first_active = date
+
+        cursor.execute("""
+            UPDATE member_activity_summary
+            SET first_active = ?, last_active = ?, total_messages = ?,
+                active_days = ?, current_streak = ?, longest_streak = ?,
+                longest_gap = ?
+            WHERE guild_id = ? AND user_id = ?
+        """, (first_active, last_active, total, days, cur, best, gap,
+              guild_id, user_id))
+
+    def get_member_journey(self, guild_id: int, user_id: int,
+                           conn: Optional[sqlite3.Connection] = None) -> Optional[Dict[str, Any]]:
+        """Assemble the Member Journey view for one member.
+
+        Combines the durable activity summary with the member's join_date /
+        last_seen and their returning-member record. Returns None if the member
+        isn't tracked at all; a tracked member who has never posted still comes
+        back (with zeroed activity) so the join/last-seen lines can render.
+        """
+        try:
+            with self._borrow(conn) as conn:
+                cursor = conn.cursor()
+
+                cursor.execute(
+                    "SELECT join_date, last_seen FROM members WHERE guild_id = ? AND user_id = ?",
+                    (guild_id, user_id)
+                )
+                m = cursor.fetchone()
+                if m is None:
+                    return None
+
+                cursor.execute("""
+                    SELECT first_active, last_active, total_messages, active_days,
+                           longest_streak, longest_gap
+                    FROM member_activity_summary
+                    WHERE guild_id = ? AND user_id = ?
+                """, (guild_id, user_id))
+                s = cursor.fetchone()
+
+                cursor.execute(
+                    "SELECT COUNT(*), MAX(away_seconds) FROM member_returns WHERE guild_id = ? AND user_id = ?",
+                    (guild_id, user_id)
+                )
+                r = cursor.fetchone()
+
+                return {
+                    'join_date': m[0],
+                    'last_seen': m[1],
+                    'first_active': s[0] if s else None,
+                    'last_active': s[1] if s else None,
+                    'total_messages': s[2] if s else 0,
+                    'active_days': s[3] if s else 0,
+                    'longest_streak': s[4] if s else 0,
+                    'longest_gap': s[5] if s else 0,
+                    'return_count': r[0] if r else 0,
+                    'longest_away_days': (r[1] // SECONDS_PER_DAY) if (r and r[1]) else None,
+                }
+        except Exception as e:
+            logger.error(f"Failed to get member journey for user {user_id}: {e}")
+            return None
 
     def increment_message_activity_hourly(self, guild_id: int, user_id: int, timestamp: int, hour: int, count: int = 1) -> bool:
         """
@@ -3296,6 +3550,27 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get health history for guild {guild_id}: {e}")
             return []
+
+    def prune_old_health_snapshots(self, retention_days: int = HEALTH_SNAPSHOT_RETENTION_DAYS) -> int:
+        """
+        Delete health_snapshots older than retention_days.
+
+        Rows older than the retention horizon are never read (see
+        get_health_history), so removing them caps the table's daily growth
+        with no effect on the trend chart. Returns the number of rows deleted.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now_dt = datetime.now(timezone.utc)
+                day = int(datetime(now_dt.year, now_dt.month, now_dt.day, tzinfo=timezone.utc).timestamp())
+                cutoff = day - retention_days * SECONDS_PER_DAY
+                cursor.execute("DELETE FROM health_snapshots WHERE date < ?", (cutoff,))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Failed to prune old health snapshots: {e}")
+            return 0
 
     def get_activity_leaderboard(self, guild_id: int, days: int = 30, limit: int = 10) -> List[Dict[str, Any]]:
         """

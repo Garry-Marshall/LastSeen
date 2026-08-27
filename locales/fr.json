@@ -627,5 +627,23 @@
   "admin.help.search_detail_examples_title": "Exemples",
   "admin.help.search_detail_examples": "• `/search roles:@Moderator status:online`\n• `/search inactive:>30 activity:<10`\n• `/search joined:>2025-01-01 export:csv`\n• `/search roles:@Member status:offline inactive:>7 activity:<50`",
   "admin.help.search_detail_notes_title": "Bon à savoir",
-  "admin.help.search_detail_notes": "• Combinez les filtres pour affiner les résultats.\n• Les résultats sont paginés (15 par page) et privés.\n• Exportez en CSV ou TXT via les boutons sous les résultats."
+  "admin.help.search_detail_notes": "• Combinez les filtres pour affiner les résultats.\n• Les résultats sont paginés (15 par page) et privés.\n• Exportez en CSV ou TXT via les boutons sous les résultats.",
+
+  "commands.journey.button": "🧬 Parcours",
+  "commands.journey.title": "🧬 Parcours du membre — {username}",
+  "commands.journey.joined": "📥 A rejoint le serveur : {date}\n",
+  "commands.journey.first_activity": "🌱 Première participation : {when}\n",
+  "commands.journey.same_day": "Le jour même",
+  "commands.journey.active_days": "📆 Jours actifs : {days:,}\n",
+  "commands.journey.messages": "💬 Messages : {count:,}\n",
+  "commands.journey.longest_streak": "🔥 Plus longue série : {days:,} jours actifs\n",
+  "commands.journey.longest_silence": "🤫 Plus long silence : {days:,} jours\n",
+  "commands.journey.returned": "↩️ Plus longue absence : {days:,} jours d'absence (et retour)\n",
+  "commands.journey.last_message": "✉️ Dernier message : {when}\n",
+  "commands.journey.last_seen_online": "⏱️ Dernière connexion : En ligne maintenant\n",
+  "commands.journey.last_seen": "⏱️ Dernière connexion : {when}\n",
+  "commands.journey.no_activity": "🌱 Première participation : Pas encore — aucun message enregistré\n",
+  "commands.journey.no_data": "Aucun historique de participation n'a encore été enregistré pour ce membre.",
+  "commands.journey.footer": "Décomptes depuis le début du suivi · participation, pas présence",
+  "commands.journey.error": "Échec du chargement du parcours : {error}"
 }

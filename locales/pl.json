@@ -627,5 +627,23 @@
   "admin.help.search_detail_examples_title": "Przykłady",
   "admin.help.search_detail_examples": "• `/search roles:@Moderator status:online`\n• `/search inactive:>30 activity:<10`\n• `/search joined:>2025-01-01 export:csv`\n• `/search roles:@Member status:offline inactive:>7 activity:<50`",
   "admin.help.search_detail_notes_title": "Warto wiedzieć",
-  "admin.help.search_detail_notes": "• Łącz filtry, aby zawęzić wyniki.\n• Wyniki są stronicowane (15 na stronę) i prywatne.\n• Eksportuj do CSV lub TXT za pomocą przycisków pod wynikami."
+  "admin.help.search_detail_notes": "• Łącz filtry, aby zawęzić wyniki.\n• Wyniki są stronicowane (15 na stronę) i prywatne.\n• Eksportuj do CSV lub TXT za pomocą przycisków pod wynikami.",
+
+  "commands.journey.button": "🧬 Ścieżka",
+  "commands.journey.title": "🧬 Ścieżka członka — {username}",
+  "commands.journey.joined": "📥 Dołączył do serwera: {date}\n",
+  "commands.journey.first_activity": "🌱 Pierwsza aktywność: {when}\n",
+  "commands.journey.same_day": "Tego samego dnia",
+  "commands.journey.active_days": "📆 Aktywne dni: {days:,}\n",
+  "commands.journey.messages": "💬 Wiadomości: {count:,}\n",
+  "commands.journey.longest_streak": "🔥 Najdłuższa seria: {days:,} aktywnych dni\n",
+  "commands.journey.longest_silence": "🤫 Najdłuższa cisza: {days:,} dni\n",
+  "commands.journey.returned": "↩️ Najdłuższa nieobecność: {days:,} dni poza serwerem (i powrót)\n",
+  "commands.journey.last_message": "✉️ Ostatnia wiadomość: {when}\n",
+  "commands.journey.last_seen_online": "⏱️ Ostatnio widziany: Teraz online\n",
+  "commands.journey.last_seen": "⏱️ Ostatnio widziany: {when}\n",
+  "commands.journey.no_activity": "🌱 Pierwsza aktywność: Jeszcze nie — brak zarejestrowanych wiadomości\n",
+  "commands.journey.no_data": "Dla tego członka nie zarejestrowano jeszcze historii uczestnictwa.",
+  "commands.journey.footer": "Liczniki od początku śledzenia · uczestnictwo, nie obecność",
+  "commands.journey.error": "Nie udało się załadować ścieżki: {error}"
 }

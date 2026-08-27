@@ -627,5 +627,23 @@
   "admin.help.search_detail_examples_title": "Ejemplos",
   "admin.help.search_detail_examples": "• `/search roles:@Moderator status:online`\n• `/search inactive:>30 activity:<10`\n• `/search joined:>2025-01-01 export:csv`\n• `/search roles:@Member status:offline inactive:>7 activity:<50`",
   "admin.help.search_detail_notes_title": "Bueno saberlo",
-  "admin.help.search_detail_notes": "• Combina filtros para acotar los resultados.\n• Los resultados se paginan (15 por página) y son privados.\n• Exporta a CSV o TXT con los botones debajo de los resultados."
+  "admin.help.search_detail_notes": "• Combina filtros para acotar los resultados.\n• Los resultados se paginan (15 por página) y son privados.\n• Exporta a CSV o TXT con los botones debajo de los resultados.",
+
+  "commands.journey.button": "🧬 Trayectoria",
+  "commands.journey.title": "🧬 Trayectoria del miembro — {username}",
+  "commands.journey.joined": "📥 Se unió al servidor: {date}\n",
+  "commands.journey.first_activity": "🌱 Primera participación: {when}\n",
+  "commands.journey.same_day": "El mismo día",
+  "commands.journey.active_days": "📆 Días activos: {days:,}\n",
+  "commands.journey.messages": "💬 Mensajes: {count:,}\n",
+  "commands.journey.longest_streak": "🔥 Racha más larga: {days:,} días activos\n",
+  "commands.journey.longest_silence": "🤫 Silencio más largo: {days:,} días\n",
+  "commands.journey.returned": "↩️ Ausencia más larga: {days:,} días fuera (y regresó)\n",
+  "commands.journey.last_message": "✉️ Último mensaje: {when}\n",
+  "commands.journey.last_seen_online": "⏱️ Última conexión: En línea ahora\n",
+  "commands.journey.last_seen": "⏱️ Última conexión: {when}\n",
+  "commands.journey.no_activity": "🌱 Primera participación: Todavía no — sin mensajes registrados\n",
+  "commands.journey.no_data": "Aún no se ha registrado historial de participación para este miembro.",
+  "commands.journey.footer": "Conteos desde el inicio del registro · participación, no presencia",
+  "commands.journey.error": "Error al cargar la trayectoria: {error}"
 }

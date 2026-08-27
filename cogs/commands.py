@@ -526,7 +526,11 @@ class CommandsCog(commands.Cog):
                         embed.description += t("commands.whois.profile_activity_bar", lang,
                                                bar=bar, percentile=percentile['percentile'])
 
-        await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
+        # Journey button — only for viewers allowed to see the profile above.
+        view = discord.utils.MISSING
+        if show_profile:
+            view = JourneyView(self, guild_id, member_data['user_id'], username, lang)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
 
     async def _lastseen_impl(self, interaction: discord.Interaction, user: str, command_name: str):
@@ -1056,7 +1060,8 @@ class CommandsCog(commands.Cog):
 
         embed.set_footer(text=t("commands.mystats.footer", lang))
 
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        view = JourneyView(self, guild_id, user_id, username, lang)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         logger.info(f"User {interaction.user} used /mystats in guild {interaction.guild.name}")
 
     @app_commands.command(name="forgetme", description="🗑️ Delete your tracked data and opt out of tracking")
@@ -1561,6 +1566,51 @@ class CommandsCog(commands.Cog):
             )
 
         embed.set_footer(text=t("commands.user_stats.overview_footer", lang))
+        return embed
+
+    def _create_journey_embed(self, journey: dict, member, username: str,
+                              guild_id: int, lang: str = 'en') -> discord.Embed:
+        """Render a member's participation journey (from get_member_journey).
+
+        Milestones and durations built entirely from message-activity rollups
+        plus the single last_seen column — no presence history involved.
+        """
+        embed = create_embed(t("commands.journey.title", lang, username=username), discord.Color.teal())
+        embed.description = ""
+
+        if journey['join_date']:
+            embed.description += t("commands.journey.joined", lang,
+                                   date=format_timestamp(journey['join_date'], 'R', guild_id, self.db, lang))
+
+        if journey['first_active']:
+            # "Same day" when the first message lands on the UTC day they joined.
+            same_day = (journey['join_date']
+                        and journey['first_active'] // 86400 == journey['join_date'] // 86400)
+            when = (t("commands.journey.same_day", lang) if same_day
+                    else format_timestamp(journey['first_active'], 'R', guild_id, self.db, lang))
+            embed.description += t("commands.journey.first_activity", lang, when=when)
+            embed.description += t("commands.journey.active_days", lang, days=journey['active_days'])
+            embed.description += t("commands.journey.messages", lang, count=journey['total_messages'])
+            embed.description += t("commands.journey.longest_streak", lang, days=journey['longest_streak'])
+            embed.description += t("commands.journey.longest_silence", lang, days=journey['longest_gap'])
+        else:
+            embed.description += t("commands.journey.no_activity", lang)
+
+        # Only meaningful once a member has come back from a 30+ day absence.
+        if journey['return_count'] > 0 and journey['longest_away_days']:
+            embed.description += t("commands.journey.returned", lang, days=journey['longest_away_days'])
+
+        if journey['last_active']:
+            embed.description += t("commands.journey.last_message", lang,
+                                   when=format_timestamp(journey['last_active'], 'R', guild_id, self.db, lang))
+
+        if member and member.status != discord.Status.offline:
+            embed.description += t("commands.journey.last_seen_online", lang)
+        elif journey['last_seen']:
+            embed.description += t("commands.journey.last_seen", lang,
+                                   when=format_timestamp(journey['last_seen'], 'R', guild_id, self.db, lang))
+
+        embed.set_footer(text=t("commands.journey.footer", lang))
         return embed
 
     def _parse_search_filters(self, roles, status, inactive, activity, joined, departed, username, guild, lang='en') -> dict:
@@ -2247,6 +2297,48 @@ class SearchResultsView(discord.ui.View):
             )
         except Exception as e:
             await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
+
+
+class JourneyView(discord.ui.View):
+    """A single 🧬 Journey button attached to /whois and /mystats results.
+
+    Clicking it posts the member's participation journey as an ephemeral
+    followup, leaving the original embed intact. Only added when the viewer is
+    allowed to see the member's profile (admin, or the member themselves).
+    """
+
+    def __init__(self, cog: 'CommandsCog', guild_id: int, user_id: int,
+                 username: str, lang: str = 'en'):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.username = username
+        self.lang = lang
+        self.journey_button.label = t("commands.journey.button", lang)
+
+    @discord.ui.button(label="🧬 Journey", style=discord.ButtonStyle.primary)
+    async def journey_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            journey = await asyncio.to_thread(
+                self.cog.db.get_member_journey, self.guild_id, self.user_id
+            )
+            if not journey:
+                await interaction.followup.send(
+                    t("commands.journey.no_data", self.lang), ephemeral=True
+                )
+                return
+            member = interaction.guild.get_member(self.user_id)
+            embed = self.cog._create_journey_embed(
+                journey, member, self.username, self.guild_id, self.lang
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Failed to show member journey: {e}", exc_info=True)
+            await interaction.followup.send(
+                t("commands.journey.error", self.lang, error=e), ephemeral=True
+            )
 
 
 class UserStatsView(discord.ui.View):

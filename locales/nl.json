@@ -627,5 +627,23 @@
   "admin.help.search_detail_examples_title": "Voorbeelden",
   "admin.help.search_detail_examples": "• `/search roles:@Moderator status:online`\n• `/search inactive:>30 activity:<10`\n• `/search joined:>2025-01-01 export:csv`\n• `/search roles:@Member status:offline inactive:>7 activity:<50`",
   "admin.help.search_detail_notes_title": "Goed om te weten",
-  "admin.help.search_detail_notes": "• Combineer filters om de resultaten te verfijnen.\n• Resultaten zijn gepagineerd (15 per pagina) en alleen voor jou zichtbaar.\n• Exporteer naar CSV of TXT via de knoppen onder de resultaten."
+  "admin.help.search_detail_notes": "• Combineer filters om de resultaten te verfijnen.\n• Resultaten zijn gepagineerd (15 per pagina) en alleen voor jou zichtbaar.\n• Exporteer naar CSV of TXT via de knoppen onder de resultaten.",
+
+  "commands.journey.button": "🧬 Ledenreis",
+  "commands.journey.title": "🧬 Ledenreis — {username}",
+  "commands.journey.joined": "📥 Lid van server: {date}\n",
+  "commands.journey.first_activity": "🌱 Eerste deelname: {when}\n",
+  "commands.journey.same_day": "Zelfde dag",
+  "commands.journey.active_days": "📆 Actieve dagen: {days:,}\n",
+  "commands.journey.messages": "💬 Berichten: {count:,}\n",
+  "commands.journey.longest_streak": "🔥 Langste reeks: {days:,} actieve dagen\n",
+  "commands.journey.longest_silence": "🤫 Langste stilte: {days:,} dagen\n",
+  "commands.journey.returned": "↩️ Langste afwezigheid: {days:,} dagen weg (en teruggekomen)\n",
+  "commands.journey.last_message": "✉️ Laatste bericht: {when}\n",
+  "commands.journey.last_seen_online": "⏱️ Laatst gezien: Nu online\n",
+  "commands.journey.last_seen": "⏱️ Laatst gezien: {when}\n",
+  "commands.journey.no_activity": "🌱 Eerste deelname: Nog niet — geen berichten geregistreerd\n",
+  "commands.journey.no_data": "Er is nog geen deelnamegeschiedenis voor dit lid geregistreerd.",
+  "commands.journey.footer": "Aantallen sinds registratie begon · deelname, geen aanwezigheid",
+  "commands.journey.error": "Reis laden mislukt: {error}"
 }

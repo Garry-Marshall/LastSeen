@@ -627,5 +627,23 @@
   "admin.help.search_detail_examples_title": "Examples",
   "admin.help.search_detail_examples": "• `/search roles:@Moderator status:online`\n• `/search inactive:>30 activity:<10`\n• `/search joined:>2025-01-01 export:csv`\n• `/search roles:@Member status:offline inactive:>7 activity:<50`",
   "admin.help.search_detail_notes_title": "Good to know",
-  "admin.help.search_detail_notes": "• Combine any filters to narrow the results.\n• Results are paginated (15 per page) and private to you.\n• Export to CSV or TXT from the buttons below the results."
+  "admin.help.search_detail_notes": "• Combine any filters to narrow the results.\n• Results are paginated (15 per page) and private to you.\n• Export to CSV or TXT from the buttons below the results.",
+
+  "commands.journey.button": "🧬 Journey",
+  "commands.journey.title": "🧬 Member Journey — {username}",
+  "commands.journey.joined": "📥 Joined server: {date}\n",
+  "commands.journey.first_activity": "🌱 First participated: {when}\n",
+  "commands.journey.same_day": "Same day",
+  "commands.journey.active_days": "📆 Active days: {days:,}\n",
+  "commands.journey.messages": "💬 Messages: {count:,}\n",
+  "commands.journey.longest_streak": "🔥 Longest streak: {days:,} active days\n",
+  "commands.journey.longest_silence": "🤫 Longest silence: {days:,} days\n",
+  "commands.journey.returned": "↩️ Longest absence: {days:,} days away (and came back)\n",
+  "commands.journey.last_message": "✉️ Last message: {when}\n",
+  "commands.journey.last_seen_online": "⏱️ Last seen: Currently online\n",
+  "commands.journey.last_seen": "⏱️ Last seen: {when}\n",
+  "commands.journey.no_activity": "🌱 First participated: Not yet — no messages tracked\n",
+  "commands.journey.no_data": "No participation history has been tracked for this member yet.",
+  "commands.journey.footer": "Counts since tracking began · participation, not presence",
+  "commands.journey.error": "Failed to load journey: {error}"
 }

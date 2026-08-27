@@ -1126,7 +1126,11 @@ class TrackingCog(commands.Cog):
                 )
             else:
                 logger.debug(f"Data retention cleanup: no old records to delete ({result['guilds_processed']} guilds checked)")
-                
+
+            snapshots_deleted = await asyncio.to_thread(self.db.prune_old_health_snapshots)
+            if snapshots_deleted > 0:
+                logger.info(f"Pruned {snapshots_deleted} old health snapshot(s)")
+
         except Exception as e:
             logger.error(f"Error during data retention cleanup: {e}", exc_info=True)
 
