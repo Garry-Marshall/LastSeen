@@ -290,3 +290,62 @@ def format_health_delta(cur: int, prev: int, lang: str = 'en') -> str:
     if cur > 0:
         return t("commands.stats_view.health_delta_new", lang)
     return t("commands.stats_view.health_delta_flat", lang, prev=prev)
+
+
+# Community Pulse thresholds: the average month-over-month change in the two
+# participation vitals (distinct posters, message volume) that tips the
+# directional read one way or the other. Deliberately relative — a server is
+# only ever compared with its own previous month, never an absolute scale, so
+# a healthy lurker-heavy community is never graded down.
+PULSE_RISING_THRESHOLD = 5.0
+PULSE_COOLING_THRESHOLD = -5.0
+
+
+def compute_community_pulse(health: dict) -> dict:
+    """Directional community-pulse read from month-over-month engagement.
+
+    Blends the two participation vitals already in ``health`` — distinct
+    posters (breadth) and messages sent (volume) — as percent change vs the
+    previous 30-day window. No score: the result is only a direction.
+
+    Returns a dict with:
+        state           'rising' | 'steady' | 'cooling' | 'collecting'
+        posters_delta   percent change in distinct posters, or None
+        messages_delta  percent change in messages, or None
+    'collecting' means the prior month isn't fully covered by data yet, so no
+    honest comparison is possible; both deltas are None there.
+    """
+    if not health or not health.get('monthly_comparable'):
+        return {'state': 'collecting', 'posters_delta': None, 'messages_delta': None}
+
+    def pct(cur: int, prev: int):
+        return (cur - prev) / prev * 100 if prev > 0 else None
+
+    posters_delta = pct(health['posters_30d'], health['posters_prev_30d'])
+    messages_delta = pct(health['messages_30d'], health['messages_prev_30d'])
+
+    deltas = [d for d in (posters_delta, messages_delta) if d is not None]
+    if not deltas:
+        # Old enough to compare, but last month had no activity to divide by.
+        # Any activity now reads as rising; none as steady.
+        state = 'rising' if (health['posters_30d'] or health['messages_30d']) else 'steady'
+        return {'state': state, 'posters_delta': posters_delta, 'messages_delta': messages_delta}
+
+    avg = sum(deltas) / len(deltas)
+    if avg >= PULSE_RISING_THRESHOLD:
+        state = 'rising'
+    elif avg <= PULSE_COOLING_THRESHOLD:
+        state = 'cooling'
+    else:
+        state = 'steady'
+    return {'state': state, 'posters_delta': posters_delta, 'messages_delta': messages_delta}
+
+
+def format_pct_arrow(pct: float) -> str:
+    """Compact directional percentage for the pulse headline (e.g. '↑8%')."""
+    r = round(pct)
+    if r > 0:
+        return f"↑{r}%"
+    if r < 0:
+        return f"↓{abs(r)}%"
+    return "→0%"

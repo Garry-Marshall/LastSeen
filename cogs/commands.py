@@ -22,7 +22,9 @@ from bot.utils import (
     can_use_bot_commands,
     is_channel_allowed,
     has_bot_admin_role,
-    format_health_delta
+    format_health_delta,
+    compute_community_pulse,
+    format_pct_arrow
 )
 from bot.locale import t, guild_language, weekday_name
 
@@ -2359,9 +2361,9 @@ class UserStatsView(discord.ui.View):
             logger.error(f"Failed to show leaderboard: {e}", exc_info=True)
             await interaction.followup.send(t("commands.stats_view.error", self.lang, error=e), ephemeral=True)
 
-    @discord.ui.button(label="🩺 Server Health", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="💓 Community Pulse", style=discord.ButtonStyle.primary, row=0)
     async def health_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Show server health vitals (window-vs-window deltas, no scoring)."""
+        """Show the community pulse: a directional read plus window-vs-window vitals (no scoring)."""
         await interaction.response.defer()
 
         try:
@@ -2899,7 +2901,20 @@ class UserStatsView(discord.ui.View):
             embed.description = t("commands.stats_view.health_no_data", lang)
             return embed
 
-        embed.description = t("commands.stats_view.health_desc", lang)
+        # Directional headline (no score): posters + messages vs last month,
+        # blended into a single up/steady/down read of the community's pulse.
+        pulse = compute_community_pulse(health)
+        state_label = t(f"commands.stats_view.pulse_{pulse['state']}", lang)
+        headline = t("commands.stats_view.pulse_headline", lang, state=state_label)
+        if pulse['state'] == 'collecting':
+            headline += "\n" + t("commands.stats_view.pulse_collecting_note", lang,
+                                 need=60, days=health['days_of_data'])
+        elif pulse['posters_delta'] is not None and pulse['messages_delta'] is not None:
+            headline += "\n" + t("commands.stats_view.pulse_detail", lang,
+                                 posters=format_pct_arrow(pulse['posters_delta']),
+                                 messages=format_pct_arrow(pulse['messages_delta']))
+
+        embed.description = headline + "\n\n" + t("commands.stats_view.health_desc", lang)
         weekly_ok = health['weekly_comparable']
         monthly_ok = health['monthly_comparable']
 
