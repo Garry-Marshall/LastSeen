@@ -16,6 +16,7 @@ from bot.locale import t, guild_language
 from bot.reports import purge_guild_state
 from bot.topgg import update_topgg_metrics
 from bot.discordbotlist import update_discordbotlist_metrics
+from bot.voidbots import update_voidbots_metrics
 from bot.stats_push import push_stats
 
 logger = logging.getLogger(__name__)
@@ -514,6 +515,7 @@ class TrackingCog(commands.Cog):
         # Push the updated counts to the external listings (no-op if unconfigured)
         await update_topgg_metrics(self.bot)
         await update_discordbotlist_metrics(self.bot)
+        await update_voidbots_metrics(self.bot)
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
@@ -562,6 +564,7 @@ class TrackingCog(commands.Cog):
         # By now the guild is already gone from bot.guilds, so the counts are current.
         await update_topgg_metrics(self.bot)
         await update_discordbotlist_metrics(self.bot)
+        await update_voidbots_metrics(self.bot)
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):

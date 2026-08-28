@@ -102,6 +102,10 @@ class Config:
         # the numeric ID is rejected. Falls back to the numeric ID when unset.
         self.discordbotlist_bot_id = os.getenv('DISCORDBOTLIST_BOT_ID', '').strip()
 
+        # Optional voidbots.net token. When set, the bot pushes its server and
+        # shard count to that listing on every guild join/leave. Unset = disabled.
+        self.voidbots_token = os.getenv('VOIDBOTS_TOKEN', '').strip()
+
         # Optional stats push to a LAN webserver via scp. When enabled, the bot
         # writes a small stats.json (server/user counts) and copies it to the
         # webserver on a timer. Disabled by default so a dev instance never
@@ -119,6 +123,7 @@ class Config:
         logger.info(f"Shard count: {self.shard_count if self.shard_count else 'auto (Discord recommended)'}")
         logger.info(f"TOP.GG metrics: {'enabled' if self.topgg_token else 'disabled (no TOPGG_TOKEN)'}")
         logger.info(f"DiscordBotList metrics: {'enabled' if self.discordbotlist_token else 'disabled (no DISCORDBOTLIST_TOKEN)'}")
+        logger.info(f"VoidBots metrics: {'enabled' if self.voidbots_token else 'disabled (no VOIDBOTS_TOKEN)'}")
         logger.info(f"Stats push: {'enabled' if self.stats_push_enabled else 'disabled (STATS_PUSH_ENABLED not set)'}")
 
     def _create_default_env(self):
@@ -161,6 +166,10 @@ DISCORDBOTLIST_TOKEN=
 # The bot's discordbotlist.com URL slug (e.g. lastseen-2591), NOT the numeric Discord ID.
 # Find it in your bot's discordbotlist.com page URL. Falls back to the numeric ID if unset.
 DISCORDBOTLIST_BOT_ID=
+
+# VoidBots.net Token (Optional): Set your token here to automatically update the server count on the VoidBots.net site listing.
+# Leave unset to disable this feature.
+VOIDBOTS_TOKEN=
 
 # Stats push (optional): when enabled, the bot writes a small stats.json (server
 # count, user count, timestamp) every 10 minutes and copies it to the LAN
