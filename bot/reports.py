@@ -100,9 +100,23 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
     peak_hour = windows['peak_hour']
     if peak_hour is not None and windows['by_hour'][peak_hour] > 0:
         hour_label = f"{peak_hour:02d}:00-{(peak_hour + 1) % 24:02d}:00"
-        embed.description += t('report.peak_hour', lang, hour=hour_label, count=windows['by_hour'][peak_hour])
+        embed.description += t('report.peak_hour', lang, hour=hour_label, tz=guild_tz, count=windows['by_hour'][peak_hour])
 
     embed.description += "\n"
+
+    # Best time to post — busiest contiguous band, mirroring the /user-stats
+    # heatmap recommendation. Same minimum-sample gate so a whole-server
+    # suggestion is never drawn off a handful of messages.
+    if windows['total'] >= 50 and windows['active_days'] >= 7 and windows['recommend']:
+        rd, rs, re_ = windows['recommend']
+        embed.description += t('report.best_time_header', lang)
+        embed.description += t('report.best_time_line', lang, day=weekday_name(rd, lang),
+                               start=f"{rs:02d}:00", end=f"{re_ % 24:02d}:00", tz=guild_tz)
+        if windows['quiet']:
+            qd, qs, qe = windows['quiet']
+            embed.description += t('report.best_time_quiet', lang, day=weekday_name(qd, lang),
+                                   start=f"{qs:02d}:00", end=f"{qe % 24:02d}:00")
+        embed.description += "\n"
 
     # Member changes - only show the counts whose report type is enabled
     show_joined = 'members' in report_types
@@ -160,12 +174,23 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
                                    delta=format_health_delta(health['returns_30d'], health['returns_prev_30d'], lang))
             embed.description += "\n"
 
-    # Participation gap: present-but-silent (lurkers) and never-active (ghosts)
+    # Participation gap: breadth (who actually posted) plus present-but-silent
+    # (lurkers) and never-active (ghosts). Breadth is cadence-matched — 7-day
+    # posters for weekly reports, 30-day for monthly — and reuses the health
+    # snapshot already fetched above.
     segments = db.get_participation_segments(guild_id, window_days=days)
-    if segments and (segments['lurkers'] or segments['ghosts']):
+    have_segments = bool(segments and (segments['lurkers'] or segments['ghosts']))
+    breadth_members = health['active_members'] if health else 0
+    breadth_posters = (health['posters_7d'] if days <= 7 else health['posters_30d']) if health else 0
+    if have_segments or breadth_members:
         embed.description += t('report.participation_header', lang)
-        embed.description += t('report.lurkers', lang, count=segments['lurkers'], pct=round(segments['lurker_pct']))
-        embed.description += t('report.ghosts', lang, count=segments['ghosts'])
+        if breadth_members:
+            breadth_pct = breadth_posters / breadth_members * 100
+            embed.description += t('report.breadth', lang, posters=breadth_posters,
+                                   members=breadth_members, pct=round(breadth_pct))
+        if have_segments:
+            embed.description += t('report.lurkers', lang, count=segments['lurkers'], pct=round(segments['lurker_pct']))
+            embed.description += t('report.ghosts', lang, count=segments['ghosts'])
         embed.description += "\n"
 
     # New-member retention cohorts — opt-in, monthly only. The cohort windows are
@@ -208,6 +233,17 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
                 embed.description += t('report.funnel_dropoff', lang, from_label=frm, to_label=to)
             embed.description += "\n"
 
+    # Departed-member lifespan — the churn flip-side of the retention cohorts
+    # above. Same opt-in/monthly gate; summarised to a single line (the full
+    # tenure-bucket chart lives in /user-stats).
+    if 'retention' in report_types and days >= 30:
+        lifespan = db.get_departure_lifespan(guild_id)
+        if lifespan['sample'] >= 3:
+            embed.description += t('report.lifespan_header', lang)
+            embed.description += t('report.lifespan_line', lang, median=lifespan['median_days'],
+                                   avg=lifespan['avg_days'], pct=round(lifespan['early_churn_pct']))
+            embed.description += "\n"
+
     # Top contributors
     if top_users:
         embed.description += t('report.top_contributors_header', lang)
@@ -218,6 +254,9 @@ async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, da
             embed.description += t('report.contributor_line', lang, rank=i, display=display, count=user['total_messages'])
     else:
         embed.description += t('report.top_contributors_header', lang) + t('report.no_activity', lang)
+
+    # Pointer to the interactive command for anyone who wants to drill in.
+    embed.description += t('report.more_info', lang)
 
     return embed
 
