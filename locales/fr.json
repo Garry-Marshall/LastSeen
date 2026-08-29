@@ -611,11 +611,11 @@
   "admin.help.watch_detail_title": "👀 /watch - Surveillances & Alertes d'activité",
   "admin.help.watch_detail_desc": "Soyez notifié de l'activité des membres. Les surveillances sont **réservées aux administrateurs**, et chaque alerte est publiée dans le salon où vous avez créé la surveillance. Une cible peut être un **membre ou un rôle**.\n\nDeux types de surveillance :\n🔔 **Retour en ligne** - se déclenche quand quelqu'un revient en ligne\n💤 **Hors ligne depuis** - se déclenche quand quelqu'un est hors ligne depuis un certain temps",
   "admin.help.watch_detail_commands_title": "Commandes",
-  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel]`\n Alerte quand le membre/rôle revient en ligne. Ajoutez `after` (ex. `7d`) pour n'alerter qu'après une absence de cette durée.\n`/watch offline <target> <duration> [channel]`\n Alerte quand le membre/rôle est hors ligne depuis `<duration>` (ex. `48h`).\n`/watch list` - affiche les surveillances du serveur et leurs id\n`/watch remove <id>` - supprime une surveillance par son id",
+  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel] [dm]`\n Alerte quand le membre/rôle revient en ligne. Ajoutez `after` (ex. `7d`) pour n'alerter qu'après une absence de cette durée.\n`/watch offline <target> <duration> [channel] [dm]`\n Alerte quand le membre/rôle est hors ligne depuis `<duration>` (ex. `48h`).\nAjoutez `dm:True` à l'une ou l'autre commande pour recevoir l'alerte en MP au lieu d'un salon.\n`/watch list` - affiche les surveillances du serveur et leurs id\n`/watch remove <id>` - supprime une surveillance par son id",
   "admin.help.watch_detail_examples_title": "Exemples",
-  "admin.help.watch_detail_examples": "• `/watch online @Alice` - alerte dès qu'Alice sera en ligne\n• `/watch online @Alice after:7d` - alerte quand Alice revient après 7+ jours d'absence\n• `/watch offline @Bob 7d` - alerte si Bob passe 7 jours sans être vu\n• `/watch offline @Staff 48h` - alerte quand un membre Staff n'a pas été vu depuis 48h",
+  "admin.help.watch_detail_examples": "• `/watch online @Alice` - alerte dès qu'Alice sera en ligne\n• `/watch online @Alice after:7d` - alerte quand Alice revient après 7+ jours d'absence\n• `/watch offline @Bob 7d` - alerte si Bob passe 7 jours sans être vu\n• `/watch offline @Staff 48h` - alerte quand un membre Staff n'a pas été vu depuis 48h\n• `/watch offline @Alice 7d dm:True` - m'envoyer un MP au lieu de poster dans un salon",
   "admin.help.watch_detail_notes_title": "Bon à savoir",
-  "admin.help.watch_detail_notes": "• Les durées utilisent `m`/`h`/`d`, ex. `30m`, `48h`, `7d`.\n• Les alertes en ligne ont un délai d'1 heure par membre pour éviter le spam.\n• Les membres désinscrits via `/forgetme` ne peuvent pas être surveillés.\n• Jusqu'à 50 surveillances par serveur.",
+  "admin.help.watch_detail_notes": "• Les durées utilisent `m`/`h`/`d`, ex. `30m`, `48h`, `7d`.\n• Les alertes en ligne ont un délai d'1 heure par membre pour éviter le spam.\n• Les membres désinscrits via `/forgetme` ne peuvent pas être surveillés.\n• Jusqu'à 50 surveillances par serveur.\n• Ajoutez `dm:True` à une surveillance pour recevoir l'alerte en MP au lieu d'un salon.",
   "watch.removed_target": "{count} surveillance(s) supprimée(s) pour {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Recherche avancée de membres",
@@ -643,5 +643,12 @@
   "commands.journey.no_activity": "🌱 Première participation : Pas encore — aucun message enregistré\n",
   "commands.journey.no_data": "Aucun historique de participation n'a encore été enregistré pour ce membre.",
   "commands.journey.footer": "Décomptes depuis le début du suivi · participation, pas présence",
-  "commands.journey.error": "Échec du chargement du parcours : {error}"
+  "commands.journey.error": "Échec du chargement du parcours : {error}",
+
+  "watch.dest_dm": "vos MP",
+  "watch.dm_note": "\n\n⚠️ Assurez-vous d'autoriser les MP des membres du serveur, sinon les alertes ne vous parviendront pas.",
+  "watch.err_channel_and_dm": "❌ Choisissez un salon OU un MP, pas les deux.",
+  "watch.replaced_existing": "\n\nℹ️ Ceci a remplacé une surveillance existante pour cette cible.",
+  "watch.replaced_existing_other": "\n\nℹ️ Ceci a remplacé une surveillance configurée par {user}.",
+  "watch.dest_dm_other": "les MP de {user}"
 }

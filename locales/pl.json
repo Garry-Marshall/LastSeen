@@ -611,11 +611,11 @@
   "admin.help.watch_detail_title": "👀 /watch - Obserwacje i Powiadomienia o aktywności",
   "admin.help.watch_detail_desc": "Otrzymuj powiadomienia o aktywności członków. Obserwacje są **tylko dla administratorów**, a każde powiadomienie jest publikowane na kanale, na którym utworzono obserwację. Celem może być **członek lub rola**.\n\nDwa rodzaje obserwacji:\n🔔 **Powrót do sieci** - uruchamia się, gdy ktoś wraca do sieci\n💤 **Offline przez** - uruchamia się, gdy ktoś jest offline przez określony czas",
   "admin.help.watch_detail_commands_title": "Komendy",
-  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel]`\n Powiadamia, gdy członek/rola wraca do sieci. Dodaj `after` (np. `7d`), aby powiadomić dopiero po takiej nieobecności.\n`/watch offline <target> <duration> [channel]`\n Powiadamia, gdy członek/rola jest offline przez `<duration>` (np. `48h`).\n`/watch list` - pokaż obserwacje tego serwera i ich id\n`/watch remove <id>` - usuń obserwację według id",
+  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel] [dm]`\n Powiadamia, gdy członek/rola wraca do sieci. Dodaj `after` (np. `7d`), aby powiadomić dopiero po takiej nieobecności.\n`/watch offline <target> <duration> [channel] [dm]`\n Powiadamia, gdy członek/rola jest offline przez `<duration>` (np. `48h`).\nDodaj `dm:True` do dowolnej z komend, aby otrzymać powiadomienie w wiadomości prywatnej zamiast na kanale.\n`/watch list` - pokaż obserwacje tego serwera i ich id\n`/watch remove <id>` - usuń obserwację według id",
   "admin.help.watch_detail_examples_title": "Przykłady",
-  "admin.help.watch_detail_examples": "• `/watch online @Alice` - powiadom, gdy Alice będzie następnym razem online\n• `/watch online @Alice after:7d` - powiadom, gdy Alice wróci po 7+ dniach nieobecności\n• `/watch offline @Bob 7d` - powiadom, jeśli Bob nie będzie widziany przez 7 dni\n• `/watch offline @Staff 48h` - powiadom, gdy członek Staff nie był widziany przez 48h",
+  "admin.help.watch_detail_examples": "• `/watch online @Alice` - powiadom, gdy Alice będzie następnym razem online\n• `/watch online @Alice after:7d` - powiadom, gdy Alice wróci po 7+ dniach nieobecności\n• `/watch offline @Bob 7d` - powiadom, jeśli Bob nie będzie widziany przez 7 dni\n• `/watch offline @Staff 48h` - powiadom, gdy członek Staff nie był widziany przez 48h\n• `/watch offline @Alice 7d dm:True` - wyślij mi wiadomość prywatną zamiast posta na kanale",
   "admin.help.watch_detail_notes_title": "Warto wiedzieć",
-  "admin.help.watch_detail_notes": "• Czas używa `m`/`h`/`d`, np. `30m`, `48h`, `7d`.\n• Powiadomienia online mają 1-godzinny czas odnowienia na członka, aby uniknąć spamu.\n• Członkowie, którzy zrezygnowali przez `/forgetme`, nie mogą być obserwowani.\n• Maksymalnie 50 obserwacji na serwer.",
+  "admin.help.watch_detail_notes": "• Czas używa `m`/`h`/`d`, np. `30m`, `48h`, `7d`.\n• Powiadomienia online mają 1-godzinny czas odnowienia na członka, aby uniknąć spamu.\n• Członkowie, którzy zrezygnowali przez `/forgetme`, nie mogą być obserwowani.\n• Maksymalnie 50 obserwacji na serwer.\n• Dodaj `dm:True` do dowolnej obserwacji, aby otrzymać powiadomienie w wiadomości prywatnej zamiast na kanale.",
   "watch.removed_target": "Usunięto {count} obserwacji dla {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Zaawansowane wyszukiwanie członków",
@@ -643,5 +643,12 @@
   "commands.journey.no_activity": "🌱 Pierwsza aktywność: Jeszcze nie — brak zarejestrowanych wiadomości\n",
   "commands.journey.no_data": "Dla tego członka nie zarejestrowano jeszcze historii uczestnictwa.",
   "commands.journey.footer": "Liczniki od początku śledzenia · uczestnictwo, nie obecność",
-  "commands.journey.error": "Nie udało się załadować ścieżki: {error}"
+  "commands.journey.error": "Nie udało się załadować ścieżki: {error}",
+
+  "watch.dest_dm": "wiadomości prywatne",
+  "watch.dm_note": "\n\n⚠️ Upewnij się, że zezwalasz na wiadomości prywatne od członków serwera, inaczej powiadomienia do Ciebie nie dotrą.",
+  "watch.err_channel_and_dm": "❌ Wybierz kanał ALBO wiadomość prywatną, nie oba.",
+  "watch.replaced_existing": "\n\nℹ️ To zastąpiło istniejącą obserwację dla tego celu.",
+  "watch.replaced_existing_other": "\n\nℹ️ To zastąpiło obserwację ustawioną przez {user}.",
+  "watch.dest_dm_other": "wiadomości prywatne {user}"
 }

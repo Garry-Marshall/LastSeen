@@ -611,11 +611,11 @@
   "admin.help.watch_detail_title": "👀 /watch - Vigilancias y Alertas de actividad",
   "admin.help.watch_detail_desc": "Recibe notificaciones sobre la actividad de los miembros. Las vigilancias son **solo para administradores**, y cada alerta se publica en el canal donde creaste la vigilancia. Un objetivo puede ser un **miembro o un rol**.\n\nDos tipos de vigilancia:\n🔔 **Vuelta en línea** - se activa cuando alguien vuelve a estar en línea\n💤 **Desconectado durante** - se activa cuando alguien lleva un tiempo desconectado",
   "admin.help.watch_detail_commands_title": "Comandos",
-  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel]`\n Avisa cuando el miembro/rol vuelva a estar en línea. Añade `after` (p.ej. `7d`) para avisar solo tras esa ausencia.\n`/watch offline <target> <duration> [channel]`\n Avisa cuando el miembro/rol lleve `<duration>` desconectado (p.ej. `48h`).\n`/watch list` - muestra las vigilancias del servidor y sus id\n`/watch remove <id>` - elimina una vigilancia por su id",
+  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel] [dm]`\n Avisa cuando el miembro/rol vuelva a estar en línea. Añade `after` (p.ej. `7d`) para avisar solo tras esa ausencia.\n`/watch offline <target> <duration> [channel] [dm]`\n Avisa cuando el miembro/rol lleve `<duration>` desconectado (p.ej. `48h`).\nAñade `dm:True` a cualquiera de los dos comandos para recibir la alerta por MD en lugar de un canal.\n`/watch list` - muestra las vigilancias del servidor y sus id\n`/watch remove <id>` - elimina una vigilancia por su id",
   "admin.help.watch_detail_examples_title": "Ejemplos",
-  "admin.help.watch_detail_examples": "• `/watch online @Alice` - aviso en cuanto Alice esté en línea\n• `/watch online @Alice after:7d` - aviso cuando Alice vuelva tras 7+ días ausente\n• `/watch offline @Bob 7d` - aviso si Bob pasa 7 días sin ser visto\n• `/watch offline @Staff 48h` - aviso cuando un miembro de Staff no ha sido visto en 48h",
+  "admin.help.watch_detail_examples": "• `/watch online @Alice` - aviso en cuanto Alice esté en línea\n• `/watch online @Alice after:7d` - aviso cuando Alice vuelva tras 7+ días ausente\n• `/watch offline @Bob 7d` - aviso si Bob pasa 7 días sin ser visto\n• `/watch offline @Staff 48h` - aviso cuando un miembro de Staff no ha sido visto en 48h\n• `/watch offline @Alice 7d dm:True` - enviarme un MD en lugar de publicar en un canal",
   "admin.help.watch_detail_notes_title": "Bueno saberlo",
-  "admin.help.watch_detail_notes": "• Las duraciones usan `m`/`h`/`d`, p.ej. `30m`, `48h`, `7d`.\n• Las alertas en línea tienen un enfriamiento de 1 hora por miembro para evitar spam.\n• Los miembros que se excluyeron con `/forgetme` no pueden ser vigilados.\n• Hasta 50 vigilancias por servidor.",
+  "admin.help.watch_detail_notes": "• Las duraciones usan `m`/`h`/`d`, p.ej. `30m`, `48h`, `7d`.\n• Las alertas en línea tienen un enfriamiento de 1 hora por miembro para evitar spam.\n• Los miembros que se excluyeron con `/forgetme` no pueden ser vigilados.\n• Hasta 50 vigilancias por servidor.\n• Añade `dm:True` a cualquier vigilancia para recibir la alerta por MD en lugar de un canal.",
   "watch.removed_target": "Se eliminaron {count} vigilancia(s) para {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Búsqueda avanzada de miembros",
@@ -643,5 +643,12 @@
   "commands.journey.no_activity": "🌱 Primera participación: Todavía no — sin mensajes registrados\n",
   "commands.journey.no_data": "Aún no se ha registrado historial de participación para este miembro.",
   "commands.journey.footer": "Conteos desde el inicio del registro · participación, no presencia",
-  "commands.journey.error": "Error al cargar la trayectoria: {error}"
+  "commands.journey.error": "Error al cargar la trayectoria: {error}",
+
+  "watch.dest_dm": "tus MD",
+  "watch.dm_note": "\n\n⚠️ Asegúrate de permitir MD de miembros del servidor, o las alertas no te llegarán.",
+  "watch.err_channel_and_dm": "❌ Elige un canal O un MD, no ambos.",
+  "watch.replaced_existing": "\n\nℹ️ Esto reemplazó una vigilancia existente para este objetivo.",
+  "watch.replaced_existing_other": "\n\nℹ️ Esto reemplazó una vigilancia configurada por {user}.",
+  "watch.dest_dm_other": "los MD de {user}"
 }

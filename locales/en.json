@@ -611,11 +611,11 @@
   "admin.help.watch_detail_title": "👀 /watch - Watchlists & Activity Alerts",
   "admin.help.watch_detail_desc": "Get notified about member activity. Watches are **admin-only**, and each alert posts to the channel where you created the watch. A target can be a **user or a role**.\n\nTwo kinds of watch:\n🔔 **Online return** - fires when someone comes back online\n💤 **Offline for** - fires when someone has been offline for a set time",
   "admin.help.watch_detail_commands_title": "Commands",
-  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel]`\n Alert when the user/role comes back online. Add `after` (e.g. `7d`) to only alert once they'd been away that long.\n`/watch offline <target> <duration> [channel]`\n Alert when the user/role has been offline for `<duration>` (e.g. `48h`).\n`/watch list` - show this server's watches and their ids\n`/watch remove <id>` - delete a watch by its id",
+  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel] [dm]`\n Alert when the user/role comes back online. Add `after` (e.g. `7d`) to only alert once they'd been away that long.\n`/watch offline <target> <duration> [channel] [dm]`\n Alert when the user/role has been offline for `<duration>` (e.g. `48h`).\nAdd `dm:True` to either command to receive the alert in your DMs instead of a channel.\n`/watch list` - show this server's watches and their ids\n`/watch remove <id>` - delete a watch by its id",
   "admin.help.watch_detail_examples_title": "Examples",
-  "admin.help.watch_detail_examples": "• `/watch online @Alice` - ping when Alice is next online\n• `/watch online @Alice after:7d` - ping when Alice returns after 7+ days away\n• `/watch offline @Bob 7d` - ping if Bob goes 7 days without being seen\n• `/watch offline @Staff 48h` - ping when a Staff member hasn't been seen in 48h",
+  "admin.help.watch_detail_examples": "• `/watch online @Alice` - ping when Alice is next online\n• `/watch online @Alice after:7d` - ping when Alice returns after 7+ days away\n• `/watch offline @Bob 7d` - ping if Bob goes 7 days without being seen\n• `/watch offline @Staff 48h` - ping when a Staff member hasn't been seen in 48h\n• `/watch offline @Alice 7d dm:True` - DM me instead of posting in a channel",
   "admin.help.watch_detail_notes_title": "Good to know",
-  "admin.help.watch_detail_notes": "• Durations use `m`/`h`/`d`, e.g. `30m`, `48h`, `7d`.\n• Online alerts have a 1-hour cooldown per member to avoid spam.\n• Members who opted out with `/forgetme` can't be watched.\n• Up to 50 watches per server.",
+  "admin.help.watch_detail_notes": "• Durations use `m`/`h`/`d`, e.g. `30m`, `48h`, `7d`.\n• Online alerts have a 1-hour cooldown per member to avoid spam.\n• Members who opted out with `/forgetme` can't be watched.\n• Up to 50 watches per server.\n• Add `dm:True` to any watch to get the alert in your DMs instead of a channel.",
   "watch.removed_target": "Removed {count} watch(es) for {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Advanced Member Search",
@@ -643,5 +643,12 @@
   "commands.journey.no_activity": "🌱 First participated: Not yet — no messages tracked\n",
   "commands.journey.no_data": "No participation history has been tracked for this member yet.",
   "commands.journey.footer": "Counts since tracking began · participation, not presence",
-  "commands.journey.error": "Failed to load journey: {error}"
+  "commands.journey.error": "Failed to load journey: {error}",
+
+  "watch.dest_dm": "your DMs",
+  "watch.dm_note": "\n\n⚠️ Make sure you allow DMs from server members, or alerts won't reach you.",
+  "watch.err_channel_and_dm": "❌ Choose either a channel or DM, not both.",
+  "watch.replaced_existing": "\n\nℹ️ This replaced an existing watch on this target.",
+  "watch.replaced_existing_other": "\n\nℹ️ This replaced a watch set by {user}.",
+  "watch.dest_dm_other": "{user}'s DMs"
 }

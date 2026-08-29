@@ -457,6 +457,7 @@ class DatabaseManager:
                     alert_type TEXT NOT NULL,
                     threshold_seconds INTEGER,
                     channel_id INTEGER,
+                    deliver_dm INTEGER DEFAULT 0,
                     state TEXT DEFAULT 'armed',
                     fired_targets TEXT,
                     created_by INTEGER NOT NULL,
@@ -648,6 +649,12 @@ class DatabaseManager:
                     counters[gid] = counters.get(gid, 0) + 1
                     cursor.execute("UPDATE watchlists SET seq = ? WHERE id = ?", (counters[gid], wid))
                 logger.info("Backfilled per-guild seq numbers for existing watches")
+
+            # Migration: DM delivery flag. Existing rows get 0 (channel mode) from
+            # the DEFAULT, so watches already pointing at a channel are unchanged.
+            if 'deliver_dm' not in watch_cols:
+                cursor.execute("ALTER TABLE watchlists ADD COLUMN deliver_dm INTEGER DEFAULT 0")
+                logger.info("Added deliver_dm column to watchlists table")
 
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
@@ -4074,8 +4081,12 @@ class DatabaseManager:
 
     def add_watch(self, guild_id: int, target_type: str, target_id: int,
                   alert_type: str, threshold_seconds: Optional[int],
-                  channel_id: Optional[int], created_by: int) -> Optional[int]:
+                  channel_id: Optional[int], created_by: int,
+                  deliver_dm: bool = False) -> Optional[int]:
         """Create or update a watch, returning its per-guild display number (seq).
+
+        deliver_dm=True stores the watch to DM created_by instead of posting to a
+        channel (channel_id is then None). Defaults to channel delivery.
 
         Re-adding an identical (guild, target, alert_type) watch updates its
         threshold/channel and resets fire-state (keeping its existing seq), so an
@@ -4101,15 +4112,17 @@ class DatabaseManager:
                 cursor.execute("""
                     INSERT INTO watchlists
                     (guild_id, seq, target_type, target_id, alert_type, threshold_seconds,
-                     channel_id, state, fired_targets, created_by, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'armed', NULL, ?, ?)
+                     channel_id, deliver_dm, state, fired_targets, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'armed', NULL, ?, ?)
                     ON CONFLICT(guild_id, target_type, target_id, alert_type) DO UPDATE SET
                         threshold_seconds = excluded.threshold_seconds,
                         channel_id = excluded.channel_id,
+                        deliver_dm = excluded.deliver_dm,
+                        created_by = excluded.created_by,
                         state = 'armed',
                         fired_targets = NULL
                 """, (guild_id, seq, target_type, target_id, alert_type,
-                      threshold_seconds, channel_id, created_by, now))
+                      threshold_seconds, channel_id, 1 if deliver_dm else 0, created_by, now))
                 # Re-read to return the true seq (the INSERT's seq is discarded on
                 # the conflict/update path, which keeps the existing one).
                 cursor.execute("""

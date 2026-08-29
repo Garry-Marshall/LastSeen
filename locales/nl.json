@@ -611,11 +611,11 @@
   "admin.help.watch_detail_title": "👀 /watch - Watchlijsten & Activiteitsmeldingen",
   "admin.help.watch_detail_desc": "Krijg meldingen over ledenactiviteit. Watches zijn **alleen voor beheerders**, en elke melding wordt geplaatst in het kanaal waar je de watch hebt aangemaakt. Een doel kan een **lid of een rol** zijn.\n\nTwee soorten watch:\n🔔 **Terug online** - meldt wanneer iemand weer online komt\n💤 **Offline gedurende** - meldt wanneer iemand een bepaalde tijd offline is",
   "admin.help.watch_detail_commands_title": "Commando's",
-  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel]`\n Meldt wanneer het lid/de rol weer online komt. Voeg `after` toe (bijv. `7d`) om pas te melden na zo lang afwezig te zijn geweest.\n`/watch offline <target> <duration> [channel]`\n Meldt wanneer het lid/de rol `<duration>` offline is (bijv. `48h`).\n`/watch list` - toon de watches van deze server en hun id's\n`/watch remove <id>` - verwijder een watch op id",
+  "admin.help.watch_detail_commands": "`/watch online <target> [after] [channel] [dm]`\n Meldt wanneer het lid/de rol weer online komt. Voeg `after` toe (bijv. `7d`) om pas te melden na zo lang afwezig te zijn geweest.\n`/watch offline <target> <duration> [channel] [dm]`\n Meldt wanneer het lid/de rol `<duration>` offline is (bijv. `48h`).\nVoeg `dm:True` toe aan een van beide commando's om de melding in je DM's te ontvangen in plaats van een kanaal.\n`/watch list` - toon de watches van deze server en hun id's\n`/watch remove <id>` - verwijder een watch op id",
   "admin.help.watch_detail_examples_title": "Voorbeelden",
-  "admin.help.watch_detail_examples": "• `/watch online @Alice` - melding zodra Alice weer online is\n• `/watch online @Alice after:7d` - melding wanneer Alice na 7+ dagen terugkomt\n• `/watch offline @Bob 7d` - melding als Bob 7 dagen niet is gezien\n• `/watch offline @Staff 48h` - melding wanneer een Staff-lid 48u niet is gezien",
+  "admin.help.watch_detail_examples": "• `/watch online @Alice` - melding zodra Alice weer online is\n• `/watch online @Alice after:7d` - melding wanneer Alice na 7+ dagen terugkomt\n• `/watch offline @Bob 7d` - melding als Bob 7 dagen niet is gezien\n• `/watch offline @Staff 48h` - melding wanneer een Staff-lid 48u niet is gezien\n• `/watch offline @Alice 7d dm:True` - stuur mij een DM in plaats van een kanaalbericht",
   "admin.help.watch_detail_notes_title": "Goed om te weten",
-  "admin.help.watch_detail_notes": "• Duur gebruikt `m`/`h`/`d`, bijv. `30m`, `48h`, `7d`.\n• Online-meldingen hebben een afkoeltijd van 1 uur per lid om spam te voorkomen.\n• Leden die zich hebben afgemeld met `/forgetme` kunnen niet gevolgd worden.\n• Maximaal 50 watches per server.",
+  "admin.help.watch_detail_notes": "• Duur gebruikt `m`/`h`/`d`, bijv. `30m`, `48h`, `7d`.\n• Online-meldingen hebben een afkoeltijd van 1 uur per lid om spam te voorkomen.\n• Leden die zich hebben afgemeld met `/forgetme` kunnen niet gevolgd worden.\n• Maximaal 50 watches per server.\n• Voeg `dm:True` toe aan een watch om de melding in je DM's te krijgen in plaats van een kanaal.",
   "watch.removed_target": "{count} watch(es) voor {target} verwijderd.",
 
   "admin.help.search_detail_title": "🔍 /search - Geavanceerd zoeken naar leden",
@@ -643,5 +643,12 @@
   "commands.journey.no_activity": "🌱 Eerste deelname: Nog niet — geen berichten geregistreerd\n",
   "commands.journey.no_data": "Er is nog geen deelnamegeschiedenis voor dit lid geregistreerd.",
   "commands.journey.footer": "Aantallen sinds registratie begon · deelname, geen aanwezigheid",
-  "commands.journey.error": "Reis laden mislukt: {error}"
+  "commands.journey.error": "Reis laden mislukt: {error}",
+
+  "watch.dest_dm": "je DM's",
+  "watch.dm_note": "\n\n⚠️ Zorg dat je DM's van serverleden toestaat, anders bereiken meldingen je niet.",
+  "watch.err_channel_and_dm": "❌ Kies een kanaal óf DM, niet beide.",
+  "watch.replaced_existing": "\n\nℹ️ Dit heeft een bestaande watch voor dit doel vervangen.",
+  "watch.replaced_existing_other": "\n\nℹ️ Dit heeft een watch vervangen die door {user} was ingesteld.",
+  "watch.dest_dm_other": "DM's van {user}"
 }

@@ -139,7 +139,7 @@ class WatchCog(commands.Cog):
     async def _add_watch(self, interaction: discord.Interaction, lang: str,
                          target: Union[discord.Member, discord.Role],
                          alert_type: str, threshold_seconds: Optional[int],
-                         channel: Optional[discord.TextChannel]) -> None:
+                         channel: Optional[discord.TextChannel], dm: bool = False) -> None:
         """Shared validation + persistence for the online/offline add commands."""
         # Resolve and validate the target. The mentionable option can hand back a
         # discord.Member, discord.User, discord.Role, or a bare discord.Object
@@ -180,15 +180,21 @@ class WatchCog(commands.Cog):
                 return
             target_type, target_id = 'user', target.id
 
-        dest = channel or interaction.channel
+        # DM and a channel are mutually exclusive destinations.
+        if dm and channel is not None:
+            await interaction.response.send_message(
+                embed=create_error_embed(t('watch.err_channel_and_dm', lang), lang), ephemeral=True)
+            return
 
-        # Enforce the per-guild cap, but never block re-configuring an existing watch.
+        dest = None if dm else (channel or interaction.channel)
+
+        # Enforce the per-guild cap, but never block re-configuring an existing
+        # watch. Capture the matching watch to report an overwrite below.
         existing = await asyncio.to_thread(self.db.get_guild_watches, interaction.guild_id)
-        already = any(
-            w['target_type'] == target_type and w['target_id'] == target_id
-            and w['alert_type'] == alert_type for w in existing
-        )
-        if not already and len(existing) >= MAX_WATCHES_PER_GUILD:
+        prior = next((w for w in existing
+                      if w['target_type'] == target_type and w['target_id'] == target_id
+                      and w['alert_type'] == alert_type), None)
+        if prior is None and len(existing) >= MAX_WATCHES_PER_GUILD:
             await interaction.response.send_message(
                 embed=create_error_embed(t('watch.err_cap', lang, max=MAX_WATCHES_PER_GUILD), lang),
                 ephemeral=True)
@@ -196,7 +202,7 @@ class WatchCog(commands.Cog):
 
         seq = await asyncio.to_thread(
             self.db.add_watch, interaction.guild_id, target_type, target_id,
-            alert_type, threshold_seconds, dest.id, interaction.user.id,
+            alert_type, threshold_seconds, (None if dm else dest.id), interaction.user.id, dm,
         )
         if seq is None:
             await interaction.response.send_message(
@@ -205,40 +211,60 @@ class WatchCog(commands.Cog):
 
         self._refresh_watch_guilds()
 
+        # Reconfiguring keeps the same underlying watch id (add_watch upserts), so a
+        # stale online_return cooldown from the previous configuration — e.g. a fire
+        # to the old channel — would suppress the reconfigured watch for up to an
+        # hour. Clear this watch's cooldown so it can fire fresh. prior['id'] is that
+        # id because the upsert preserves it.
+        if prior is not None:
+            self._online_cooldown = {k: v for k, v in self._online_cooldown.items()
+                                     if k[0] != prior['id']}
+
         # Build the confirmation. Derive the mentions from the ids/type rather than
-        # target.mention: the target may be a bare discord.Object (no .mention).
+        # target.mention: the target may be a bare discord.Object (no .mention). The
+        # {channel} placeholder carries either a channel mention or "your DMs".
         target_mention = f"<@&{target_id}>" if target_type == 'role' else f"<@{target_id}>"
-        dest_mention = f"<#{dest.id}>"
+        dest_label = t('watch.dest_dm', lang) if dm else f"<#{dest.id}>"
         if alert_type == 'online_return':
             extra = t('watch.added_online_extra', lang, duration=format_duration(threshold_seconds)) \
                 if threshold_seconds else ''
             desc = t('watch.added_online', lang, target=target_mention,
-                     channel=dest_mention, extra=extra)
+                     channel=dest_label, extra=extra)
         else:
             desc = t('watch.added_offline', lang, target=target_mention,
-                     channel=dest_mention, duration=format_duration(threshold_seconds))
+                     channel=dest_label, duration=format_duration(threshold_seconds))
 
-        # Warn if the destination is undeliverable.
-        me = interaction.guild.me
-        if not dest.permissions_for(me).send_messages:
-            desc += t('watch.warn_cannot_send', lang, channel=dest_mention)
+        if dm:
+            desc += t('watch.dm_note', lang)
+        elif not dest.permissions_for(interaction.guild.me).send_messages:
+            desc += t('watch.warn_cannot_send', lang, channel=dest_label)
+
+        # Inform when this replaced an existing watch — especially one set by
+        # another admin (a DM watch redirects the alerts to whoever set it last).
+        if prior is not None:
+            if prior['created_by'] and prior['created_by'] != interaction.user.id:
+                desc += t('watch.replaced_existing_other', lang, user=f"<@{prior['created_by']}>")
+            else:
+                desc += t('watch.replaced_existing', lang)
 
         embed = create_embed(t('watch.added_title', lang), discord.Color.green())
         embed.description = desc
         embed.set_footer(text=f"#{seq}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
-        logger.info(f"Watch #{seq} ({alert_type}, {target_type}:{target_id}) created in guild {interaction.guild.name} by {interaction.user}")
+        logger.info(f"Watch #{seq} ({alert_type}, {target_type}:{target_id}, {'dm' if dm else 'channel'}) created in guild {interaction.guild.name} by {interaction.user}")
 
     @watch_group.command(name="online", description="🔔 Alert when a member/role comes back online")
     @app_commands.describe(
         target="The user or role to watch",
         after="Only alert if they'd been away at least this long, e.g. 7d (optional)",
-        channel="Where to post the alert (defaults to this channel)",
+        channel="Where to post the alert (defaults to this channel; leave empty if using dm)",
+        dm="DM the alert to you instead — don't also set a channel",
     )
     async def watch_online(self, interaction: discord.Interaction,
                            target: Union[discord.Member, discord.Role],
                            after: Optional[str] = None,
-                           channel: Optional[discord.TextChannel] = None):
+                           channel: Optional[discord.TextChannel] = None,
+                           dm: bool = False):
         lang = await self._ensure_admin(interaction)
         if lang is None:
             return
@@ -255,18 +281,20 @@ class WatchCog(commands.Cog):
                         min=format_duration(MIN_DURATION_SECONDS),
                         max=format_duration(MAX_DURATION_SECONDS)), lang), ephemeral=True)
                 return
-        await self._add_watch(interaction, lang, target, 'online_return', threshold, channel)
+        await self._add_watch(interaction, lang, target, 'online_return', threshold, channel, dm)
 
     @watch_group.command(name="offline", description="💤 Alert when a member/role has been offline for a duration")
     @app_commands.describe(
         target="The user or role to watch",
         duration="How long offline before alerting, e.g. 48h or 7d",
-        channel="Where to post the alert (defaults to this channel)",
+        channel="Where to post the alert (defaults to this channel; leave empty if using dm)",
+        dm="DM the alert to you instead — don't also set a channel",
     )
     async def watch_offline(self, interaction: discord.Interaction,
                             target: Union[discord.Member, discord.Role],
                             duration: str,
-                            channel: Optional[discord.TextChannel] = None):
+                            channel: Optional[discord.TextChannel] = None,
+                            dm: bool = False):
         lang = await self._ensure_admin(interaction)
         if lang is None:
             return
@@ -281,7 +309,7 @@ class WatchCog(commands.Cog):
                     min=format_duration(MIN_DURATION_SECONDS),
                     max=format_duration(MAX_DURATION_SECONDS)), lang), ephemeral=True)
             return
-        await self._add_watch(interaction, lang, target, 'offline_for', threshold, channel)
+        await self._add_watch(interaction, lang, target, 'offline_for', threshold, channel, dm)
 
     @watch_group.command(name="list", description="📋 List this server's watches")
     async def watch_list(self, interaction: discord.Interaction):
@@ -295,7 +323,7 @@ class WatchCog(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        lines = [self._format_watch_line(w, lang) for w in watches]
+        lines = [self._format_watch_line(w, lang, interaction.user.id) for w in watches]
         embeds = []
         for i, page in enumerate(chunk_list(lines, WATCHES_PER_PAGE)):
             embed = create_embed(t('watch.list_title', lang), discord.Color.blue())
@@ -308,9 +336,15 @@ class WatchCog(commands.Cog):
             view = PaginationView(embeds, lang=lang)
             await interaction.response.send_message(embed=embeds[0], view=view, ephemeral=True)
 
-    def _format_watch_line(self, w: dict, lang: str) -> str:
+    def _format_watch_line(self, w: dict, lang: str, viewer_id: int) -> str:
         target = f"<@&{w['target_id']}>" if w['target_type'] == 'role' else f"<@{w['target_id']}>"
-        channel = f"<#{w['channel_id']}>" if w['channel_id'] else "?"
+        if w['deliver_dm']:
+            # "your DMs" is only true for the recipient; other admins must see who
+            # actually gets it, since the DM goes to whoever set the watch last.
+            channel = (t('watch.dest_dm', lang) if w['created_by'] == viewer_id
+                       else t('watch.dest_dm_other', lang, user=f"<@{w['created_by']}>"))
+        else:
+            channel = f"<#{w['channel_id']}>" if w['channel_id'] else "?"
         if w['alert_type'] == 'online_return':
             extra = t('watch.list_extra_after', lang, duration=format_duration(w['threshold_seconds'])) \
                 if w['threshold_seconds'] else ''
@@ -433,10 +467,16 @@ class WatchCog(commands.Cog):
         away = (now - previous_last_seen) if previous_last_seen and previous_last_seen > 0 else None
 
         try:
-            # During the post-connect grace window, skip firing online_return
-            # alerts — presence is resyncing and can surface spurious returns —
-            # but still run the offline_for re-arm below so state stays correct.
-            if now >= self._suppress_online_until:
+            # Fire online_return only on a genuine return from offline, and not
+            # during the post-connect grace window:
+            #   previous_last_seen > 0 -> was offline (real return, fire)
+            #   previous_last_seen == 0 -> already online (status flicker like
+            #       online->idle->dnd, or a duplicate presence event) — skip, or a
+            #       single arrival produces several DMs.
+            #   previous_last_seen is None -> no prior row (fire once; can't repeat).
+            # The atomic read-and-overwrite guarantees only the first event of an
+            # arrival sees a timestamp; the rest see 0, so exactly one fires.
+            if now >= self._suppress_online_until and previous_last_seen != 0:
                 online = await asyncio.to_thread(
                     self.db.get_watches_for_member, guild_id, user_id, role_ids, 'online_return')
                 for w in online:
@@ -444,13 +484,15 @@ class WatchCog(commands.Cog):
                     # Away-gated watches only fire on a confirmed long-enough absence.
                     if threshold and (away is None or away < threshold):
                         continue
-                    # Per-member cooldown to suppress rapid presence flicker.
+                    # Per-member cooldown to suppress repeated returns. Set before
+                    # firing so the check-and-set is atomic (no await between them),
+                    # which stops concurrent handler tasks from all passing.
                     cd_key = (w['id'], user_id)
                     last_fired = self._online_cooldown.get(cd_key)
                     if last_fired and now - last_fired < ONLINE_COOLDOWN_SECONDS:
                         continue
-                    await self._fire_alert(member.guild, w, member.mention, online_away=away if threshold else None)
                     self._online_cooldown[cd_key] = now
+                    await self._fire_alert(member.guild, w, member.mention, online_away=away if threshold else None)
 
             # Re-arm offline_for watches for this member.
             offline = await asyncio.to_thread(
@@ -550,15 +592,9 @@ class WatchCog(commands.Cog):
                           offline_for: Optional[int] = None,
                           role_offline: Optional[int] = None,
                           members: Optional[str] = None):
-        """Build and post one alert embed to the watch's channel."""
-        channel = guild.get_channel_or_thread(w['channel_id']) if w['channel_id'] else None
-        if not channel:
-            logger.warning(f"Watch #{w['id']}: channel {w['channel_id']} not found in guild {guild.name}; can't deliver")
-            return
-        if not channel.permissions_for(guild.me).send_messages:
-            logger.warning(f"Watch #{w['id']}: no send permission in channel {channel.id}; can't deliver")
-            return
-
+        """Build one alert embed and deliver it — to the watch's channel, or as a
+        DM to its creator when deliver_dm is set. A failed DM is logged and dropped
+        (there is no channel to fall back to)."""
         lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, guild.id))
 
         if role_offline is not None:
@@ -582,8 +618,38 @@ class WatchCog(commands.Cog):
 
         embed = create_embed(title, color)
         embed.description = desc
+
+        origin = f"({w['alert_type']}, {w['target_type']}:{w['target_id']}) in guild {guild.name}"
+
+        if w['deliver_dm']:
+            # A DM has no channel context, so stamp the guild it's about.
+            embed.set_footer(text=guild.name)
+            user = guild.get_member(w['created_by']) or self.bot.get_user(w['created_by'])
+            if user is None:
+                try:
+                    user = await self.bot.fetch_user(w['created_by'])
+                except Exception:
+                    logger.warning(f"Watch #{w['seq']}: DM recipient {w['created_by']} not found; alert dropped")
+                    return
+            try:
+                await user.send(embed=embed)
+                logger.info(f"Watch #{w['seq']} fired {origin} -> DM {user}")
+            except discord.Forbidden:
+                logger.warning(f"Watch #{w['seq']}: can't DM {user} (DMs closed); alert dropped")
+            except Exception as e:
+                logger.error(f"Watch #{w['id']}: failed to DM {w['created_by']}: {e}")
+            return
+
+        channel = guild.get_channel_or_thread(w['channel_id']) if w['channel_id'] else None
+        if not channel:
+            logger.warning(f"Watch #{w['id']}: channel {w['channel_id']} not found in guild {guild.name}; can't deliver")
+            return
+        if not channel.permissions_for(guild.me).send_messages:
+            logger.warning(f"Watch #{w['id']}: no send permission in channel {channel.id}; can't deliver")
+            return
         try:
             await channel.send(embed=embed)
+            logger.info(f"Watch #{w['seq']} fired {origin} -> #{channel.name}")
         except Exception as e:
             logger.error(f"Watch #{w['id']}: failed to send alert to channel {channel.id}: {e}")
 

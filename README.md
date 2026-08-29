@@ -103,10 +103,11 @@ Configurable database backups with automatic retention management. Set your back
   - Export results to CSV or TXT format
   - Paginated results with interactive navigation
 - `/watch` - Watchlists & activity alerts (post to the channel you run them in)
-  - `/watch online <user|role> [after] [channel]` - Alert when the target comes back online (add `after`, e.g. `7d`, to only alert after a long absence)
-  - `/watch offline <user|role> <duration> [channel]` - Alert when the target has been offline for `<duration>` (e.g. `48h`, `7d`)
+  - `/watch online <user|role> [after] [channel] [dm]` - Alert when the target comes back online (add `after`, e.g. `7d`, to only alert after a long absence)
+  - `/watch offline <user|role> <duration> [channel] [dm]` - Alert when the target has been offline for `<duration>` (e.g. `48h`, `7d`)
   - `/watch list` - List this server's watches and their ids
   - `/watch remove <id>` - Remove a watch by id
+  - Set `dm:True` to receive the alert as a DM instead of a channel post (requires the second argument, `channel`, to be left unset)
   - Durations use `m`/`h`/`d`; online alerts have a 1-hour per-member cooldown; opted-out members can't be watched; up to 50 watches per server
 - `/role-history <user>` - Show the last 20 role changes for a member
 - `/help [command]` - Show available commands, or detailed help for one command (e.g. `/help watch`)
@@ -476,6 +477,11 @@ Get alerted about member activity. A target can be a **user or a role**, and eac
 /watch offline @Staff 48h
 ```
 
+**Get the alert as a DM instead of a channel post:**
+```
+/watch offline @Alice 7d dm:True
+```
+
 **Manage watches:**
 ```
 /watch list
@@ -484,6 +490,7 @@ Get alerted about member activity. A target can be a **user or a role**, and eac
 
 **Notes:**
 - Durations use `m`/`h`/`d` — e.g. `30m`, `48h`, `7d`
+- `dm:True` sends the alert to whoever set the watch (make sure you allow DMs from server members); can't be combined with a channel
 - Online alerts have a 1-hour per-member cooldown to avoid spam
 - Members who opted out with `/forgetme` can't be watched
 - Up to 50 watches per server
