@@ -227,7 +227,7 @@ class WatchCog(commands.Cog):
         embed.description = desc
         embed.set_footer(text=f"#{seq}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
-        logger.info(f"Watch #{seq} ({alert_type}, {target_type}:{target_id}) created in guild {interaction.guild_id} by {interaction.user}")
+        logger.info(f"Watch #{seq} ({alert_type}, {target_type}:{target_id}) created in guild {interaction.guild.name} by {interaction.user}")
 
     @watch_group.command(name="online", description="🔔 Alert when a member/role comes back online")
     @app_commands.describe(
@@ -413,7 +413,7 @@ class WatchCog(commands.Cog):
             label = self._target_label(guild, matched[0])
             msg = t('watch.removed_target', lang, count=removed, target=label)
         await interaction.response.send_message(embed=create_success_embed(msg, lang), ephemeral=True)
-        logger.info(f"Removed {removed} watch(es) ({[w['id'] for w in matched]}) in guild {interaction.guild_id} by {interaction.user}")
+        logger.info(f"Removed {removed} watch(es) ({[w['id'] for w in matched]}) in guild {interaction.guild.name} by {interaction.user}")
 
     # ==================== online_return firing + re-arm ====================
 
@@ -466,7 +466,7 @@ class WatchCog(commands.Cog):
                         await asyncio.to_thread(self.db.update_watch_fire_state, w['id'],
                                                 fired_targets=json.dumps(sorted(fired)))
         except Exception as e:
-            logger.error(f"Error handling online return for {member} in guild {guild_id}: {e}", exc_info=True)
+            logger.error(f"Error handling online return for {member} in guild {member.guild.name}: {e}", exc_info=True)
 
     # ==================== offline_for sweep ====================
 
@@ -553,7 +553,7 @@ class WatchCog(commands.Cog):
         """Build and post one alert embed to the watch's channel."""
         channel = guild.get_channel_or_thread(w['channel_id']) if w['channel_id'] else None
         if not channel:
-            logger.warning(f"Watch #{w['id']}: channel {w['channel_id']} not found in guild {guild.id}; can't deliver")
+            logger.warning(f"Watch #{w['id']}: channel {w['channel_id']} not found in guild {guild.name}; can't deliver")
             return
         if not channel.permissions_for(guild.me).send_messages:
             logger.warning(f"Watch #{w['id']}: no send permission in channel {channel.id}; can't deliver")
