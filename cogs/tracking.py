@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 # Time constants (in seconds)
 FLUSH_INTERVAL = 30  # How often to flush activity buffers
 CLEANUP_INTERVAL_HOURS = 24  # How often to run data cleanup
-REPORT_CHECK_INTERVAL_HOURS = 1  # How often to check for scheduled reports
+REPORT_CHECK_INTERVAL_MINUTES = 1  # How often to check for scheduled reports
+REPORT_JITTER_MINUTES = 10  # Window past the configured hour to spread sends over (keeps reports near the set time, just not all at once)
 WAL_CHECKPOINT_INTERVAL_MINUTES = 15  # How often to checkpoint the SQLite WAL file
 WAL_TRUNCATE_EVERY_N_CHECKPOINTS = 4  # Attempt a full TRUNCATE (file reset) hourly
 STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
@@ -1223,11 +1224,13 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before the first stats push."""
         await self.bot.wait_until_ready()
 
-    @tasks.loop(hours=REPORT_CHECK_INTERVAL_HOURS)
+    @tasks.loop(minutes=REPORT_CHECK_INTERVAL_MINUTES)
     async def check_scheduled_reports(self):
         """
-        Background task that checks and sends scheduled reports every hour.
-        Checks all guilds with reports enabled and sends reports when due.
+        Background task that checks and sends scheduled reports.
+        Runs every minute so a cluster of same-timezone guilds on the default
+        schedule (Monday 09:00) is spread over a short window past the hour by a
+        per-guild minute offset, rather than all firing at once.
         """
         try:
             from bot.reports import send_scheduled_report
@@ -1279,7 +1282,21 @@ class TrackingCog(commands.Cog):
                     if current_hour < time_hour:
                         logger.debug(f"Guild {guild.name}: Skipping - current hour {current_hour} < configured hour {time_hour}")
                         continue  # Not yet at the configured hour today
-                    
+
+                    # Small deterministic per-guild offset (0..JITTER-1 minutes)
+                    # past the configured hour. Without it, every same-timezone
+                    # guild on the default (Monday 09:00) fires in one tick — a
+                    # burst of sends. Keeps reports near the set time while
+                    # de-clustering them. Only gates the configured hour itself:
+                    # a catch-up (bot was down, so current_hour > time_hour) fires
+                    # on the next tick with no added delay, preserving the
+                    # miss-recovery behaviour above.
+                    send_minute = guild_id % REPORT_JITTER_MINUTES
+                    if current_hour == time_hour and now_local.minute < send_minute:
+                        logger.debug(f"Guild {guild.name}: Waiting for staggered send minute {send_minute} (now :{now_local.minute:02d})")
+                        continue
+
+
                     try:
                         report_types = json.loads(guild_config['report_types']) if guild_config['report_types'] else []
                     except (json.JSONDecodeError, TypeError):
@@ -1372,17 +1389,18 @@ class TrackingCog(commands.Cog):
 
     @check_scheduled_reports.before_loop
     async def before_check_scheduled_reports(self):
-        """Wait for bot to be ready and sync to the next hour mark."""
+        """Wait for bot to be ready and align ticks to the interval boundary."""
         await self.bot.wait_until_ready()
-        
-        # Wait until the next hour mark (XX:00:00) to sync the schedule
+
+        # Align the first tick to the next interval mark (:00, :05, ...) so the
+        # per-guild send-minute buckets land on tidy minute boundaries.
         now = datetime.now(timezone.utc)
-        minutes_until_next_hour = 60 - now.minute
-        seconds_until_next_hour = (minutes_until_next_hour * 60) - now.second
-        
-        if seconds_until_next_hour > 0:
-            logger.info(f"Syncing scheduled reports to hour mark. Waiting {minutes_until_next_hour} minutes...")
-            await asyncio.sleep(seconds_until_next_hour)
+        seconds_into_interval = (now.minute % REPORT_CHECK_INTERVAL_MINUTES) * 60 + now.second
+        seconds_until_next_mark = (REPORT_CHECK_INTERVAL_MINUTES * 60) - seconds_into_interval
+
+        if 0 < seconds_until_next_mark < REPORT_CHECK_INTERVAL_MINUTES * 60:
+            logger.info(f"Syncing scheduled reports to {REPORT_CHECK_INTERVAL_MINUTES}-minute mark. Waiting {seconds_until_next_mark}s...")
+            await asyncio.sleep(seconds_until_next_mark)
 
     @tasks.loop(hours=1)  # Check every hour, will use config to determine actual interval
     async def backup_database(self):

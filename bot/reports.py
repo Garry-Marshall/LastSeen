@@ -29,9 +29,14 @@ def purge_guild_state(guild_id: int) -> None:
     _last_report_send.pop(guild_id, None)
 
 
-async def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: int, report_types: list) -> discord.Embed:
+def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: int, report_types: list) -> discord.Embed:
     """
     Generate activity summary report.
+
+    Synchronous: every step is a blocking DB read plus in-memory embed building,
+    with no awaits. Run it off the event loop (asyncio.to_thread) so generating a
+    report — a dozen-plus queries — never stalls presence tracking or slash-command
+    handling.
 
     Args:
         guild: Discord guild
@@ -299,7 +304,7 @@ async def send_scheduled_report(guild: discord.Guild, channel_id: int, db: Datab
                     logger.info(f"No report content to send for guild {guild.name}")
                     return True
 
-                embed = await generate_activity_report(guild, db, days, report_types)
+                embed = await asyncio.to_thread(generate_activity_report, guild, db, days, report_types)
                 await channel.send(embed=embed)
                 _last_report_send[guild.id] = datetime.now(timezone.utc).timestamp()
                 logger.info(f"Sent scheduled report to {channel.name} in guild {guild.name}")
