@@ -709,6 +709,9 @@ class TrackingCog(commands.Cog):
             embed = create_embed(t("tracking.member_left.title", lang), discord.Color.red())
             embed.description = ""
 
+            # Show the departed member's avatar next to their name
+            embed.set_thumbnail(url=member.display_avatar.url)
+
             # User Identity
             embed.description += t("tracking.member_left.user_id", lang, user_id=member_data['user_id'])
             embed.description += t("tracking.member_left.username", lang, username=member_data['username'])
@@ -1237,7 +1240,6 @@ class TrackingCog(commands.Cog):
             import json
             import pytz
             
-            logger.debug("Checking scheduled reports...")
             guilds_with_reports = self.db.get_guilds_with_reports_enabled()
             
             if not guilds_with_reports:
@@ -1270,17 +1272,12 @@ class TrackingCog(commands.Cog):
                     current_weekday = now_local.weekday()  # 0=Monday, 6=Sunday
                     current_day_of_month = now_local.day
                     current_hour = now_local.hour
-                    
-                    logger.debug(f"Guild {guild.name}: Current time {now_local.strftime('%Y-%m-%d %H:%M')} {guild_tz_str}, "
-                                f"Current hour: {current_hour}, Configured hour: {time_hour}, "
-                                f"Frequency: {frequency}, Weekday: {current_weekday}, Day of month: {current_day_of_month}")
-                    
+
                     # Fire at or after the configured hour (in guild's timezone), not
                     # only exactly on it. The per-day dedup below ensures a single send,
                     # so this stays exact under normal operation but still fires if the
                     # configured hour is skipped by a DST spring-forward or a missed tick.
                     if current_hour < time_hour:
-                        logger.debug(f"Guild {guild.name}: Skipping - current hour {current_hour} < configured hour {time_hour}")
                         continue  # Not yet at the configured hour today
 
                     # Small deterministic per-guild offset (0..JITTER-1 minutes)
@@ -1293,9 +1290,7 @@ class TrackingCog(commands.Cog):
                     # miss-recovery behaviour above.
                     send_minute = guild_id % REPORT_JITTER_MINUTES
                     if current_hour == time_hour and now_local.minute < send_minute:
-                        logger.debug(f"Guild {guild.name}: Waiting for staggered send minute {send_minute} (now :{now_local.minute:02d})")
-                        continue
-
+                        continue  # Not yet at this guild's staggered send minute
 
                     try:
                         report_types = json.loads(guild_config['report_types']) if guild_config['report_types'] else []
@@ -1311,28 +1306,16 @@ class TrackingCog(commands.Cog):
                         day_weekly = guild_config.get('report_day_weekly', 0)
                         last_weekly = guild_config.get('last_weekly_report', 0)
                         
-                        logger.debug(f"Guild {guild.name}: Checking weekly - configured day: {day_weekly}, current weekday: {current_weekday}, last report: {last_weekly}")
-                        
-                        # Check if it's the right day and report hasn't been sent today
+                        # Right day, and not already sent today (dedup by date in
+                        # the guild's timezone).
                         should_send_weekly = False
                         if current_weekday == day_weekly:
                             if last_weekly == 0:
-                                # Never sent before
-                                should_send_weekly = True
-                                logger.debug(f"Guild {guild.name}: Weekly report never sent, will send now")
+                                should_send_weekly = True  # Never sent before
                             else:
-                                # Check if last report was sent on a different date (not today)
-                                # Convert last report timestamp to the guild's timezone for comparison
-                                last_report_datetime = datetime.fromtimestamp(last_weekly, tz=timezone.utc).astimezone(guild_tz)
-                                last_report_date = last_report_datetime.date()
-                                current_date = now_local.date()
-                                logger.debug(f"Guild {guild.name}: Last weekly report: {last_report_date}, Current date: {current_date}")
-                                should_send_weekly = (current_date != last_report_date)
-                                if not should_send_weekly:
-                                    logger.debug(f"Guild {guild.name}: Weekly report already sent today, skipping")
-                        else:
-                            logger.debug(f"Guild {guild.name}: Not the configured weekly day")
-                        
+                                last_report_date = datetime.fromtimestamp(last_weekly, tz=timezone.utc).astimezone(guild_tz).date()
+                                should_send_weekly = (last_report_date != now_local.date())
+
                         if should_send_weekly:
                             logger.info(f"Sending weekly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
                             success = await send_scheduled_report(guild, channel_id, self.db, report_types, 7)
@@ -1351,28 +1334,16 @@ class TrackingCog(commands.Cog):
                         day_monthly = guild_config.get('report_day_monthly', 1)
                         last_monthly = guild_config.get('last_monthly_report', 0)
                         
-                        logger.debug(f"Guild {guild.name}: Checking monthly - configured day: {day_monthly}, current day: {current_day_of_month}, last report: {last_monthly}")
-                        
-                        # Check if it's the right day and report hasn't been sent today
+                        # Right day, and not already sent today (dedup by date in
+                        # the guild's timezone).
                         should_send_monthly = False
                         if current_day_of_month == day_monthly:
                             if last_monthly == 0:
-                                # Never sent before
-                                should_send_monthly = True
-                                logger.debug(f"Guild {guild.name}: Monthly report never sent, will send now")
+                                should_send_monthly = True  # Never sent before
                             else:
-                                # Check if last report was sent on a different date (not today)
-                                # Convert last report timestamp to the guild's timezone for comparison
-                                last_report_datetime = datetime.fromtimestamp(last_monthly, tz=timezone.utc).astimezone(guild_tz)
-                                last_report_date = last_report_datetime.date()
-                                current_date = now_local.date()
-                                logger.debug(f"Guild {guild.name}: Last monthly report: {last_report_date}, Current date: {current_date}")
-                                should_send_monthly = (current_date != last_report_date)
-                                if not should_send_monthly:
-                                    logger.debug(f"Guild {guild.name}: Monthly report already sent today, skipping")
-                        else:
-                            logger.debug(f"Guild {guild.name}: Not the configured monthly day")
-                        
+                                last_report_date = datetime.fromtimestamp(last_monthly, tz=timezone.utc).astimezone(guild_tz).date()
+                                should_send_monthly = (last_report_date != now_local.date())
+
                         if should_send_monthly:
                             logger.info(f"Sending monthly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
                             success = await send_scheduled_report(guild, channel_id, self.db, report_types, 30)

@@ -381,6 +381,11 @@ class CommandsCog(commands.Cog):
         embed = create_embed(t("commands.whois.title", lang, username=username), discord.Color.blue())
         embed.description = ""
 
+        # Show the member's avatar next to their name
+        avatar_user = member or self.bot.get_user(member_data['user_id'])
+        if avatar_user:
+            embed.set_thumbnail(url=avatar_user.display_avatar.url)
+
         # ===== USER IDENTITY SECTION =====
         embed.description += t("commands.whois.user_id", lang, user_id=member_data['user_id'])
 
@@ -561,6 +566,11 @@ class CommandsCog(commands.Cog):
 
         # Create embed
         embed = create_embed(t("commands.lastseen.title", lang), discord.Color.green())
+
+        # Show the member's avatar next to their name
+        avatar_user = interaction.guild.get_member(member_data['user_id']) or self.bot.get_user(member_data['user_id'])
+        if avatar_user:
+            embed.set_thumbnail(url=avatar_user.display_avatar.url)
 
         embed.add_field(
             name=t("commands.lastseen.field_username", lang),
@@ -2329,6 +2339,10 @@ class JourneyView(discord.ui.View):
             embed = self.cog._create_journey_embed(
                 journey, member, self.username, self.guild_id, self.lang
             )
+            # Show the member's avatar next to their name
+            avatar_user = member or self.cog.bot.get_user(self.user_id)
+            if avatar_user:
+                embed.set_thumbnail(url=avatar_user.display_avatar.url)
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Failed to show member journey: {e}", exc_info=True)
