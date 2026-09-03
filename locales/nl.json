@@ -650,5 +650,6 @@
   "watch.err_channel_and_dm": "❌ Kies een kanaal óf DM, niet beide.",
   "watch.replaced_existing": "\n\nℹ️ Dit heeft een bestaande watch voor dit doel vervangen.",
   "watch.replaced_existing_other": "\n\nℹ️ Dit heeft een watch vervangen die door {user} was ingesteld.",
-  "watch.dest_dm_other": "DM's van {user}"
+  "watch.dest_dm_other": "DM's van {user}",
+  "watch.alert_footer": "Gebruik /watch remove {seq} om deze watch te verwijderen"
 }

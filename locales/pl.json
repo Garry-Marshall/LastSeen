@@ -650,5 +650,6 @@
   "watch.err_channel_and_dm": "❌ Wybierz kanał ALBO wiadomość prywatną, nie oba.",
   "watch.replaced_existing": "\n\nℹ️ To zastąpiło istniejącą obserwację dla tego celu.",
   "watch.replaced_existing_other": "\n\nℹ️ To zastąpiło obserwację ustawioną przez {user}.",
-  "watch.dest_dm_other": "wiadomości prywatne {user}"
+  "watch.dest_dm_other": "wiadomości prywatne {user}",
+  "watch.alert_footer": "Aby usunąć tę obserwację, użyj /watch remove {seq}"
 }

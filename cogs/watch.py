@@ -619,11 +619,15 @@ class WatchCog(commands.Cog):
         embed = create_embed(title, color)
         embed.description = desc
 
+        # Footer tells the recipient how to stop the alert (embed footers are
+        # plain text, so /watch remove <n> shows literally).
+        remove_hint = t('watch.alert_footer', lang, seq=w['seq'])
+
         origin = f"({w['alert_type']}, {w['target_type']}:{w['target_id']}) in guild {guild.name}"
 
         if w['deliver_dm']:
             # A DM has no channel context, so stamp the guild it's about.
-            embed.set_footer(text=guild.name)
+            embed.set_footer(text=f"{guild.name} • {remove_hint}")
             user = guild.get_member(w['created_by']) or self.bot.get_user(w['created_by'])
             if user is None:
                 try:
@@ -640,6 +644,7 @@ class WatchCog(commands.Cog):
                 logger.error(f"Watch #{w['id']}: failed to DM {w['created_by']}: {e}")
             return
 
+        embed.set_footer(text=remove_hint)
         channel = guild.get_channel_or_thread(w['channel_id']) if w['channel_id'] else None
         if not channel:
             logger.warning(f"Watch #{w['id']}: channel {w['channel_id']} not found in guild {guild.name}; can't deliver")

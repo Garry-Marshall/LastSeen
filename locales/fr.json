@@ -650,5 +650,6 @@
   "watch.err_channel_and_dm": "❌ Choisissez un salon OU un MP, pas les deux.",
   "watch.replaced_existing": "\n\nℹ️ Ceci a remplacé une surveillance existante pour cette cible.",
   "watch.replaced_existing_other": "\n\nℹ️ Ceci a remplacé une surveillance configurée par {user}.",
-  "watch.dest_dm_other": "les MP de {user}"
+  "watch.dest_dm_other": "les MP de {user}",
+  "watch.alert_footer": "Pour supprimer cette surveillance, utilisez /watch remove {seq}"
 }

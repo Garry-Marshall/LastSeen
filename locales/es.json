@@ -650,5 +650,6 @@
   "watch.err_channel_and_dm": "❌ Elige un canal O un MD, no ambos.",
   "watch.replaced_existing": "\n\nℹ️ Esto reemplazó una vigilancia existente para este objetivo.",
   "watch.replaced_existing_other": "\n\nℹ️ Esto reemplazó una vigilancia configurada por {user}.",
-  "watch.dest_dm_other": "los MD de {user}"
+  "watch.dest_dm_other": "los MD de {user}",
+  "watch.alert_footer": "Para eliminar esta vigilancia, usa /watch remove {seq}"
 }

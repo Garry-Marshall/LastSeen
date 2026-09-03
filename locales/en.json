@@ -650,5 +650,6 @@
   "watch.err_channel_and_dm": "❌ Choose either a channel or DM, not both.",
   "watch.replaced_existing": "\n\nℹ️ This replaced an existing watch on this target.",
   "watch.replaced_existing_other": "\n\nℹ️ This replaced a watch set by {user}.",
-  "watch.dest_dm_other": "{user}'s DMs"
+  "watch.dest_dm_other": "{user}'s DMs",
+  "watch.alert_footer": "To remove this watch, use /watch remove {seq}"
 }
