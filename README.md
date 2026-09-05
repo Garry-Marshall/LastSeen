@@ -18,7 +18,7 @@ Know exactly when members were last online. Track presence changes, join/leave t
 Instantly identify members who've been offline beyond your threshold. Perfect for engagement campaigns, role cleanup, or understanding server health.
 
 ### 👀 Watchlists & Activity Alerts
-Get pinged automatically when specific members — or a whole role — come back online or go quiet. Watch a user or role for a return to online (optionally only after a long absence), or for crossing an offline threshold (e.g. "alert me if any staff member hasn't been seen in 48h"). Alerts post to the channel you set them up in. See `/help watch` in-app for full details.
+Get pinged automatically when specific members — or a whole role — come back online or go quiet. Watch a user or role for a return to online (optionally only after a long absence), or for crossing an offline threshold (e.g. "alert me if any staff member hasn't been seen in 48h"). Alerts post to the channel you set them up in. When you start watching a member, they're automatically sent a DM letting them know, and anyone can opt out of being watched with `/no-watch`. See `/help watch` in-app for full details.
 
 ### 👤 WhoIs (Member Profiles)
 Comprehensive member information at a glance: join date, roles, nickname history, last seen, and message activity stats.
@@ -69,6 +69,7 @@ Configurable database backups with automatic retention management. Set your back
 - `/mystats` - View your own activity statistics (always private/ephemeral)
 - `/forgetme` - Delete your tracked data and opt out of tracking
 - `/optin` - Re-enable activity tracking after a `/forgetme` opt-out
+- `/no-watch` - Stop admins from setting presence-watch alerts on you (activity tracking stays on); run again to allow it
 - `/help [command]` - Show available commands, or detailed help for one (e.g. `/help watch`)
 - `/about` - Show bot information and system resources
 
@@ -108,6 +109,7 @@ Configurable database backups with automatic retention management. Set your back
   - `/watch list` - List this server's watches and their ids
   - `/watch remove <id>` - Remove a watch by id
   - Set `dm:True` to receive the alert as a DM instead of a channel post (requires the second argument, `channel`, to be left unset)
+  - The watched member is DM'd when a watch is created on them, and can opt out of being watched with `/no-watch` (activity tracking stays on)
   - Durations use `m`/`h`/`d`; online alerts have a 1-hour per-member cooldown; opted-out members can't be watched; up to 50 watches per server
 - `/role-history <user>` - Show the last 20 role changes for a member
 - `/help [command]` - Show available commands, or detailed help for one command (e.g. `/help watch`)
@@ -492,6 +494,8 @@ Get alerted about member activity. A target can be a **user or a role**, and eac
 - Durations use `m`/`h`/`d` — e.g. `30m`, `48h`, `7d`
 - `dm:True` sends the alert to whoever set the watch (make sure you allow DMs from server members); can't be combined with a channel
 - Online alerts have a 1-hour per-member cooldown to avoid spam
+- When you create a watch on a member, they're sent a DM letting them know
+- Members can opt out of being watched with `/no-watch` — their activity tracking stays on
 - Members who opted out with `/forgetme` can't be watched
 - Up to 50 watches per server
 - Reads only the existing "last seen" data — no presence history is stored
@@ -668,6 +672,8 @@ This bot stores:
 - Guild information
 
 All data is stored locally in SQLite database. No data is sent to external services.
+
+Members control their own data: `/forgetme` deletes it and opts out of tracking entirely, and `/no-watch` opts out of being a watch target while leaving activity tracking on.
 
 ## Support
 

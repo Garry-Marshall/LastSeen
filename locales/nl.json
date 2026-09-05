@@ -339,7 +339,7 @@
   "admin.help.links_title": "🔗 Links",
   "admin.help.links": "[Commando-overzicht](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "admin.help.user_commands_title": "👥 Gebruikerscommando's",
-  "admin.help.user_commands": "`/whois <gebruiker>` - Toon gebruikersinfo, rollen, lidmaatschapsdatum, laatst gezien\n`/lastseen <gebruiker>` of `/seen <gebruiker>` - Wanneer de gebruiker voor het laatst online was\n`/chat-history <gebruiker>` - Toon berichtstatistieken van het afgelopen jaar\n`/mystats` - Bekijk je eigen activiteitsstatistieken (alleen voor jou zichtbaar)\n`/forgetme` - Verwijder je gegevens en meld je af voor tracking\n`/optin` - Tracking opnieuw inschakelen na afmelden\n",
+  "admin.help.user_commands": "`/whois <gebruiker>` - Toon gebruikersinfo, rollen, lidmaatschapsdatum, laatst gezien\n`/lastseen <gebruiker>` of `/seen <gebruiker>` - Wanneer de gebruiker voor het laatst online was\n`/chat-history <gebruiker>` - Toon berichtstatistieken van het afgelopen jaar\n`/mystats` - Bekijk je eigen activiteitsstatistieken (alleen voor jou zichtbaar)\n`/forgetme` - Verwijder je gegevens en meld je af voor tracking\n`/optin` - Tracking opnieuw inschakelen na afmelden\n`/no-watch` - Voorkom dat beheerders aanwezigheidsmeldingen op jou instellen (tracking blijft aan)\n",
   "admin.help.admin_commands_title": "⚙️ Beheerderscommando's",
   "admin.help.admin_commands": "`/config` - Configureer botinstellingen (kanalen, rollen, rapporten en meer)\n`/role-history <gebruiker>` - Bekijk de rolwijzigingsgeschiedenis van een lid\n`/inactive` - Toon leden die langer dan de drempel offline zijn\n`/inactive <dagen>` - Toon leden die <dagen> dagen offline zijn\n`/user-stats` - Interactief statistiekdashboard met analyses",
   "admin.help.search_title": "🔍 Zoeken & filteren",
@@ -615,7 +615,7 @@
   "admin.help.watch_detail_examples_title": "Voorbeelden",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - melding zodra Alice weer online is\n• `/watch online @Alice after:7d` - melding wanneer Alice na 7+ dagen terugkomt\n• `/watch offline @Bob 7d` - melding als Bob 7 dagen niet is gezien\n• `/watch offline @Staff 48h` - melding wanneer een Staff-lid 48u niet is gezien\n• `/watch offline @Alice 7d dm:True` - stuur mij een DM in plaats van een kanaalbericht",
   "admin.help.watch_detail_notes_title": "Goed om te weten",
-  "admin.help.watch_detail_notes": "• Duur gebruikt `m`/`h`/`d`, bijv. `30m`, `48h`, `7d`.\n• Online-meldingen hebben een afkoeltijd van 1 uur per lid om spam te voorkomen.\n• Leden die zich hebben afgemeld met `/forgetme` kunnen niet gevolgd worden.\n• Maximaal 50 watches per server.\n• Voeg `dm:True` toe aan een watch om de melding in je DM's te krijgen in plaats van een kanaal.",
+  "admin.help.watch_detail_notes": "• Duur gebruikt `m`/`h`/`d`, bijv. `30m`, `48h`, `7d`.\n• Online-meldingen hebben een afkoeltijd van 1 uur per lid om spam te voorkomen.\n• Leden die zich hebben afgemeld met `/forgetme` kunnen niet gevolgd worden.\n• Wanneer je een watch op een lid aanmaakt, krijgt diegene een DM om het te laten weten.\n• Leden kunnen zich met `/no-watch` afmelden om gevolgd te worden (hun activiteit-tracking blijft aan).\n• Maximaal 50 watches per server.\n• Voeg `dm:True` toe aan een watch om de melding in je DM's te krijgen in plaats van een kanaal.",
   "watch.removed_target": "{count} watch(es) voor {target} verwijderd.",
 
   "admin.help.search_detail_title": "🔍 /search - Geavanceerd zoeken naar leden",
@@ -651,5 +651,12 @@
   "watch.replaced_existing": "\n\nℹ️ Dit heeft een bestaande watch voor dit doel vervangen.",
   "watch.replaced_existing_other": "\n\nℹ️ Dit heeft een watch vervangen die door {user} was ingesteld.",
   "watch.dest_dm_other": "DM's van {user}",
-  "watch.alert_footer": "Gebruik /watch remove {seq} om deze watch te verwijderen"
+  "watch.alert_footer": "Gebruik /watch remove {seq} om deze watch te verwijderen",
+  "watch.err_no_watch": "❌ Dat lid heeft zich afgemeld om gevolgd te worden (`/no-watch`).",
+  "watch.notified_target": "\n\nℹ️ {target} heeft een DM gekregen om te laten weten dat ze gevolgd worden.",
+  "watch.dm_notify_title": "👀 Let op: er is een aanwezigheidsmelding voor jou ingesteld",
+  "watch.dm_notify_body": "Een beheerder in **{guild}** heeft zojuist een melding ingesteld die hen op de hoogte brengt van jouw aanwezigheid (wanneer je online komt of offline gaat).\n\nHet volgen van je activiteit verandert hier niet door. Wil je liever niet gevolgd worden, gebruik dan `/no-watch` in **{guild}** en meldingen over jouw aanwezigheid stoppen.",
+  "commands.no_watch.update_failed": "Kon je voorkeur niet bijwerken. Probeer het later opnieuw.",
+  "commands.no_watch.now_exempt": "Je bent nu uitgesloten van aanwezigheidsmeldingen. Beheerders kunnen geen nieuwe `/watch`-meldingen voor jou instellen en bestaande stoppen. Het volgen van je activiteit verandert niet — gebruik `/no-watch` opnieuw om weer volgbaar te worden.",
+  "commands.no_watch.now_watchable": "Je kunt weer gevolgd worden. Beheerders kunnen nu `/watch`-aanwezigheidsmeldingen voor jou instellen. Gebruik `/no-watch` opnieuw om je weer af te melden."
 }

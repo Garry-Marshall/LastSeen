@@ -178,6 +178,10 @@ class WatchCog(commands.Cog):
                 await interaction.response.send_message(
                     embed=create_error_embed(t('watch.err_opted_out', lang), lang), ephemeral=True)
                 return
+            if target.id in self.bot.no_watch_users:
+                await interaction.response.send_message(
+                    embed=create_error_embed(t('watch.err_no_watch', lang), lang), ephemeral=True)
+                return
             target_type, target_id = 'user', target.id
 
         # DM and a channel are mutually exclusive destinations.
@@ -247,11 +251,43 @@ class WatchCog(commands.Cog):
             else:
                 desc += t('watch.replaced_existing', lang)
 
+        # Transparency: a new watch on a user DMs that member a heads-up (roles
+        # aren't notified; a reconfigure isn't re-notified). Tell the admin it's
+        # happening so a watch is never a silent action.
+        notify_target = target_type == 'user' and prior is None
+        if notify_target:
+            desc += t('watch.notified_target', lang, target=target_mention)
+
         embed = create_embed(t('watch.added_title', lang), discord.Color.green())
         embed.description = desc
         embed.set_footer(text=f"#{seq}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"Watch #{seq} ({alert_type}, {target_type}:{target_id}, {'dm' if dm else 'channel'}) created in guild {interaction.guild.name} by {interaction.user}")
+
+        # Sent after the admin confirmation so the DM's latency can't push the
+        # interaction response past its window. Best-effort; a closed DM is fine.
+        if notify_target:
+            await self._notify_watched_user(interaction.guild, target_id, alert_type)
+
+    async def _notify_watched_user(self, guild: discord.Guild, user_id: int, alert_type: str) -> None:
+        """DM a user that an admin set a presence watch on them (best-effort).
+
+        Transparency for the watched member: they learn which server it's in and
+        can opt out with /no-watch. A closed DM (Forbidden) is logged and dropped.
+        """
+        member = guild.get_member(user_id) or self.bot.get_user(user_id)
+        if member is None:
+            return
+        lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, guild.id))
+        embed = create_embed(t('watch.dm_notify_title', lang), discord.Color.blurple())
+        embed.description = t('watch.dm_notify_body', lang, guild=guild.name)
+        try:
+            await member.send(embed=embed)
+            logger.info(f"Notified watched user {user_id} of new {alert_type} watch in guild {guild.name}")
+        except discord.Forbidden:
+            logger.info(f"Could not notify watched user {user_id} (DMs closed) in guild {guild.name}")
+        except Exception as e:
+            logger.warning(f"Failed to notify watched user {user_id} in guild {guild.name}: {e}")
 
     @watch_group.command(name="online", description="🔔 Alert when a member/role comes back online")
     @app_commands.describe(
@@ -457,7 +493,7 @@ class WatchCog(commands.Cog):
         offline_for watches. Dispatched by TrackingCog with the pre-overwrite
         last_seen so the away-duration survives the two listeners racing.
         """
-        if member.id in self.bot.opted_out_users:
+        if member.id in self.bot.opted_out_users or member.id in self.bot.no_watch_users:
             return
 
         guild_id = member.guild.id
@@ -543,6 +579,8 @@ class WatchCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _sweep_user_watch(self, guild: discord.Guild, w: dict, now: int):
+        if w['target_id'] in self.bot.no_watch_users:
+            return
         member_data = await asyncio.to_thread(self.db.get_member, guild.id, w['target_id'])
         if not member_data:
             return
@@ -563,7 +601,9 @@ class WatchCog(commands.Cog):
         role = guild.get_role(w['target_id'])
         if not role:
             return
-        members = [m for m in role.members if not m.bot and m.id not in self.bot.opted_out_users]
+        members = [m for m in role.members if not m.bot
+                   and m.id not in self.bot.opted_out_users
+                   and m.id not in self.bot.no_watch_users]
         if not members:
             return
         last_seen_map = await asyncio.to_thread(

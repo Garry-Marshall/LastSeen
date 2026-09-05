@@ -1139,6 +1139,42 @@ class CommandsCog(commands.Cog):
         )
         logger.info(f"User {interaction.user} ({user_id}) opted back in to tracking")
 
+    @app_commands.command(name="no-watch", description="🙈 Toggle whether admins can set presence-watch alerts on you")
+    @app_commands.checks.cooldown(1, 10.0, key=lambda i: i.user.id)
+    @app_commands.guild_only()
+    async def no_watch(self, interaction: discord.Interaction):
+        """Toggle the global 'don't watch me' exemption.
+
+        Independent of /forgetme — activity tracking is unaffected. This only
+        stops presence watches (/watch) from firing on you and blocks new ones.
+        Reversible: run it again to become watchable.
+        """
+        user_id = interaction.user.id
+        lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id))
+
+        if user_id in self.bot.no_watch_users:
+            # Currently exempt -> make watchable again.
+            if not await asyncio.to_thread(self.db.remove_no_watch_user, user_id):
+                await interaction.response.send_message(
+                    embed=create_error_embed(t("commands.no_watch.update_failed", lang), lang), ephemeral=True)
+                return
+            self.bot.no_watch_users.discard(user_id)
+            await interaction.response.send_message(
+                embed=create_success_embed(t("commands.no_watch.now_watchable", lang), lang), ephemeral=True)
+            logger.info(f"User {interaction.user} ({user_id}) opted back in to being watchable")
+        else:
+            # Not exempt -> opt out of being watched. Add to the in-memory set
+            # first so no watch can fire in the gap, rolling back if the write fails.
+            self.bot.no_watch_users.add(user_id)
+            if not await asyncio.to_thread(self.db.add_no_watch_user, user_id):
+                self.bot.no_watch_users.discard(user_id)
+                await interaction.response.send_message(
+                    embed=create_error_embed(t("commands.no_watch.update_failed", lang), lang), ephemeral=True)
+                return
+            await interaction.response.send_message(
+                embed=create_success_embed(t("commands.no_watch.now_exempt", lang), lang), ephemeral=True)
+            logger.info(f"User {interaction.user} ({user_id}) opted out of being watched")
+
     @app_commands.command(name="about", description="ℹ️ About this bot")
     async def about(self, interaction: discord.Interaction):
         import psutil

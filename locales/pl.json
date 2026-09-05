@@ -339,7 +339,7 @@
   "admin.help.links_title": "🔗 Linki",
   "admin.help.links": "[Spis poleceń](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "admin.help.user_commands_title": "👥 Polecenia użytkownika",
-  "admin.help.user_commands": "`/whois <użytkownik>` - Pokaż informacje o użytkowniku, role, datę dołączenia, ostatnią obecność\n`/lastseen <użytkownik>` lub `/seen <użytkownik>` - Kiedy użytkownik był ostatnio online\n`/chat-history <użytkownik>` - Pokaż statystyki wiadomości z ostatniego roku\n`/mystats` - Zobacz własne statystyki aktywności (widoczne tylko dla Ciebie)\n`/forgetme` - Usuń swoje dane i zrezygnuj ze śledzenia\n`/optin` - Ponownie włącz śledzenie po rezygnacji\n",
+  "admin.help.user_commands": "`/whois <użytkownik>` - Pokaż informacje o użytkowniku, role, datę dołączenia, ostatnią obecność\n`/lastseen <użytkownik>` lub `/seen <użytkownik>` - Kiedy użytkownik był ostatnio online\n`/chat-history <użytkownik>` - Pokaż statystyki wiadomości z ostatniego roku\n`/mystats` - Zobacz własne statystyki aktywności (widoczne tylko dla Ciebie)\n`/forgetme` - Usuń swoje dane i zrezygnuj ze śledzenia\n`/optin` - Ponownie włącz śledzenie po rezygnacji\n`/no-watch` - Uniemożliw adminom ustawianie alertów obecności na Ciebie (śledzenie pozostaje włączone)\n",
   "admin.help.admin_commands_title": "⚙️ Polecenia administratora",
   "admin.help.admin_commands": "`/config` - Skonfiguruj ustawienia bota (kanały, role, raporty i więcej)\n`/role-history <użytkownik>` - Zobacz historię zmian ról członka\n`/inactive` - Wyświetl członków offline poza progiem\n`/inactive <dni>` - Wyświetl członków offline od <dni> dni\n`/user-stats` - Interaktywny panel statystyk z analizą",
   "admin.help.search_title": "🔍 Szukaj i filtruj",
@@ -615,7 +615,7 @@
   "admin.help.watch_detail_examples_title": "Przykłady",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - powiadom, gdy Alice będzie następnym razem online\n• `/watch online @Alice after:7d` - powiadom, gdy Alice wróci po 7+ dniach nieobecności\n• `/watch offline @Bob 7d` - powiadom, jeśli Bob nie będzie widziany przez 7 dni\n• `/watch offline @Staff 48h` - powiadom, gdy członek Staff nie był widziany przez 48h\n• `/watch offline @Alice 7d dm:True` - wyślij mi wiadomość prywatną zamiast posta na kanale",
   "admin.help.watch_detail_notes_title": "Warto wiedzieć",
-  "admin.help.watch_detail_notes": "• Czas używa `m`/`h`/`d`, np. `30m`, `48h`, `7d`.\n• Powiadomienia online mają 1-godzinny czas odnowienia na członka, aby uniknąć spamu.\n• Członkowie, którzy zrezygnowali przez `/forgetme`, nie mogą być obserwowani.\n• Maksymalnie 50 obserwacji na serwer.\n• Dodaj `dm:True` do dowolnej obserwacji, aby otrzymać powiadomienie w wiadomości prywatnej zamiast na kanale.",
+  "admin.help.watch_detail_notes": "• Czas używa `m`/`h`/`d`, np. `30m`, `48h`, `7d`.\n• Powiadomienia online mają 1-godzinny czas odnowienia na członka, aby uniknąć spamu.\n• Członkowie, którzy zrezygnowali przez `/forgetme`, nie mogą być obserwowani.\n• Gdy tworzysz obserwację członka, otrzymuje on wiadomość prywatną z informacją o tym.\n• Członkowie mogą zrezygnować z bycia obserwowanym za pomocą `/no-watch` (śledzenie ich aktywności pozostaje włączone).\n• Maksymalnie 50 obserwacji na serwer.\n• Dodaj `dm:True` do dowolnej obserwacji, aby otrzymać powiadomienie w wiadomości prywatnej zamiast na kanale.",
   "watch.removed_target": "Usunięto {count} obserwacji dla {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Zaawansowane wyszukiwanie członków",
@@ -651,5 +651,12 @@
   "watch.replaced_existing": "\n\nℹ️ To zastąpiło istniejącą obserwację dla tego celu.",
   "watch.replaced_existing_other": "\n\nℹ️ To zastąpiło obserwację ustawioną przez {user}.",
   "watch.dest_dm_other": "wiadomości prywatne {user}",
-  "watch.alert_footer": "Aby usunąć tę obserwację, użyj /watch remove {seq}"
+  "watch.alert_footer": "Aby usunąć tę obserwację, użyj /watch remove {seq}",
+  "watch.err_no_watch": "❌ Ten użytkownik zrezygnował z bycia obserwowanym (`/no-watch`).",
+  "watch.notified_target": "\n\nℹ️ {target} otrzymał(a) wiadomość prywatną z informacją, że jest obserwowany(a).",
+  "watch.dm_notify_title": "👀 Uwaga: ustawiono dla Ciebie alert obecności",
+  "watch.dm_notify_body": "Administrator na serwerze **{guild}** właśnie ustawił alert, który powiadamia go o Twojej obecności (gdy wchodzisz online lub wychodzisz offline).\n\nNie wpływa to na śledzenie Twojej aktywności. Jeśli wolisz nie być obserwowany(a), użyj `/no-watch` na serwerze **{guild}**, a alerty o Twojej obecności zostaną wstrzymane.",
+  "commands.no_watch.update_failed": "Nie udało się zaktualizować Twojej preferencji. Spróbuj ponownie później.",
+  "commands.no_watch.now_exempt": "Jesteś teraz wyłączony(a) z obserwacji obecności. Administratorzy nie mogą ustawiać nowych alertów `/watch` na Ciebie, a istniejące przestaną działać. Nie wpływa to na śledzenie Twojej aktywności — użyj `/no-watch` ponownie, aby znów można było Cię obserwować.",
+  "commands.no_watch.now_watchable": "Znów możesz być obserwowany(a). Administratorzy mogą teraz ustawiać alerty obecności `/watch` na Ciebie. Użyj `/no-watch` w dowolnym momencie, aby ponownie zrezygnować."
 }

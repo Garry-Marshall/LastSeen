@@ -87,6 +87,9 @@ def create_bot(config) -> commands.Bot:
     # whenever bot.db does; kept in memory because it is checked on hot event
     # paths (presence updates, messages).
     bot.opted_out_users = bot.db.get_opted_out_user_ids()
+    # Global "don't watch me" list (/no-watch). Checked on the watch fire paths
+    # and at watch creation; kept in memory like opted_out_users.
+    bot.no_watch_users = bot.db.get_no_watch_user_ids()
     # Guild ids that have at least one watch (see cogs/watch.py). Kept in memory
     # so the presence hot path can skip watch work for the vast majority of
     # guilds with a single set lookup. Populated/maintained by WatchCog; seeded

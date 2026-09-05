@@ -436,6 +436,17 @@ class DatabaseManager:
                 )
             """)
 
+            # "Don't watch me" list. Global per-user opt-out from being a watch
+            # target (see cogs/watch.py). Lighter than opted_out_users: activity
+            # tracking continues, only presence watches are suppressed. No FK, so
+            # it survives guild removal.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS no_watch_users (
+                    user_id INTEGER PRIMARY KEY,
+                    opted_out_at INTEGER NOT NULL
+                )
+            """)
+
             # Watchlists: admin-configured presence alerts. Stores only alert
             # config plus minimal fire-state (never presence history). All
             # timing decisions read the existing single members.last_seen column.
@@ -4030,6 +4041,42 @@ class DatabaseManager:
                 return {row[0] for row in cursor.fetchall()}
         except Exception as e:
             logger.error(f"Failed to get opted-out users: {e}")
+            return set()
+
+    def add_no_watch_user(self, user_id: int) -> bool:
+        """Add a user to the global 'don't watch me' list."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR IGNORE INTO no_watch_users (user_id, opted_out_at)
+                    VALUES (?, ?)
+                """, (user_id, int(datetime.now(timezone.utc).timestamp())))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to add no-watch user {user_id}: {e}")
+            return False
+
+    def remove_no_watch_user(self, user_id: int) -> bool:
+        """Remove a user from the global 'don't watch me' list."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM no_watch_users WHERE user_id = ?", (user_id,))
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to remove no-watch user {user_id}: {e}")
+            return False
+
+    def get_no_watch_user_ids(self) -> set:
+        """Get the set of all user IDs who opted out of being watched."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id FROM no_watch_users")
+                return {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Failed to get no-watch users: {e}")
             return set()
 
     def purge_user_data(self, user_id: int) -> Optional[Dict[str, int]]:

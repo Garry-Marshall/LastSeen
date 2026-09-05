@@ -339,7 +339,7 @@
   "admin.help.links_title": "🔗 Links",
   "admin.help.links": "[Command reference](https://lastseen.bot/commands/) • [FAQ](https://lastseen.bot/faq/)",
   "admin.help.user_commands_title": "👥 User Commands",
-  "admin.help.user_commands": "`/whois <user>` - Show user info, roles, join date, last seen\n`/lastseen <user>` or `/seen <user>` - When user was last online\n`/chat-history <user>` - Show message posting stats for the last year\n`/mystats` - View your own activity statistics (only visible to you)\n`/forgetme` - Delete your data and opt out of tracking\n`/optin` - Re-enable tracking after opting out\n",
+  "admin.help.user_commands": "`/whois <user>` - Show user info, roles, join date, last seen\n`/lastseen <user>` or `/seen <user>` - When user was last online\n`/chat-history <user>` - Show message posting stats for the last year\n`/mystats` - View your own activity statistics (only visible to you)\n`/forgetme` - Delete your data and opt out of tracking\n`/optin` - Re-enable tracking after opting out\n`/no-watch` - Stop admins setting presence alerts on you (tracking stays on)\n",
   "admin.help.admin_commands_title": "⚙️ Admin Commands",
   "admin.help.admin_commands": "`/config` - Configure bot settings (channels, roles, reports, and more)\n`/role-history <user>` - View role change history for a member\n`/inactive` - List members offline beyond threshold\n`/inactive <days>` - List members offline for <days> days\n`/user-stats` - Interactive statistics dashboard with analytics",
   "admin.help.search_title": "🔍 Search & Filter",
@@ -615,7 +615,7 @@
   "admin.help.watch_detail_examples_title": "Examples",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - ping when Alice is next online\n• `/watch online @Alice after:7d` - ping when Alice returns after 7+ days away\n• `/watch offline @Bob 7d` - ping if Bob goes 7 days without being seen\n• `/watch offline @Staff 48h` - ping when a Staff member hasn't been seen in 48h\n• `/watch offline @Alice 7d dm:True` - DM me instead of posting in a channel",
   "admin.help.watch_detail_notes_title": "Good to know",
-  "admin.help.watch_detail_notes": "• Durations use `m`/`h`/`d`, e.g. `30m`, `48h`, `7d`.\n• Online alerts have a 1-hour cooldown per member to avoid spam.\n• Members who opted out with `/forgetme` can't be watched.\n• Up to 50 watches per server.\n• Add `dm:True` to any watch to get the alert in your DMs instead of a channel.",
+  "admin.help.watch_detail_notes": "• Durations use `m`/`h`/`d`, e.g. `30m`, `48h`, `7d`.\n• Online alerts have a 1-hour cooldown per member to avoid spam.\n• Members who opted out with `/forgetme` can't be watched.\n• When you create a watch on a member, they're sent a DM letting them know.\n• Members can stop being watched with `/no-watch` (their activity tracking stays on).\n• Up to 50 watches per server.\n• Add `dm:True` to any watch to get the alert in your DMs instead of a channel.",
   "watch.removed_target": "Removed {count} watch(es) for {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Advanced Member Search",
@@ -651,5 +651,12 @@
   "watch.replaced_existing": "\n\nℹ️ This replaced an existing watch on this target.",
   "watch.replaced_existing_other": "\n\nℹ️ This replaced a watch set by {user}.",
   "watch.dest_dm_other": "{user}'s DMs",
-  "watch.alert_footer": "To remove this watch, use /watch remove {seq}"
+  "watch.alert_footer": "To remove this watch, use /watch remove {seq}",
+  "watch.err_no_watch": "❌ That member has opted out of being watched (`/no-watch`).",
+  "watch.notified_target": "\n\nℹ️ {target} has been sent a DM letting them know they're being watched.",
+  "watch.dm_notify_title": "👀 Heads-up: a presence alert was set for you",
+  "watch.dm_notify_body": "An admin in **{guild}** just set up an alert that notifies them about your presence (when you come online or go offline).\n\nYour activity tracking is unaffected. If you'd rather not be watched, run `/no-watch` in **{guild}** and presence alerts about you will stop.",
+  "commands.no_watch.update_failed": "Failed to update your preference. Please try again later.",
+  "commands.no_watch.now_exempt": "You're now exempt from presence watches. Admins can't set new `/watch` alerts on you, and any existing ones will stop firing. Your activity tracking is unaffected — run `/no-watch` again to become watchable.",
+  "commands.no_watch.now_watchable": "You can be watched again. Admins can now set `/watch` presence alerts on you. Run `/no-watch` again at any time to opt back out."
 }
