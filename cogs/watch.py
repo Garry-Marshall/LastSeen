@@ -620,7 +620,7 @@ class WatchCog(commands.Cog):
                     newly.append(m)
         if newly:
             listing = "\n".join(f"• {m.mention}" for m in newly)
-            await self._fire_alert(guild, w, role.mention, role_offline=w['threshold_seconds'], members=listing)
+            await self._fire_alert(guild, w, f"@{role.name}", role_offline=w['threshold_seconds'], members=listing)
         if new_fired != old_fired:
             await asyncio.to_thread(self.db.update_watch_fire_state, w['id'],
                                     fired_targets=json.dumps(sorted(new_fired)))
