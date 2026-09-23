@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands, tasks
 import logging
 import asyncio
+import contextlib
 import itertools
 import json
 from dataclasses import dataclass
@@ -148,6 +149,11 @@ class TrackingCog(commands.Cog):
         # day" and double-count the journey summary's active days, or collide
         # on its first insert and roll the whole write back.
         self._flush_lock = asyncio.Lock()
+
+        # Per-member ordering for join/leave/update DB work (see _member_order).
+        # Key: (guild_id, user_id) -> [lock, holders + waiters]; an entry is
+        # removed as soon as nobody holds or waits for it.
+        self._member_locks: Dict[Tuple[int, int], list] = {}
 
         # Guard: run the stale-guild cleanup only on the first on_ready.
         # on_ready re-fires on reconnects; re-running the cleanup then is
@@ -365,6 +371,26 @@ class TrackingCog(commands.Cog):
                 del buffer[key]
         # return_buffer holds (guild_id, user_id, away, ts) tuples; drop this user's
         self.return_buffer = [r for r in self.return_buffer if r[1] != user_id]
+
+    @contextlib.asynccontextmanager
+    async def _member_order(self, guild_id: int, user_id: int):
+        """Hold around one member's join/leave/update DB work so it is written
+        in the order Discord sent the events. That work runs in worker threads,
+        which otherwise race: an instant anti-raid kick could write the leave
+        before the join, leaving the departed member active. Different members
+        don't wait on each other."""
+        key = (guild_id, user_id)
+        entry = self._member_locks.get(key)
+        if entry is None:
+            entry = self._member_locks[key] = [asyncio.Lock(), 0]
+        entry[1] += 1
+        try:
+            async with entry[0]:
+                yield
+        finally:
+            entry[1] -= 1
+            if not entry[1]:
+                del self._member_locks[key]
 
     def _calculate_and_set_join_position(self, member: discord.Member) -> bool:
         """Calculate and set join position for a member based on their join date.
@@ -664,8 +690,13 @@ class TrackingCog(commands.Cog):
 
         def record_join():
             """All DB work for the join, off the event loop."""
-            # Check if member already exists (rejoining)
-            if self.db.member_exists(guild_id, user_id):
+            existing = self.db.get_member(guild_id, user_id)
+            if existing:
+                if existing['is_active'] and existing['join_date'] == join_date:
+                    # This same join was already stored by the presence update
+                    # that follows it (applied by the presence queue, which can
+                    # get there first): not a rejoin.
+                    return
                 logger.info(f"Member {username} is rejoining guild {guild_id}")
                 # Reactivate with the new join date and position. The prior
                 # left_date is kept, so the departure and this rejoin both count.
@@ -695,7 +726,8 @@ class TrackingCog(commands.Cog):
                 if position is not None:
                     self.db.set_member_join_position(guild_id, user_id, position)
 
-        await asyncio.to_thread(record_join)
+        async with self._member_order(guild_id, user_id):
+            await asyncio.to_thread(record_join)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -729,7 +761,8 @@ class TrackingCog(commands.Cog):
             self.db.set_member_left_date(guild_id, user_id, current_time)
             return member_data, self.db.get_guild_config(guild_id)
 
-        member_data, guild_config = await asyncio.to_thread(record_leave)
+        async with self._member_order(guild_id, user_id):
+            member_data, guild_config = await asyncio.to_thread(record_leave)
         if not member_data:
             logger.warning(f"Member {user_id} not found in database for guild {guild_id}")
             return
@@ -869,7 +902,8 @@ class TrackingCog(commands.Cog):
                 for role_name in removed_roles:
                     self.db.record_role_change(guild_id, user_id, role_name, "removed")
 
-        await asyncio.to_thread(record_update)
+        async with self._member_order(guild_id, user_id):
+            await asyncio.to_thread(record_update)
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User):

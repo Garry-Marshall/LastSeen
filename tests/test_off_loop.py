@@ -75,6 +75,7 @@ async def main():
     cog = TrackingCog.__new__(TrackingCog)
     cog.db, cog.config = db, SimpleNamespace(default_inactive_days=10)
     cog.bot = SimpleNamespace(opted_out_users=set(), get_channel=lambda cid: None)
+    cog._member_locks = {}
 
     await TrackingCog.on_member_join(cog, FakeMember(2, guild, online=True))
     m2 = real.get_member(G, 2)
