@@ -674,13 +674,11 @@ class TrackingCog(commands.Cog):
         # Check if member already exists (rejoining)
         if self.db.member_exists(guild_id, user_id):
             logger.info(f"Member {member} is rejoining guild {member.guild.name}")
-            # Update existing record
+            # Reactivate with the new join date and position. The prior
+            # left_date is kept, so the departure and this rejoin both count.
             nickname = member.display_name if member.display_name != str(member) else None
-            self.db.set_member_active(guild_id, user_id)
-            self.db.set_member_left_date(guild_id, user_id, None)  # Clear prior departure
-            self.db.update_member_username(guild_id, user_id, str(member))
-            self.db.update_member_nickname(guild_id, user_id, nickname)
-            self.db.update_member_roles(guild_id, user_id, roles)
+            self.db.rejoin_member(guild_id, user_id, str(member), nickname, join_date, roles,
+                                  member.status != discord.Status.offline)
         else:
             # Add new member
             nickname = member.display_name if member.display_name != str(member) else None

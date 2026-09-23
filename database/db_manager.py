@@ -26,6 +26,13 @@ HEALTH_SNAPSHOT_RETENTION_DAYS = 120
 # How long global /about statistics stay cached (seconds)
 BOT_STATS_CACHE_TTL = 300
 
+# When a member left, for counting departures in a time window. left_date is
+# kept across a rejoin, so a leave followed by a rejoin counts as both a leave
+# and a join (the rejoin updates join_date). Departures recorded before the
+# left_date column existed fall back to last_seen, which on_member_remove sets
+# to the same moment.
+LEFT_TS_SQL = "COALESCE(left_date, CASE WHEN is_active = 0 THEN last_seen END)"
+
 
 class DatabaseManager:
     """Manages SQLite database connections and operations."""
@@ -1336,19 +1343,6 @@ class DatabaseManager:
             logger.error(f"Failed to set member {user_id} inactive in guild {guild_id}: {e}")
             return False
 
-    def set_member_active(self, guild_id: int, user_id: int) -> bool:
-        """Mark a member as active (rejoined the guild)."""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    UPDATE members SET is_active = 1 WHERE guild_id = ? AND user_id = ?
-                """, (guild_id, user_id))
-                return cursor.rowcount > 0
-        except Exception as e:
-            logger.error(f"Failed to set member {user_id} active in guild {guild_id}: {e}")
-            return False
-
     def set_member_left_date(self, guild_id: int, user_id: int, timestamp: Optional[int]) -> bool:
         """Set (or clear, when timestamp is None) the date a member left the guild."""
         try:
@@ -1716,6 +1710,36 @@ class DatabaseManager:
     # held only briefly even when a guild has thousands of changes to catch up.
     RECONCILE_BATCH_SIZE = 500
 
+    # A returning member: active again with their new join date. left_date is
+    # deliberately kept so the departure still counts in its window (see
+    # LEFT_TS_SQL). Shared by the live rejoin and reconciliation.
+    _REJOIN_SQL = """UPDATE members SET is_active = 1, username = ?, nickname = ?,
+                         join_date = ?, roles = ?,
+                         last_seen = CASE WHEN ? THEN 0 ELSE last_seen END
+                     WHERE guild_id = ? AND user_id = ?"""
+
+    # Same rule as calculate_join_position: 1 + members who joined earlier.
+    _JOIN_POSITION_SQL = """UPDATE members SET join_position = (
+                                SELECT COUNT(*) FROM members m2
+                                WHERE m2.guild_id = members.guild_id AND m2.join_date < members.join_date
+                            ) + 1
+                            WHERE guild_id = ? AND user_id = ?"""
+
+    def rejoin_member(self, guild_id: int, user_id: int, username: str, nickname: Optional[str],
+                      join_date: int, roles: List[str], is_online: bool) -> bool:
+        """Reactivate a stored member who joined the guild again."""
+        try:
+            positions = self.guild_positions_initialized(guild_id)
+            with self.get_connection() as conn:
+                conn.execute(self._REJOIN_SQL, (username, nickname, join_date, json.dumps(roles),
+                                                1 if is_online else 0, guild_id, user_id))
+                if positions:
+                    conn.execute(self._JOIN_POSITION_SQL, (guild_id, user_id))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to record rejoin of {user_id} in guild {guild_id}: {e}")
+            return False
+
     def get_member_presence_rows(self, guild_id: int) -> Dict[int, Tuple[Optional[int], int]]:
         """Map user_id -> (last_seen, is_active) for every stored member of a guild."""
         with self.get_connection() as conn:
@@ -1742,7 +1766,8 @@ class DatabaseManager:
         departed_ids: stored as active but no longer in the guild; recorded the
         same way on_member_remove does, with `since` as the departure time.
         rejoined / new: (user_id, username, nickname, join_date, roles, is_online)
-        tuples for members stored as departed, or not stored at all.
+        tuples for members stored as departed, or not stored at all. Both get a
+        join position (when the guild has positions); rejoiners keep left_date.
 
         Every statement is idempotent, so a partial failure is repaired by the
         next reconciliation. Returns False on error.
@@ -1762,10 +1787,7 @@ class DatabaseManager:
                 [(since, since, guild_id, uid) for uid in departed_ids]
             )
             self._executemany_batched(
-                """UPDATE members SET is_active = 1, left_date = NULL, username = ?,
-                       nickname = ?, join_date = ?, roles = ?,
-                       last_seen = CASE WHEN ? THEN 0 ELSE last_seen END
-                   WHERE guild_id = ? AND user_id = ?""",
+                self._REJOIN_SQL,
                 [(name, nick, joined, json.dumps(roles), 1 if is_online else 0, guild_id, uid)
                  for uid, name, nick, joined, roles, is_online in rejoined]
             )
@@ -1783,15 +1805,10 @@ class DatabaseManager:
                   json.dumps(roles), json.dumps([nick]) if nick else None)
                  for uid, name, nick, joined, roles, is_online in new]
             )
-            if new and self.guild_positions_initialized(guild_id):
-                # Same rule as calculate_join_position: 1 + members who joined earlier.
+            if (new or rejoined) and self.guild_positions_initialized(guild_id):
                 self._executemany_batched(
-                    """UPDATE members SET join_position = (
-                           SELECT COUNT(*) FROM members m2
-                           WHERE m2.guild_id = members.guild_id AND m2.join_date < members.join_date
-                       ) + 1
-                       WHERE guild_id = ? AND user_id = ?""",
-                    [(guild_id, row[0]) for row in new]
+                    self._JOIN_POSITION_SQL,
+                    [(guild_id, row[0]) for row in new + rejoined]
                 )
             return True
         except Exception as e:
@@ -3101,10 +3118,10 @@ class DatabaseManager:
                 joins_this_month = cursor.fetchone()['joins'] or 0
                 
                 # Count members who left this month (only after bot was added)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) as leaves
                     FROM members
-                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ? AND last_seen >= ?
+                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} >= ?
                 """, (guild_id, month_start, bot_added_at))
                 leaves_this_month = cursor.fetchone()['leaves'] or 0
                 
@@ -3179,12 +3196,12 @@ class DatabaseManager:
                 """, (guild_id, period_start, bot_added_at))
                 joins = cursor.fetchone()['joins'] or 0
                 
-                # Members who left in this period (is_active = 0 and last_seen >= period_start)
-                # Only count leaves after bot was added
-                cursor.execute("""
+                # Members who left in this period, including those who have
+                # since rejoined. Only count leaves after bot was added
+                cursor.execute(f"""
                     SELECT COUNT(*) as leaves
                     FROM members
-                    WHERE guild_id = ? AND is_active = 0 AND last_seen >= ? AND last_seen >= ?
+                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} >= ?
                 """, (guild_id, period_start, bot_added_at))
                 leaves = cursor.fetchone()['leaves'] or 0
                 
@@ -3406,7 +3423,8 @@ class DatabaseManager:
 
         Tenure is left_date - join_date. Only departures recorded since the
         left_date column was added are analysable (older ones have left_date
-        NULL); rejoining clears left_date, so only the current departure counts.
+        NULL). Only members currently gone count: a rejoiner is active again, and
+        a later departure overwrites left_date with the latest one.
         The churn side of retention — pairs with get_retention_cohorts().
 
         Returns a dict with 'sample' (number of analysable departures), and when
@@ -3551,10 +3569,9 @@ class DatabaseManager:
                     SELECT COUNT(*) AS n FROM members
                     WHERE guild_id = ? AND join_date >= ? AND join_date < ?
                 """
-                leaves_sql = """
+                leaves_sql = f"""
                     SELECT COUNT(*) AS n FROM members
-                    WHERE guild_id = ? AND is_active = 0
-                      AND left_date IS NOT NULL AND left_date >= ? AND left_date < ?
+                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} < ?
                 """
                 returns_sql = """
                     SELECT COUNT(*) AS n FROM member_returns
@@ -3647,10 +3664,9 @@ class DatabaseManager:
                     """, (guild_id, start, day))
                     joins = cursor.fetchone()['n'] or 0
 
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT COUNT(*) AS n FROM members
-                        WHERE guild_id = ? AND is_active = 0
-                          AND left_date IS NOT NULL AND left_date >= ? AND left_date < ?
+                        WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} < ?
                     """, (guild_id, start, day))
                     leaves = cursor.fetchone()['n'] or 0
 
@@ -3966,7 +3982,8 @@ class DatabaseManager:
             return []
 
     def get_new_members_period(self, guild_id: int, days: int) -> list:
-        """Get members who joined in the last N days."""
+        """Get members who joined in the last N days, including those who have
+        since left again (a join then a leave counts as both, see LEFT_TS_SQL)."""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
@@ -3974,7 +3991,7 @@ class DatabaseManager:
                 cursor.execute("""
                     SELECT user_id, username, nickname, join_date, join_position
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND is_active = 1
+                    WHERE guild_id = ? AND join_date >= ?
                     ORDER BY join_date DESC
                 """, (guild_id, cutoff))
                 columns = [desc[0] for desc in cursor.description]
@@ -3984,17 +4001,16 @@ class DatabaseManager:
             return []
 
     def get_departed_members_period(self, guild_id: int, days: int) -> list:
-        """Get members who left in the last N days."""
+        """Get members who left in the last N days, including those who have since rejoined."""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cutoff = int(datetime.now(timezone.utc).timestamp()) - (days * SECONDS_PER_DAY)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT user_id, username, nickname, last_seen, left_date
                     FROM members
-                    WHERE guild_id = ? AND is_active = 0 
-                    AND left_date IS NOT NULL AND left_date >= ?
-                    ORDER BY left_date DESC
+                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ?
+                    ORDER BY {LEFT_TS_SQL} DESC
                 """, (guild_id, cutoff))
                 columns = [desc[0] for desc in cursor.description]
                 return [dict(zip(columns, row)) for row in cursor.fetchall()]
