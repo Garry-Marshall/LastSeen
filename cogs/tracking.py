@@ -1672,13 +1672,18 @@ class TrackingCog(commands.Cog):
         """Wait for bot to be ready before starting the backup loop."""
         await self.bot.wait_until_ready()
 
-    def cog_unload(self):
+    async def cog_unload(self):
         """
-        Called when the cog is unloaded.
-        Ensures buffered data is flushed before shutdown.
+        Called when the cog is unloaded, including on shutdown: Bot.close()
+        unloads extensions (awaiting this) before it disconnects and before the
+        DB pool is closed. Waits for one final, complete flush so buffered
+        message activity isn't lost.
         """
         logger.info("TrackingCog unloading, flushing remaining buffers...")
-        self.flush_activity_buffer.cancel()
+        # stop(), not cancel(): a flush that is mid-write finishes. Cancelling it
+        # would release the flush lock while its worker thread keeps writing, so
+        # the final flush below could overlap it.
+        self.flush_activity_buffer.stop()
         self.cleanup_old_data.cancel()
         self.record_health_snapshots.cancel()
         self.check_scheduled_reports.cancel()
@@ -1695,45 +1700,16 @@ class TrackingCog(commands.Cog):
         if pending:
             logger.info(f"Discarding {pending} queued presence update(s) on unload")
 
-        # Schedule async flush task to run in the event loop
-        # This avoids blocking the shutdown process
-        async def async_flush():
-            try:
-                # Use asyncio.to_thread to run DB operations in thread pool
-                await asyncio.to_thread(self._flush_buffers_sync)
-                logger.info("Successfully flushed all buffers on unload")
-            except Exception as e:
-                logger.error(f"Error flushing buffers on unload: {e}", exc_info=True)
-        
-        # Schedule the async flush
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.create_task(async_flush())
-            else:
-                # Fallback to sync if loop not running
-                self._flush_buffers_sync()
-        except Exception as e:
-            logger.error(f"Error scheduling buffer flush: {e}", exc_info=True)
-            # Last resort: try synchronous flush
-            try:
-                self._flush_buffers_sync()
-            except Exception as sync_e:
-                logger.error(f"Failed to flush buffers synchronously: {sync_e}", exc_info=True)
-    
-    def _flush_buffers_sync(self):
-        """Synchronous version of buffer flush for thread pool execution.
-        
-        This method is called via asyncio.to_thread() to avoid blocking
-        the event loop during shutdown. Flushes all pending activity data
-        to the database.
-        """
-        """Synchronous helper to flush buffers. Called from thread pool."""
-        for (guild_id, user_id, date), count in self.daily_activity_buffer.items():
-            self.db.increment_message_activity(guild_id, user_id, date, count)
-        
-        for (guild_id, user_id, timestamp, hour), count in self.hourly_activity_buffer.items():
-            self.db.increment_message_activity_hourly(guild_id, user_id, timestamp, hour, count)
+        # Final flush through the normal path, under the same lock: it waits for
+        # a flush already running, then writes everything left — the buffers,
+        # failed writes awaiting retry, returning-member records — and the last
+        # heartbeat (the shards are still connected at this point).
+        await self.flush_activity_buffer()
+        left = len(self.failed_daily_writes) + len(self.failed_hourly_writes)
+        if left:
+            logger.warning(f"{left} activity entr(ies) could not be written on unload and are lost")
+        else:
+            logger.info("Flushed all buffers on unload")
 
 
 async def setup(bot: commands.Bot):
