@@ -1123,39 +1123,73 @@ class TrackingCog(commands.Cog):
         transitions, which need loop-side post-processing (returning-member
         capture and watch dispatch). previous_last_seen comes from the atomic
         read-and-overwrite: a timestamp (was offline), 0 (already online), or
-        None (no row). Guild reconcile items are applied in their queue position.
+        None (never seen). Guild reconcile items are applied in their queue
+        position; the presence events between them are applied as one run.
         """
         online_results = []
+        run = []  # presence events since the last reconcile item, in order
         for item in batch:
             if isinstance(item, _GuildReconcile):
+                online_results.extend(self._apply_presence_run(run))
+                run = []
                 try:
                     self._reconcile_guild(item)
                 except Exception as e:
                     logger.error(f"Failed to reconcile guild {item.guild_id}: {e}", exc_info=True)
                 continue
-
-            member, went_offline, event_ts = item
-            try:
-                # Re-checked here: /forgetme may have run since the event was queued
-                if member.id in self.bot.opted_out_users:
-                    continue
-
-                # Ensure member exists in database (safety net for members who
-                # joined while the bot was offline)
-                self._ensure_member_exists(member)
-
-                if went_offline:
-                    # User went offline - record timestamp
-                    self.db.update_last_seen(member.guild.id, member.id, event_ts)
-                else:
-                    # User came online. Read the prior offline timestamp and set
-                    # last_seen to 0 in one step — the value is destroyed the
-                    # moment it is overwritten, so it cannot be re-read afterwards.
-                    previous = self.db.update_last_seen_and_get_previous(member.guild.id, member.id)
-                    online_results.append((member, previous, event_ts))
-            except Exception as e:
-                logger.error(f"Failed to apply presence update for {member.id} in guild {member.guild.id}: {e}")
+            # Re-checked here: /forgetme may have run since the event was queued
+            if item[0].id not in self.bot.opted_out_users:
+                run.append(item)
+        online_results.extend(self._apply_presence_run(run))
         return online_results
+
+    def _apply_presence_run(self, run: list) -> list:
+        """Apply consecutive presence events in one DB transaction (worker thread).
+
+        Members without a row (joined while the bot was offline and not yet
+        reconciled) are created via _ensure_member_exists, then their events are
+        applied in a second, usually tiny, run. Returns the online results as
+        described in _apply_presence_batch.
+        """
+        if not run:
+            return []
+
+        def apply(events):
+            """Per-event results, or None if the transaction failed (e.g. the
+            write lock wasn't obtained within busy_timeout)."""
+            try:
+                return self.db.apply_presence_events(
+                    [(m.guild.id, m.id, went_offline, ts) for m, went_offline, ts in events])
+            except Exception as e:
+                logger.error(f"Failed to apply {len(events)} presence update(s): {e}")
+                return None
+
+        results = apply(run)
+        if results is None:
+            return []  # dropped as a whole; nothing was written (rolled back)
+
+        online, missing = [], []
+        for (member, went_offline, ts), (found, previous) in zip(run, results):
+            if not found:
+                missing.append((member, went_offline, ts))
+            elif not went_offline:
+                online.append((member, previous, ts))
+
+        if missing:
+            created = set()
+            for member, _, _ in missing:
+                key = (member.guild.id, member.id)
+                if key not in created:
+                    created.add(key)
+                    try:
+                        self._ensure_member_exists(member)
+                    except Exception as e:
+                        logger.error(f"Failed to add member {member.id} in guild {member.guild.id}: {e}")
+            # Still-missing members are untracked (opted out, unregistered guild): dropped.
+            for (member, went_offline, ts), (found, previous) in zip(missing, apply(missing) or []):
+                if found and not went_offline:
+                    online.append((member, previous, ts))
+        return online
 
     async def _drain_presence_queue(self):
         """Single consumer for the presence write queue.

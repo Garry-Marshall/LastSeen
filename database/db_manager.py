@@ -1337,35 +1337,41 @@ class DatabaseManager:
             logger.error(f"Failed to update last_seen for {user_id} in guild {guild_id}: {e}")
             return False
 
-    def update_last_seen_and_get_previous(self, guild_id: int, user_id: int) -> Optional[int]:
-        """Zero a member's last_seen (mark online) and return its previous value.
+    def apply_presence_events(self, events: List[Tuple[int, int, bool, int]]) -> List[Tuple[bool, Optional[int]]]:
+        """Apply a run of presence events, in order, in one transaction.
 
-        Read-and-overwrite in a single transaction so the away duration — needed
-        for the returning-member capture and the online-return watch alert — is
-        never lost to the race between the two presence listeners. Returns the
-        prior last_seen (a timestamp, or 0 if already online), or None if the
-        member row does not exist. Replaces a get_member() + update_last_seen(0)
-        pair with one lighter round-trip (no SELECT *, no roles JSON parse).
+        events: (guild_id, user_id, went_offline, event_ts) tuples.
+        Returns one (found, previous_last_seen) per event: found is False when
+        the member has no row (nothing written); for an online event,
+        previous_last_seen is the value before it was set to 0 — a timestamp
+        (was offline), 0 (already online) or None (never seen) — which the
+        returning-member capture and online-return watches need and which is
+        destroyed by the overwrite.
+
+        BEGIN IMMEDIATE takes the write lock up front, so each online event's
+        read-then-zero is atomic and the whole batch costs one commit instead
+        of one connection checkout and commit per event. Raises on failure
+        (e.g. the lock not obtained within busy_timeout).
         """
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT last_seen FROM members WHERE guild_id = ? AND user_id = ?",
-                    (guild_id, user_id)
-                )
-                row = cursor.fetchone()
+        results = []
+        with self.get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.cursor()
+            for guild_id, user_id, went_offline, event_ts in events:
+                if went_offline:
+                    cursor.execute("UPDATE members SET last_seen = ? WHERE guild_id = ? AND user_id = ?",
+                                   (event_ts, guild_id, user_id))
+                    results.append((cursor.rowcount > 0, None))
+                    continue
+                row = cursor.execute("SELECT last_seen FROM members WHERE guild_id = ? AND user_id = ?",
+                                     (guild_id, user_id)).fetchone()
                 if row is None:
-                    return None
-                previous = row['last_seen']
-                cursor.execute(
-                    "UPDATE members SET last_seen = 0 WHERE guild_id = ? AND user_id = ?",
-                    (guild_id, user_id)
-                )
-                return previous
-        except Exception as e:
-            logger.error(f"Failed to update/read last_seen for {user_id} in guild {guild_id}: {e}")
-            return None
+                    results.append((False, None))
+                    continue
+                cursor.execute("UPDATE members SET last_seen = 0 WHERE guild_id = ? AND user_id = ?",
+                               (guild_id, user_id))
+                results.append((True, row[0]))
+        return results
 
     def set_member_inactive(self, guild_id: int, user_id: int) -> bool:
         """Mark a member as inactive (left the guild)."""
