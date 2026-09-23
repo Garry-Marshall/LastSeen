@@ -3691,6 +3691,11 @@ class DatabaseManager:
         run at startup and again on its daily tick. Days the bot was fully
         offline are simply absent; get_health_history() tolerates the gaps.
 
+        All counts are computed first and the rows written afterwards in one
+        batch. Writing each row as it was computed opened the transaction at
+        the first guild, so the write lock was held (and every presence and
+        command write waited) while the remaining guilds' queries ran.
+
         Returns the number of guilds snapshotted.
         """
         try:
@@ -3703,6 +3708,7 @@ class DatabaseManager:
                 cursor.execute("SELECT guild_id FROM guilds")
                 guild_ids = [row['guild_id'] for row in cursor.fetchall()]
 
+                rows = []
                 for guild_id in guild_ids:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT user_id) AS posters,
@@ -3736,13 +3742,15 @@ class DatabaseManager:
                     """, (guild_id, start, day))
                     returns = cursor.fetchone()['n'] or 0
 
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO health_snapshots
-                            (guild_id, date, active_members, posters_7d, messages_7d,
-                             joins_7d, leaves_7d, returns_7d)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (guild_id, day, active_members, posters, messages, joins, leaves, returns))
+                    rows.append((guild_id, day, active_members, posters, messages, joins, leaves, returns))
 
+                # Only now take the write lock, for one short batch.
+                cursor.executemany("""
+                    INSERT OR REPLACE INTO health_snapshots
+                        (guild_id, date, active_members, posters_7d, messages_7d,
+                         joins_7d, leaves_7d, returns_7d)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, rows)
                 conn.commit()
                 return len(guild_ids)
         except Exception as e:
