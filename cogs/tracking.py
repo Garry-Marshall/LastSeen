@@ -6,8 +6,9 @@ import logging
 import asyncio
 import itertools
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, List, NamedTuple
 from collections import defaultdict
 
 from database import DatabaseManager
@@ -38,6 +39,60 @@ RETURN_THRESHOLD_SECONDS = 30 * 86400  # Min absence before a re-appearance coun
 # invert, and the hottest event path never waits on the DB.
 PRESENCE_QUEUE_MAX = 10000  # Beyond this, events are dropped with a warning
 PRESENCE_BATCH_MAX = 500    # Max events applied per worker-thread batch
+
+# Member reconciliation (see on_lastseen_guild_chunked). Departures are only
+# applied when they look plausible: more than this many AND more than this
+# share of the stored active members is treated as a bad cache and skipped.
+MASS_DEPARTURE_MIN = 50
+MASS_DEPARTURE_RATIO = 0.2
+SNAPSHOT_YIELD_EVERY = 5000  # Yield to the event loop while snapshotting huge guilds
+HEARTBEAT_KEY = 'heartbeat'  # bot_state key: last time every shard was connected
+
+
+class MemberDiff(NamedTuple):
+    """User ids whose stored state disagrees with the Discord member cache."""
+    online: List[int]    # online now, stored as offline or never seen
+    offline: List[int]   # offline now, stored as online (last_seen = 0)
+    rejoined: List[int]  # in the guild, stored as departed
+    new: List[int]       # in the guild, not stored at all
+    departed: List[int]  # stored as active, no longer in the guild
+
+
+def diff_member_state(cache_online: Dict[int, bool],
+                      db_rows: Dict[int, Tuple[Optional[int], int]]) -> MemberDiff:
+    """Compare a guild's member cache {user_id: is_online} with its stored rows
+    {user_id: (last_seen, is_active)}. Pure, so it can be tested without Discord."""
+    diff = MemberDiff([], [], [], [], [])
+    for uid, is_online in cache_online.items():
+        row = db_rows.get(uid)
+        if row is None:
+            diff.new.append(uid)
+            continue
+        last_seen, is_active = row
+        if not is_active:
+            diff.rejoined.append(uid)
+        elif is_online and last_seen != 0:
+            diff.online.append(uid)
+        elif not is_online and last_seen == 0:
+            diff.offline.append(uid)
+    for uid, (_, is_active) in db_rows.items():
+        if is_active and uid not in cache_online:
+            diff.departed.append(uid)
+    return diff
+
+
+@dataclass
+class _GuildReconcile:
+    """Presence-queue item: reconcile one guild against a cache snapshot.
+
+    Travelling through the presence queue keeps it ordered with presence
+    events: anything that happened after the snapshot is applied after it.
+    """
+    guild_id: int
+    guild_name: str
+    online: Dict[int, bool]            # user_id -> online at snapshot time
+    members: Dict[int, discord.Member]  # for building rows of new/rejoined members
+    since: int                         # earliest time the stored data can be stale from
 
 # Presence messages cycled by rotate_status, as (emoji, text) pairs. Shown as a
 # custom status (no "Playing/Watching" header). The emoji is prepended into the
@@ -101,6 +156,18 @@ class TrackingCog(commands.Cog):
 
         # Endless cycle over STATUS_MESSAGES for the presence rotation loop.
         self._status_cycle = itertools.cycle(STATUS_MESSAGES)
+
+        # Member reconciliation bookkeeping (see on_lastseen_guild_chunked).
+        # The heartbeat left by the previous process bounds how stale the
+        # stored presence data is after a restart; read it before the flush
+        # loop starts overwriting it. None on the very first run.
+        self._startup_stale_since: Optional[int] = self.db.get_bot_state(HEARTBEAT_KEY)
+        # guild_id -> when the bot stopped receiving that guild's events
+        # (shard disconnect or guild outage); consumed by its next reconcile.
+        self._stale_since: Dict[int, int] = {}
+        self._down_shards: set = set()        # shards currently disconnected
+        self._reconciled_guilds: set = set()  # reconciled at least once this process
+        self._reconcile_queued: set = set()   # reconcile waiting in the presence queue
 
         # Presence write queue and its consumer task (see _drain_presence_queue)
         self._presence_queue: asyncio.Queue = asyncio.Queue(maxsize=PRESENCE_QUEUE_MAX)
@@ -939,6 +1006,116 @@ class TrackingCog(commands.Cog):
                 logger.warning(f"Presence queue full; dropped {self._presence_dropped} presence update(s) so far")
         logger.debug(f"User {after} is now {after.status} in {after.guild.name}")
 
+    # ==================== Member reconciliation ====================
+    #
+    # While the bot isn't receiving a guild's events (restart, shard
+    # re-identify, guild outage), joins, leaves and status changes are missed.
+    # Once that guild's member cache is complete again, its stored members are
+    # compared with the cache and only the differences are written. Reconcile
+    # work travels through the presence queue so it stays ordered with live
+    # presence events.
+
+    @commands.Cog.listener()
+    async def on_shard_disconnect(self, shard_id: int):
+        """Mark the shard's guilds stale from now (kept if already stale)."""
+        now = int(datetime.now(timezone.utc).timestamp())
+        self._down_shards.add(shard_id)
+        for guild in self.bot.guilds:
+            if guild.shard_id == shard_id:
+                self._stale_since.setdefault(guild.id, now)
+
+    @commands.Cog.listener()
+    async def on_shard_resumed(self, shard_id: int):
+        """A resume replays the missed events, so nothing went stale."""
+        self._down_shards.discard(shard_id)
+        for guild in self.bot.guilds:
+            # A guild still unavailable keeps its outage timestamp.
+            if guild.shard_id == shard_id and not guild.unavailable:
+                self._stale_since.pop(guild.id, None)
+
+    @commands.Cog.listener()
+    async def on_shard_ready(self, shard_id: int):
+        self._down_shards.discard(shard_id)
+
+    @commands.Cog.listener()
+    async def on_guild_unavailable(self, guild: discord.Guild):
+        self._stale_since.setdefault(guild.id, int(datetime.now(timezone.utc).timestamp()))
+
+    @commands.Cog.listener()
+    async def on_lastseen_guild_chunked(self, guild: discord.Guild):
+        """Queue a reconcile of this guild's stored members against its now
+        complete member cache (dispatched by the chunking code in bot.client)."""
+        # A partial cache would make real members look departed.
+        if guild.id in self._reconcile_queued or not guild.chunked:
+            return
+
+        # Snapshot on the loop: discord.py's cache is not thread-safe, and the
+        # statuses must be those at enqueue time for the queue ordering to hold.
+        online: Dict[int, bool] = {}
+        members: Dict[int, discord.Member] = {}
+        opted_out = self.bot.opted_out_users
+        for i, member in enumerate(guild.members, start=1):
+            if not member.bot and member.id not in opted_out:
+                online[member.id] = member.status != discord.Status.offline
+                members[member.id] = member
+            if i % SNAPSHOT_YIELD_EVERY == 0:
+                await asyncio.sleep(0)
+
+        # The earliest known moment this guild's data could have gone stale.
+        # With no record at all (first run), "now" is the honest bound.
+        candidates = [self._stale_since.pop(guild.id, None)]
+        if guild.id not in self._reconciled_guilds:
+            candidates.append(self._startup_stale_since)
+        candidates = [c for c in candidates if c]
+        since = min(candidates) if candidates else int(datetime.now(timezone.utc).timestamp())
+        self._reconciled_guilds.add(guild.id)
+
+        self._reconcile_queued.add(guild.id)
+        # put() rather than put_nowait(): a reconcile must never be dropped.
+        await self._presence_queue.put(_GuildReconcile(guild.id, guild.name, online, members, since))
+
+    @staticmethod
+    def _member_row(member: discord.Member, is_online: bool) -> tuple:
+        """(user_id, username, nickname, join_date, roles, is_online) for reconcile_members."""
+        nickname = member.display_name if member.display_name != str(member) else None
+        join_date = int(member.joined_at.timestamp()) if member.joined_at else int(datetime.now(timezone.utc).timestamp())
+        return (member.id, str(member), nickname, join_date, get_member_roles(member), is_online)
+
+    def _reconcile_guild(self, item: _GuildReconcile) -> None:
+        """Diff one guild's snapshot against the database and write the
+        differences. Runs in the presence worker thread."""
+        # An unregistered guild is still being set up by on_ready/on_guild_join.
+        if not self.db.get_guild_config(item.guild_id):
+            return
+
+        # /forgetme may have run since the snapshot was taken.
+        opted_out = self.bot.opted_out_users
+        online = {uid: s for uid, s in item.online.items() if uid not in opted_out}
+
+        rows = self.db.get_member_presence_rows(item.guild_id)
+        diff = diff_member_state(online, rows)
+
+        departed = diff.departed
+        active_count = sum(1 for _, is_active in rows.values() if is_active)
+        if len(departed) > MASS_DEPARTURE_MIN and len(departed) > active_count * MASS_DEPARTURE_RATIO:
+            logger.warning(
+                f"Reconcile {item.guild_name}: {len(departed)} of {active_count} stored members look "
+                f"departed; not trusting the cache, departures skipped"
+            )
+            departed = []
+
+        new_rows = [self._member_row(item.members[uid], online[uid]) for uid in diff.new]
+        rejoined_rows = [self._member_row(item.members[uid], online[uid]) for uid in diff.rejoined]
+
+        if not (diff.online or diff.offline or departed or new_rows or rejoined_rows):
+            return
+        if self.db.reconcile_members(item.guild_id, diff.online, diff.offline, departed,
+                                     rejoined_rows, new_rows, item.since):
+            logger.info(
+                f"Reconciled {item.guild_name}: {len(diff.online)} online, {len(diff.offline)} offline, "
+                f"{len(new_rows)} new, {len(rejoined_rows)} rejoined, {len(departed)} departed"
+            )
+
     def _apply_presence_batch(self, batch: list) -> list:
         """Apply queued presence events in FIFO order. Runs in a worker thread.
 
@@ -946,10 +1123,18 @@ class TrackingCog(commands.Cog):
         transitions, which need loop-side post-processing (returning-member
         capture and watch dispatch). previous_last_seen comes from the atomic
         read-and-overwrite: a timestamp (was offline), 0 (already online), or
-        None (no row).
+        None (no row). Guild reconcile items are applied in their queue position.
         """
         online_results = []
-        for member, went_offline, event_ts in batch:
+        for item in batch:
+            if isinstance(item, _GuildReconcile):
+                try:
+                    self._reconcile_guild(item)
+                except Exception as e:
+                    logger.error(f"Failed to reconcile guild {item.guild_id}: {e}", exc_info=True)
+                continue
+
+            member, went_offline, event_ts = item
             try:
                 # Re-checked here: /forgetme may have run since the event was queued
                 if member.id in self.bot.opted_out_users:
@@ -1007,6 +1192,10 @@ class TrackingCog(commands.Cog):
                         self.bot.dispatch('lastseen_member_online', member, previous_last_seen)
             except Exception as e:
                 logger.error(f"Error applying presence update batch: {e}", exc_info=True)
+            finally:
+                for item in batch:
+                    if isinstance(item, _GuildReconcile):
+                        self._reconcile_queued.discard(item.guild_id)
 
     @tasks.loop(seconds=30)
     async def flush_activity_buffer(self):
@@ -1015,6 +1204,13 @@ class TrackingCog(commands.Cog):
         This reduces I/O overhead by batching multiple message events into single writes.
         """
         try:
+            # Heartbeat for member reconciliation: the last moment every shard
+            # was connected. Not written while any shard is down, so after a
+            # crash or restart it marks when the bot stopped seeing events.
+            if not self._down_shards:
+                await asyncio.to_thread(self.db.set_bot_state, HEARTBEAT_KEY,
+                                        int(datetime.now(timezone.utc).timestamp()))
+
             # Get buffer sizes
             # First, re-add any previously failed writes to the buffer (retry mechanism)
             if self.failed_daily_writes:

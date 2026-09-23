@@ -447,6 +447,16 @@ class DatabaseManager:
                 )
             """)
 
+            # Bot-level key/value state (no per-user data). Holds the connection
+            # heartbeat that bounds how stale the presence data can be after a
+            # restart (see TrackingCog member reconciliation).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bot_state (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER
+                )
+            """)
+
             # Watchlists: admin-configured presence alerts. Stores only alert
             # config plus minimal fire-state (never presence history). All
             # timing decisions read the existing single members.last_seen column.
@@ -1698,6 +1708,94 @@ class DatabaseManager:
                 return cursor.fetchone() is None
         except Exception as e:
             logger.error(f"Failed to check if member {user_id} is missing in guild {guild_id}: {e}")
+            return False
+
+    # ==================== Member Reconciliation ====================
+
+    # Rows written per transaction during reconciliation, so the write lock is
+    # held only briefly even when a guild has thousands of changes to catch up.
+    RECONCILE_BATCH_SIZE = 500
+
+    def get_member_presence_rows(self, guild_id: int) -> Dict[int, Tuple[Optional[int], int]]:
+        """Map user_id -> (last_seen, is_active) for every stored member of a guild."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT user_id, last_seen, is_active FROM members WHERE guild_id = ?",
+                (guild_id,)
+            )
+            return {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+
+    def _executemany_batched(self, sql: str, params: list) -> None:
+        """Run executemany in RECONCILE_BATCH_SIZE chunks, one transaction each."""
+        for i in range(0, len(params), self.RECONCILE_BATCH_SIZE):
+            with self.get_connection() as conn:
+                conn.executemany(sql, params[i:i + self.RECONCILE_BATCH_SIZE])
+
+    def reconcile_members(self, guild_id: int, online_ids: List[int], offline_ids: List[int],
+                          departed_ids: List[int], rejoined: List[tuple], new: List[tuple],
+                          since: int) -> bool:
+        """Apply the differences between the Discord member cache and the database.
+
+        online_ids / offline_ids: current members whose stored status is wrong.
+        Offline ones get `since` (the earliest they could have gone offline).
+        departed_ids: stored as active but no longer in the guild; recorded the
+        same way on_member_remove does, with `since` as the departure time.
+        rejoined / new: (user_id, username, nickname, join_date, roles, is_online)
+        tuples for members stored as departed, or not stored at all.
+
+        Every statement is idempotent, so a partial failure is repaired by the
+        next reconciliation. Returns False on error.
+        """
+        try:
+            self._executemany_batched(
+                "UPDATE members SET last_seen = 0 WHERE guild_id = ? AND user_id = ?",
+                [(guild_id, uid) for uid in online_ids]
+            )
+            self._executemany_batched(
+                "UPDATE members SET last_seen = ? WHERE guild_id = ? AND user_id = ? AND last_seen = 0",
+                [(since, guild_id, uid) for uid in offline_ids]
+            )
+            self._executemany_batched(
+                """UPDATE members SET is_active = 0, left_date = ?, last_seen = ?
+                   WHERE guild_id = ? AND user_id = ? AND is_active = 1""",
+                [(since, since, guild_id, uid) for uid in departed_ids]
+            )
+            self._executemany_batched(
+                """UPDATE members SET is_active = 1, left_date = NULL, username = ?,
+                       nickname = ?, join_date = ?, roles = ?,
+                       last_seen = CASE WHEN ? THEN 0 ELSE last_seen END
+                   WHERE guild_id = ? AND user_id = ?""",
+                [(name, nick, joined, json.dumps(roles), 1 if is_online else 0, guild_id, uid)
+                 for uid, name, nick, joined, roles, is_online in rejoined]
+            )
+            # Same upsert as add_member, so a row created concurrently (e.g. by
+            # the member enumeration) keeps its history columns.
+            self._executemany_batched(
+                """INSERT INTO members
+                   (guild_id, user_id, username, nickname, join_date, last_seen, is_active, roles, nickname_history)
+                   VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                   ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                       username = excluded.username,
+                       nickname = excluded.nickname,
+                       roles = excluded.roles""",
+                [(guild_id, uid, name, nick, joined, 0 if is_online else None,
+                  json.dumps(roles), json.dumps([nick]) if nick else None)
+                 for uid, name, nick, joined, roles, is_online in new]
+            )
+            if new and self.guild_positions_initialized(guild_id):
+                # Same rule as calculate_join_position: 1 + members who joined earlier.
+                self._executemany_batched(
+                    """UPDATE members SET join_position = (
+                           SELECT COUNT(*) FROM members m2
+                           WHERE m2.guild_id = members.guild_id AND m2.join_date < members.join_date
+                       ) + 1
+                       WHERE guild_id = ? AND user_id = ?""",
+                    [(guild_id, row[0]) for row in new]
+                )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reconcile members for guild {guild_id}: {e}", exc_info=True)
             return False
 
     def get_database_health(self) -> Dict[str, Any]:
@@ -4004,6 +4102,34 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to run global cleanup: {e}", exc_info=True)
             return {'daily_deleted': 0, 'hourly_deleted': 0, 'guilds_processed': 0}
+
+    # ==================== Bot State Operations ====================
+
+    def get_bot_state(self, key: str) -> Optional[int]:
+        """Read a bot-level state value (None if unset or on error)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM bot_state WHERE key = ?", (key,))
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Failed to read bot state '{key}': {e}")
+            return None
+
+    def set_bot_state(self, key: str, value: int) -> bool:
+        """Write a bot-level state value."""
+        try:
+            with self.get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO bot_state (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value)
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Failed to write bot state '{key}': {e}")
+            return False
 
     # ==================== Privacy / Opt-Out Operations ====================
 

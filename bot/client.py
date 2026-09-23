@@ -144,17 +144,25 @@ def create_bot(config) -> commands.Bot:
         these automatically, and presence updates for uncached members are
         silently dropped. Skip during startup (chunk_task not yet created):
         the background chunker launched in on_ready covers those guilds.
+
+        Once the cache is complete, 'lastseen_guild_chunked' tells TrackingCog
+        to reconcile the stored members with it (events missed while the
+        guild was unavailable).
         """
-        if bot.chunk_task is None or guild.chunked:
+        if bot.chunk_task is None:
             return
-        logger.info(f"Guild {guild.name} became available, chunking...")
-        try:
-            await asyncio.wait_for(guild.chunk(), timeout=CHUNK_TIMEOUT)
-            logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached")
-        except asyncio.TimeoutError:
-            logger.error(f"  ✗ Timed out chunking {guild.name} after {CHUNK_TIMEOUT}s")
-        except Exception as e:
-            logger.error(f"  ✗ Failed to chunk {guild.name}: {e}")
+        if not guild.chunked:
+            logger.info(f"Guild {guild.name} became available, chunking...")
+            try:
+                await asyncio.wait_for(guild.chunk(), timeout=CHUNK_TIMEOUT)
+                logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached")
+            except asyncio.TimeoutError:
+                logger.error(f"  ✗ Timed out chunking {guild.name} after {CHUNK_TIMEOUT}s")
+                return
+            except Exception as e:
+                logger.error(f"  ✗ Failed to chunk {guild.name}: {e}")
+                return
+        bot.dispatch('lastseen_guild_chunked', guild)
 
     @bot.event
     async def on_interaction(interaction: discord.Interaction):
@@ -230,8 +238,16 @@ async def _chunk_guilds_background(bot: commands.Bot):
     Presence tracking silently loses updates for uncached members, so this
     should complete as soon as possible — but a few minutes of ramp-up on a
     large bot beats blocking startup entirely.
+
+    Every guild whose cache is complete (already, or after chunking) is
+    announced via 'lastseen_guild_chunked' so TrackingCog can reconcile the
+    stored members with it. A failed or timed-out chunk is never announced:
+    reconciling against a partial cache would mark real members as departed.
     """
     to_chunk = [g for g in bot.guilds if not g.chunked]
+    for guild in bot.guilds:
+        if guild.chunked:
+            bot.dispatch('lastseen_guild_chunked', guild)
     if not to_chunk:
         logger.info("All guild member caches already complete, no chunking needed")
         return
@@ -246,6 +262,7 @@ async def _chunk_guilds_background(bot: commands.Bot):
             try:
                 await asyncio.wait_for(guild.chunk(), timeout=CHUNK_TIMEOUT)
                 logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached")
+                bot.dispatch('lastseen_guild_chunked', guild)
             except asyncio.TimeoutError:
                 failed += 1
                 logger.error(f"  ✗ Timed out chunking {guild.name} after {CHUNK_TIMEOUT}s")
