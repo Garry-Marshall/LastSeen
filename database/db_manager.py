@@ -2726,6 +2726,37 @@ class DatabaseManager:
             logger.error(f"Failed to get message activity for user {user_id}: {e}")
             return {'total': 0, 'today': 0, 'this_week': 0, 'this_month': 0, 'avg_per_day': 0}
 
+    def get_guild_activity_totals(self, guild_id: int, days: int = 30) -> Dict[int, Dict[str, int]]:
+        """Per-member message totals for a whole guild in one grouped query.
+
+        Same windows as get_message_activity_period ('total' over `days`,
+        'this_week', 'today', all from today's UTC start), for callers that
+        need every member's numbers at once (/search) instead of one
+        get_message_activity_period round-trip per member. Members without
+        activity in the window are absent from the result.
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+            cutoff = today_start - days * SECONDS_PER_DAY
+            week_cutoff = today_start - 7 * SECONDS_PER_DAY
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT user_id,
+                           SUM(message_count) AS total,
+                           SUM(CASE WHEN date >= ? THEN message_count ELSE 0 END) AS this_week,
+                           SUM(CASE WHEN date = ? THEN message_count ELSE 0 END) AS today
+                    FROM message_activity
+                    WHERE guild_id = ? AND date >= ?
+                    GROUP BY user_id
+                """, (week_cutoff, today_start, guild_id, cutoff))
+                return {row['user_id']: {'total': row['total'], 'this_week': row['this_week'], 'today': row['today']}
+                        for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Failed to get activity totals for guild {guild_id}: {e}")
+            return {}
+
     def get_activity_percentile(self, guild_id: int, user_id: int, days: int = 30,
                                 conn: Optional[sqlite3.Connection] = None) -> Optional[Dict[str, Any]]:
         """

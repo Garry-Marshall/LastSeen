@@ -1415,9 +1415,12 @@ class CommandsCog(commands.Cog):
         # members never seen online.
         added_at = (guild_config.get('added_at') or 0) if guild_config else 0
 
-        # Apply filters. Enrichment and the activity filter hit the DB per
-        # member, so the whole loop runs off the event loop in one batch.
+        # Apply filters off the event loop in one batch.
         def _apply_filters() -> tuple[list, int]:
+            # Every member's message counts in one grouped query, used by both
+            # the activity filter and the result rows (was ~4 queries per member,
+            # twice with the activity filter).
+            activity = self.db.get_guild_activity_totals(guild_id, 30)
             results = []
             misses = 0
 
@@ -1431,12 +1434,12 @@ class CommandsCog(commands.Cog):
                         # Skip - these filters require Discord data
                         continue
                     # Database-only filters still work
-                    if self._matches_db_filters(member_data, filters, added_at):
-                        results.append(self._create_db_only_result(member_data, lang))
+                    if self._matches_db_filters(member_data, filters, added_at, activity):
+                        results.append(self._create_db_only_result(member_data, lang, activity))
                 else:
                     # Full Discord data available
-                    if self._matches_all_filters(member_data, discord_member, filters, added_at):
-                        results.append(self._enrich_member_data(member_data, discord_member, lang))
+                    if self._matches_all_filters(member_data, discord_member, filters, added_at, activity):
+                        results.append(self._enrich_member_data(member_data, discord_member, lang, activity))
 
             return results, misses
 
@@ -1834,8 +1837,13 @@ class CommandsCog(commands.Cog):
             return timestamp < day_start
         return day_start <= timestamp < day_start + 86400
 
-    def _matches_db_filters(self, member_data: dict, filters: dict, added_at: int = 0) -> bool:
-        """Check if member matches database-only filters (no Discord data needed)."""
+    def _matches_db_filters(self, member_data: dict, filters: dict, added_at: int = 0,
+                            activity: dict | None = None) -> bool:
+        """Check if member matches database-only filters (no Discord data needed).
+
+        activity: get_guild_activity_totals() result for the guild (members
+        without messages in the window are absent and count as 0).
+        """
         # Username filter (searches both username and nickname/display_name)
         if filters.get('username'):
             username_lower = member_data['username'].lower()
@@ -1883,13 +1891,20 @@ class CommandsCog(commands.Cog):
             if not departure_ts or not self._compare_date(departure_ts, filters['departed']):
                 return False
 
+        # Activity filter: messages in the last 30 days, from the batched totals.
+        # Applies to cached and uncached (e.g. departed) members alike.
+        if filters.get('activity'):
+            total = (activity or {}).get(member_data['user_id'], {}).get('total', 0)
+            if not self._compare(total, filters['activity']):
+                return False
+
         return True
 
     def _matches_all_filters(self, member_data: dict, discord_member: discord.Member, filters: dict,
-                             added_at: int = 0) -> bool:
+                             added_at: int = 0, activity: dict | None = None) -> bool:
         """Check if member matches all filters (both DB and Discord data)."""
-        # First check database filters
-        if not self._matches_db_filters(member_data, filters, added_at):
+        # First check database filters (including activity)
+        if not self._matches_db_filters(member_data, filters, added_at, activity):
             return False
 
         # Role filter (Discord data)
@@ -1907,27 +1922,12 @@ class CommandsCog(commands.Cog):
             if str(discord_member.status) != filters['status']:
                 return False
 
-        # Activity filter (requires database query)
-        if filters.get('activity'):
-            try:
-                activity_data = self.db.get_message_activity_period(
-                    member_data['guild_id'],
-                    member_data['user_id'],
-                    days=30
-                )
-                if not self._compare(activity_data.get('total', 0), filters['activity']):
-                    return False
-            except Exception as e:
-                logger.error(f"Failed to get activity data for user {member_data['user_id']}: {e}")
-                # Treat as 0 activity on error
-                if not self._compare(0, filters['activity']):
-                    return False
-
         return True
 
-    def _create_db_only_result(self, member_data: dict, lang: str = 'en') -> dict:
+    def _create_db_only_result(self, member_data: dict, lang: str = 'en', activity: dict | None = None) -> dict:
         """Create result dict from database data only (no Discord data)."""
         last_seen = member_data.get('last_seen')
+        activity_data = (activity or {}).get(member_data['user_id'], {})
         return {
             'username': member_data['username'],
             'display_name': member_data.get('display_name', ''),
@@ -1941,12 +1941,13 @@ class CommandsCog(commands.Cog):
             'join_position': member_data.get('join_position', 'N/A'),
             'roles': [],
             'is_tracked': member_data.get('is_tracked', True),
-            'activity_30d': 0,
-            'activity_7d': 0,
-            'activity_today': 0
+            'activity_30d': activity_data.get('total', 0),
+            'activity_7d': activity_data.get('this_week', 0),
+            'activity_today': activity_data.get('today', 0)
         }
 
-    def _enrich_member_data(self, member_data: dict, discord_member: discord.Member, lang: str = 'en') -> dict:
+    def _enrich_member_data(self, member_data: dict, discord_member: discord.Member, lang: str = 'en',
+                            activity: dict | None = None) -> dict:
         """Enrich database data with Discord member information."""
         last_seen = member_data.get('last_seen')
         
@@ -1956,18 +1957,10 @@ class CommandsCog(commands.Cog):
             # User is online but DB has an old offline timestamp
             # Set to 0 to show "Online now"
             last_seen = 0
-        
-        # Get activity data with error handling
-        try:
-            activity_data = self.db.get_message_activity_period(
-                member_data['guild_id'],
-                member_data['user_id'],
-                days=30
-            )
-        except Exception as e:
-            logger.error(f"Failed to get activity data for user {member_data['user_id']}: {e}")
-            activity_data = {'total': 0, 'this_week': 0, 'today': 0}
-        
+
+        # Message counts from the batched per-guild totals (absent = no messages)
+        activity_data = (activity or {}).get(member_data['user_id'], {})
+
         return {
             'username': discord_member.name,
             'display_name': discord_member.display_name,
