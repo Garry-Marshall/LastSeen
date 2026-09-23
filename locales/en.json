@@ -606,6 +606,9 @@
   "watch.alert_offline_title": "💤 Watch alert",
   "watch.alert_offline_desc": "{target} has been offline for {duration}.",
   "watch.alert_role_offline_desc": "These {role} members have been offline for {duration}+:\n{members}",
+  "watch.alert_role_online_desc": "These {role} members came back online:\n{members}",
+  "watch.alert_away_suffix": " (away {duration})",
+  "watch.alert_more": "…and {count:,} more",
 
   "admin.help.watch_section_title": "👀 Watchlists & Alerts",
   "admin.help.watch_section": "`/watch` - Get alerted when members go offline or come back online.\n💡 Type `/help watch` for full details and examples.",
@@ -617,7 +620,7 @@
   "admin.help.watch_detail_examples_title": "Examples",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - ping when Alice is next online\n• `/watch online @Alice after:7d` - ping when Alice returns after 7+ days away\n• `/watch offline @Bob 7d` - ping if Bob goes 7 days without being seen\n• `/watch offline @Staff 48h` - ping when a Staff member hasn't been seen in 48h\n• `/watch offline @Alice 7d dm:True` - DM me instead of posting in a channel",
   "admin.help.watch_detail_notes_title": "Good to know",
-  "admin.help.watch_detail_notes": "• Durations use `m`/`h`/`d`, e.g. `30m`, `48h`, `7d`.\n• Online alerts have a 1-hour cooldown per member to avoid spam.\n• Members who opted out with `/forgetme` can't be watched.\n• When you create a watch on a member, they're sent a DM letting them know.\n• Members can stop being watched with `/no-watch` (their activity tracking stays on).\n• Up to 50 watches per server.\n• Add `dm:True` to any watch to get the alert in your DMs instead of a channel.",
+  "admin.help.watch_detail_notes": "• Durations use `m`/`h`/`d`, e.g. `30m`, `48h`, `7d`.\n• Online alerts have a 1-hour cooldown per member to avoid spam.\n• Online alerts for a role are bundled: returns are collected and posted as one alert every 10 minutes.\n• Members who opted out with `/forgetme` can't be watched.\n• When you create a watch on a member, they're sent a DM letting them know.\n• Members can stop being watched with `/no-watch` (their activity tracking stays on).\n• Up to 50 watches per server.\n• Add `dm:True` to any watch to get the alert in your DMs instead of a channel.",
   "watch.removed_target": "Removed {count} watch(es) for {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Advanced Member Search",

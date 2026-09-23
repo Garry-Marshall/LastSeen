@@ -18,7 +18,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import discord
 from discord import app_commands
@@ -48,6 +48,13 @@ MAX_DURATION_SECONDS = 365 * 86400  # 365d
 # watches (bounded, admin-created), not with the user count.
 OFFLINE_SWEEP_INTERVAL_SECONDS = 60
 WATCHES_PER_PAGE = 10
+# Member lines per role alert; the rest is summarised as "…and N more", which
+# keeps even a huge role's alert well under Discord's 4096-char embed limit.
+ALERT_LIST_MAX = 50
+# online_return alerts on a role are bundled: returns are collected and posted
+# as one alert per watch this often, so a big role can't flood the channel.
+# User watches stay instant.
+ROLE_DIGEST_SECONDS = 600
 # After a (re)connect, Discord resyncs presence and can surface spurious
 # offline->online transitions. Suppress online_return alerts for this long after
 # each on_ready so a restart (or reconnect) doesn't spam the channel. offline_for
@@ -81,6 +88,19 @@ def format_duration(seconds: int) -> str:
     return f"{max(seconds // 60, 0)}m"
 
 
+def format_away(seconds: int) -> str:
+    """Render a measured absence rounded down to its largest unit ('9d', '5h', '42m').
+
+    format_duration is exact, which suits configured thresholds, but a measured
+    absence is never a round number and would print as e.g. '12960m'.
+    """
+    if seconds >= 86400:
+        return f"{seconds // 86400}d"
+    if seconds >= 3600:
+        return f"{seconds // 3600}h"
+    return f"{max(seconds // 60, 0)}m"
+
+
 class WatchCog(commands.Cog):
     """Watchlist commands, the online-return listener, and the offline sweep."""
 
@@ -94,6 +114,11 @@ class WatchCog(commands.Cog):
         # transient — losing it on restart at worst allows one extra alert.
         # Pruned in the hourly sweep so it stays bounded.
         self._online_cooldown: dict = {}
+        # Pending role online_return digests: watch_id -> {'since': first return
+        # ts, 'members': {user_id: away seconds or None}}. Flushed by the sweep
+        # loop once ROLE_DIGEST_SECONDS old. In-memory: a restart drops at most
+        # one pending digest per watch.
+        self._role_returns: dict = {}
         # Suppress online_return firing until this unix time. Seeded to cover the
         # startup window (the cog loads before connect) and refreshed on every
         # on_ready so reconnects are covered too.
@@ -553,7 +578,12 @@ class WatchCog(commands.Cog):
                     if last_fired and now - last_fired < ONLINE_COOLDOWN_SECONDS:
                         continue
                     self._online_cooldown[cd_key] = now
-                    await self._fire_alert(member.guild, w, member.mention, online_away=away if threshold else None)
+                    if w['target_type'] == 'role':
+                        # Bundled into the watch's next digest (see _flush_role_digests).
+                        digest = self._role_returns.setdefault(w['id'], {'since': now, 'members': {}})
+                        digest['members'][user_id] = away if threshold else None
+                    else:
+                        await self._fire_alert(member.guild, w, member.mention, online_away=away if threshold else None)
 
             # Re-arm offline_for watches for this member.
             offline = await asyncio.to_thread(
@@ -582,6 +612,8 @@ class WatchCog(commands.Cog):
             cutoff = now - ONLINE_COOLDOWN_SECONDS
             self._online_cooldown = {k: v for k, v in self._online_cooldown.items() if v >= cutoff}
 
+            await self._flush_role_digests(now)
+
             watches = await asyncio.to_thread(self.db.get_offline_watches)
             if not watches:
                 return
@@ -602,6 +634,32 @@ class WatchCog(commands.Cog):
     @check_offline_watches.before_loop
     async def before_check_offline_watches(self):
         await self.bot.wait_until_ready()
+
+    async def _flush_role_digests(self, now: int) -> None:
+        """Post each role online_return digest that is ROLE_DIGEST_SECONDS old.
+
+        The watch is re-read so a digest follows a reconfigured channel and is
+        dropped if the watch was removed meanwhile. A paused DM watch drops its
+        digest, like a single online alert (returns can't be replayed).
+        """
+        due = [wid for wid, d in self._role_returns.items() if now - d['since'] >= ROLE_DIGEST_SECONDS]
+        for wid in due:
+            digest = self._role_returns.pop(wid)  # returns from now on start a new digest
+            try:
+                w = await asyncio.to_thread(self.db.get_watch, wid)
+                guild = self.bot.get_guild(w['guild_id']) if w else None
+                if not guild:
+                    continue
+                # Honour opt-outs made while the digest was collecting.
+                members = [(f"<@{uid}>", away) for uid, away in digest['members'].items()
+                           if uid not in self.bot.opted_out_users and uid not in self.bot.no_watch_users]
+                if not members:
+                    continue
+                role = guild.get_role(w['target_id'])
+                await self._fire_alert(guild, w, f"@{role.name}" if role else f"<@&{w['target_id']}>",
+                                       role_online=True, members=members)
+            except Exception as e:
+                logger.error(f"Error posting role digest for watch {wid}: {e}", exc_info=True)
 
     async def _sweep_user_watch(self, guild: discord.Guild, w: dict, now: int):
         if w['target_id'] in self.bot.no_watch_users:
@@ -645,8 +703,8 @@ class WatchCog(commands.Cog):
                 if m.id not in old_fired:
                     newly.append(m)
         if newly:
-            listing = "\n".join(f"• {m.mention}" for m in newly)
-            if not await self._fire_alert(guild, w, f"@{role.name}", role_offline=w['threshold_seconds'], members=listing):
+            if not await self._fire_alert(guild, w, f"@{role.name}", role_offline=w['threshold_seconds'],
+                                          members=[(m.mention, None) for m in newly]):
                 return  # paused DM watch: keep fired_targets so these members alert once resumed
         if new_fired != old_fired:
             await asyncio.to_thread(self.db.update_watch_fire_state, w['id'],
@@ -672,10 +730,14 @@ class WatchCog(commands.Cog):
                           online_away: Optional[int] = None,
                           offline_for: Optional[int] = None,
                           role_offline: Optional[int] = None,
-                          members: Optional[str] = None) -> bool:
+                          role_online: bool = False,
+                          members: Optional[List[Tuple[str, Optional[int]]]] = None) -> bool:
         """Build one alert embed and deliver it — to the watch's channel, or as a
         DM to its creator when deliver_dm is set. A failed send is logged and
         dropped (there is no channel to fall back to).
+
+        members: for role alerts, (mention, away seconds or None) per member;
+        listed up to ALERT_LIST_MAX, the rest summarised.
 
         Returns False only when a DM watch is paused (see _dm_recipient), so the
         caller leaves its fire-state untouched and the alert fires once resumed.
@@ -684,10 +746,22 @@ class WatchCog(commands.Cog):
         lang = guild_language(guild_config)
         admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
 
-        if role_offline is not None:
+        listing = ''
+        if members:
+            lines = [f"• {mention}" + (t('watch.alert_away_suffix', lang, duration=format_away(away)) if away else '')
+                     for mention, away in members[:ALERT_LIST_MAX]]
+            if len(members) > ALERT_LIST_MAX:
+                lines.append(t('watch.alert_more', lang, count=len(members) - ALERT_LIST_MAX))
+            listing = "\n".join(lines)
+
+        if role_online:
+            title = t('watch.alert_online_title', lang)
+            desc = t('watch.alert_role_online_desc', lang, role=target_mention, members=listing)
+            color = discord.Color.green()
+        elif role_offline is not None:
             title = t('watch.alert_offline_title', lang)
             desc = t('watch.alert_role_offline_desc', lang, role=target_mention,
-                     duration=format_duration(role_offline), members=members or '')
+                     duration=format_duration(role_offline), members=listing)
             color = discord.Color.orange()
         elif offline_for is not None:
             title = t('watch.alert_offline_title', lang)
@@ -698,7 +772,7 @@ class WatchCog(commands.Cog):
             title = t('watch.alert_online_title', lang)
             if online_away:
                 desc = t('watch.alert_online_desc_away', lang, target=target_mention,
-                         duration=format_duration(online_away))
+                         duration=format_away(online_away))
             else:
                 desc = t('watch.alert_online_desc', lang, target=target_mention)
             color = discord.Color.green()

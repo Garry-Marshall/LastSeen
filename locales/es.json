@@ -606,6 +606,9 @@
   "watch.alert_offline_title": "💤 Alerta de vigilancia",
   "watch.alert_offline_desc": "{target} lleva {duration} desconectado.",
   "watch.alert_role_offline_desc": "Estos miembros de {role} llevan {duration}+ desconectados:\n{members}",
+  "watch.alert_role_online_desc": "Estos miembros de {role} volvieron a conectarse:\n{members}",
+  "watch.alert_away_suffix": " (ausente {duration})",
+  "watch.alert_more": "…y {count:,} más",
 
   "admin.help.watch_section_title": "👀 Vigilancias y Alertas",
   "admin.help.watch_section": "`/watch` - Recibe alertas cuando los miembros se desconectan o vuelven a estar en línea.\n💡 Escribe `/help watch` para todos los detalles y ejemplos.",
@@ -617,7 +620,7 @@
   "admin.help.watch_detail_examples_title": "Ejemplos",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - aviso en cuanto Alice esté en línea\n• `/watch online @Alice after:7d` - aviso cuando Alice vuelva tras 7+ días ausente\n• `/watch offline @Bob 7d` - aviso si Bob pasa 7 días sin ser visto\n• `/watch offline @Staff 48h` - aviso cuando un miembro de Staff no ha sido visto en 48h\n• `/watch offline @Alice 7d dm:True` - enviarme un MD en lugar de publicar en un canal",
   "admin.help.watch_detail_notes_title": "Bueno saberlo",
-  "admin.help.watch_detail_notes": "• Las duraciones usan `m`/`h`/`d`, p.ej. `30m`, `48h`, `7d`.\n• Las alertas en línea tienen un enfriamiento de 1 hora por miembro para evitar spam.\n• Los miembros que se excluyeron con `/forgetme` no pueden ser vigilados.\n• Cuando creas una vigilancia sobre un miembro, se le envía un MD para avisarle.\n• Los miembros pueden dejar de ser vigilados con `/no-watch` (su seguimiento de actividad sigue activo).\n• Hasta 50 vigilancias por servidor.\n• Añade `dm:True` a cualquier vigilancia para recibir la alerta por MD en lugar de un canal.",
+  "admin.help.watch_detail_notes": "• Las duraciones usan `m`/`h`/`d`, p.ej. `30m`, `48h`, `7d`.\n• Las alertas en línea tienen un enfriamiento de 1 hora por miembro para evitar spam.\n• Las alertas en línea de un rol se agrupan: los regresos se reúnen y se publican en una sola alerta cada 10 minutos.\n• Los miembros que se excluyeron con `/forgetme` no pueden ser vigilados.\n• Cuando creas una vigilancia sobre un miembro, se le envía un MD para avisarle.\n• Los miembros pueden dejar de ser vigilados con `/no-watch` (su seguimiento de actividad sigue activo).\n• Hasta 50 vigilancias por servidor.\n• Añade `dm:True` a cualquier vigilancia para recibir la alerta por MD en lugar de un canal.",
   "watch.removed_target": "Se eliminaron {count} vigilancia(s) para {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Búsqueda avanzada de miembros",

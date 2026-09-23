@@ -606,6 +606,9 @@
   "watch.alert_offline_title": "💤 Watch-melding",
   "watch.alert_offline_desc": "{target} is al {duration} offline.",
   "watch.alert_role_offline_desc": "Deze {role}-leden zijn al {duration}+ offline:\n{members}",
+  "watch.alert_role_online_desc": "Deze {role}-leden zijn weer online:\n{members}",
+  "watch.alert_away_suffix": " ({duration} weg)",
+  "watch.alert_more": "…en nog {count:,}",
 
   "admin.help.watch_section_title": "👀 Watchlijsten & Meldingen",
   "admin.help.watch_section": "`/watch` - Krijg een melding wanneer leden offline gaan of weer online komen.\n💡 Typ `/help watch` voor volledige uitleg en voorbeelden.",
@@ -617,7 +620,7 @@
   "admin.help.watch_detail_examples_title": "Voorbeelden",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - melding zodra Alice weer online is\n• `/watch online @Alice after:7d` - melding wanneer Alice na 7+ dagen terugkomt\n• `/watch offline @Bob 7d` - melding als Bob 7 dagen niet is gezien\n• `/watch offline @Staff 48h` - melding wanneer een Staff-lid 48u niet is gezien\n• `/watch offline @Alice 7d dm:True` - stuur mij een DM in plaats van een kanaalbericht",
   "admin.help.watch_detail_notes_title": "Goed om te weten",
-  "admin.help.watch_detail_notes": "• Duur gebruikt `m`/`h`/`d`, bijv. `30m`, `48h`, `7d`.\n• Online-meldingen hebben een afkoeltijd van 1 uur per lid om spam te voorkomen.\n• Leden die zich hebben afgemeld met `/forgetme` kunnen niet gevolgd worden.\n• Wanneer je een watch op een lid aanmaakt, krijgt diegene een DM om het te laten weten.\n• Leden kunnen zich met `/no-watch` afmelden om gevolgd te worden (hun activiteit-tracking blijft aan).\n• Maximaal 50 watches per server.\n• Voeg `dm:True` toe aan een watch om de melding in je DM's te krijgen in plaats van een kanaal.",
+  "admin.help.watch_detail_notes": "• Duur gebruikt `m`/`h`/`d`, bijv. `30m`, `48h`, `7d`.\n• Online-meldingen hebben een afkoeltijd van 1 uur per lid om spam te voorkomen.\n• Online-meldingen voor een rol worden gebundeld: terugkeerders worden verzameld en elke 10 minuten in één melding geplaatst.\n• Leden die zich hebben afgemeld met `/forgetme` kunnen niet gevolgd worden.\n• Wanneer je een watch op een lid aanmaakt, krijgt diegene een DM om het te laten weten.\n• Leden kunnen zich met `/no-watch` afmelden om gevolgd te worden (hun activiteit-tracking blijft aan).\n• Maximaal 50 watches per server.\n• Voeg `dm:True` toe aan een watch om de melding in je DM's te krijgen in plaats van een kanaal.",
   "watch.removed_target": "{count} watch(es) voor {target} verwijderd.",
 
   "admin.help.search_detail_title": "🔍 /search - Geavanceerd zoeken naar leden",

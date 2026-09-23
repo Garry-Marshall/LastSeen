@@ -606,6 +606,9 @@
   "watch.alert_offline_title": "💤 Powiadomienie obserwacji",
   "watch.alert_offline_desc": "{target} jest offline od {duration}.",
   "watch.alert_role_offline_desc": "Ci członkowie {role} są offline od {duration}+:\n{members}",
+  "watch.alert_role_online_desc": "Ci członkowie {role} wrócili online:\n{members}",
+  "watch.alert_away_suffix": " (nieobecność: {duration})",
+  "watch.alert_more": "…i {count:,} więcej",
 
   "admin.help.watch_section_title": "👀 Obserwacje i Powiadomienia",
   "admin.help.watch_section": "`/watch` - Otrzymuj powiadomienia, gdy członkowie przechodzą w tryb offline lub wracają do sieci.\n💡 Wpisz `/help watch`, aby uzyskać pełne szczegóły i przykłady.",
@@ -617,7 +620,7 @@
   "admin.help.watch_detail_examples_title": "Przykłady",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - powiadom, gdy Alice będzie następnym razem online\n• `/watch online @Alice after:7d` - powiadom, gdy Alice wróci po 7+ dniach nieobecności\n• `/watch offline @Bob 7d` - powiadom, jeśli Bob nie będzie widziany przez 7 dni\n• `/watch offline @Staff 48h` - powiadom, gdy członek Staff nie był widziany przez 48h\n• `/watch offline @Alice 7d dm:True` - wyślij mi wiadomość prywatną zamiast posta na kanale",
   "admin.help.watch_detail_notes_title": "Warto wiedzieć",
-  "admin.help.watch_detail_notes": "• Czas używa `m`/`h`/`d`, np. `30m`, `48h`, `7d`.\n• Powiadomienia online mają 1-godzinny czas odnowienia na członka, aby uniknąć spamu.\n• Członkowie, którzy zrezygnowali przez `/forgetme`, nie mogą być obserwowani.\n• Gdy tworzysz obserwację członka, otrzymuje on wiadomość prywatną z informacją o tym.\n• Członkowie mogą zrezygnować z bycia obserwowanym za pomocą `/no-watch` (śledzenie ich aktywności pozostaje włączone).\n• Maksymalnie 50 obserwacji na serwer.\n• Dodaj `dm:True` do dowolnej obserwacji, aby otrzymać powiadomienie w wiadomości prywatnej zamiast na kanale.",
+  "admin.help.watch_detail_notes": "• Czas używa `m`/`h`/`d`, np. `30m`, `48h`, `7d`.\n• Powiadomienia online mają 1-godzinny czas odnowienia na członka, aby uniknąć spamu.\n• Powiadomienia online dla roli są grupowane: powroty są zbierane i publikowane jako jedno powiadomienie co 10 minut.\n• Członkowie, którzy zrezygnowali przez `/forgetme`, nie mogą być obserwowani.\n• Gdy tworzysz obserwację członka, otrzymuje on wiadomość prywatną z informacją o tym.\n• Członkowie mogą zrezygnować z bycia obserwowanym za pomocą `/no-watch` (śledzenie ich aktywności pozostaje włączone).\n• Maksymalnie 50 obserwacji na serwer.\n• Dodaj `dm:True` do dowolnej obserwacji, aby otrzymać powiadomienie w wiadomości prywatnej zamiast na kanale.",
   "watch.removed_target": "Usunięto {count} obserwacji dla {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Zaawansowane wyszukiwanie członków",

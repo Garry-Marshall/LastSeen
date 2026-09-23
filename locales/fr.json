@@ -606,6 +606,9 @@
   "watch.alert_offline_title": "💤 Alerte de surveillance",
   "watch.alert_offline_desc": "{target} est hors ligne depuis {duration}.",
   "watch.alert_role_offline_desc": "Ces membres {role} sont hors ligne depuis {duration}+ :\n{members}",
+  "watch.alert_role_online_desc": "Ces membres de {role} sont de retour en ligne :\n{members}",
+  "watch.alert_away_suffix": " (absent {duration})",
+  "watch.alert_more": "…et {count:,} de plus",
 
   "admin.help.watch_section_title": "👀 Surveillances & Alertes",
   "admin.help.watch_section": "`/watch` - Soyez alerté lorsque des membres se déconnectent ou reviennent en ligne.\n💡 Tapez `/help watch` pour tous les détails et des exemples.",
@@ -617,7 +620,7 @@
   "admin.help.watch_detail_examples_title": "Exemples",
   "admin.help.watch_detail_examples": "• `/watch online @Alice` - alerte dès qu'Alice sera en ligne\n• `/watch online @Alice after:7d` - alerte quand Alice revient après 7+ jours d'absence\n• `/watch offline @Bob 7d` - alerte si Bob passe 7 jours sans être vu\n• `/watch offline @Staff 48h` - alerte quand un membre Staff n'a pas été vu depuis 48h\n• `/watch offline @Alice 7d dm:True` - m'envoyer un MP au lieu de poster dans un salon",
   "admin.help.watch_detail_notes_title": "Bon à savoir",
-  "admin.help.watch_detail_notes": "• Les durées utilisent `m`/`h`/`d`, ex. `30m`, `48h`, `7d`.\n• Les alertes en ligne ont un délai d'1 heure par membre pour éviter le spam.\n• Les membres désinscrits via `/forgetme` ne peuvent pas être surveillés.\n• Lorsque vous créez une surveillance sur un membre, il reçoit un MP l'en informant.\n• Les membres peuvent refuser d'être surveillés avec `/no-watch` (le suivi de leur activité reste actif).\n• Jusqu'à 50 surveillances par serveur.\n• Ajoutez `dm:True` à une surveillance pour recevoir l'alerte en MP au lieu d'un salon.",
+  "admin.help.watch_detail_notes": "• Les durées utilisent `m`/`h`/`d`, ex. `30m`, `48h`, `7d`.\n• Les alertes en ligne ont un délai d'1 heure par membre pour éviter le spam.\n• Les alertes en ligne d'un rôle sont regroupées : les retours sont rassemblés et publiés en une seule alerte toutes les 10 minutes.\n• Les membres désinscrits via `/forgetme` ne peuvent pas être surveillés.\n• Lorsque vous créez une surveillance sur un membre, il reçoit un MP l'en informant.\n• Les membres peuvent refuser d'être surveillés avec `/no-watch` (le suivi de leur activité reste actif).\n• Jusqu'à 50 surveillances par serveur.\n• Ajoutez `dm:True` à une surveillance pour recevoir l'alerte en MP au lieu d'un salon.",
   "watch.removed_target": "{count} surveillance(s) supprimée(s) pour {target}.",
 
   "admin.help.search_detail_title": "🔍 /search - Recherche avancée de membres",

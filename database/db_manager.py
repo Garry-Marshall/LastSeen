@@ -4423,6 +4423,18 @@ class DatabaseManager:
             logger.error(f"Failed to remove DM watches for {user_id} in guild {guild_id}: {e}")
             return 0
 
+    def get_watch(self, watch_id: int) -> Optional[Dict[str, Any]]:
+        """One watch by its row id, or None if it no longer exists."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM watchlists WHERE id = ?", (watch_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get watch {watch_id}: {e}")
+            return None
+
     def get_guild_watches(self, guild_id: int) -> List[Dict[str, Any]]:
         """All watches configured in a guild, ordered by display number (for /watch list)."""
         try:
@@ -4503,18 +4515,27 @@ class DatabaseManager:
             return []
 
     def get_members_last_seen(self, guild_id: int, user_ids: List[int]) -> Dict[int, Optional[int]]:
-        """Batch-read last_seen for a set of members (role offline_for sweep)."""
+        """Batch-read last_seen for a set of members (role offline_for sweep).
+
+        Queried in chunks: SQLite caps the number of bound variables per
+        statement, and a large role can have tens of thousands of members.
+        """
         if not user_ids:
             return {}
+        chunk_size = 900  # below every SQLite variable limit, including old 999 builds
         try:
-            placeholders = ",".join("?" * len(user_ids))
+            result = {}
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(f"""
-                    SELECT user_id, last_seen FROM members
-                    WHERE guild_id = ? AND user_id IN ({placeholders})
-                """, (guild_id, *user_ids))
-                return {row['user_id']: row['last_seen'] for row in cursor.fetchall()}
+                for i in range(0, len(user_ids), chunk_size):
+                    chunk = user_ids[i:i + chunk_size]
+                    placeholders = ",".join("?" * len(chunk))
+                    cursor.execute(f"""
+                        SELECT user_id, last_seen FROM members
+                        WHERE guild_id = ? AND user_id IN ({placeholders})
+                    """, (guild_id, *chunk))
+                    result.update({row['user_id']: row['last_seen'] for row in cursor.fetchall()})
+            return result
         except Exception as e:
             logger.error(f"Failed to batch-read last_seen for guild {guild_id}: {e}")
             return {}
