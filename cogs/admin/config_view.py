@@ -6,7 +6,7 @@ import logging
 import json
 
 from database import DatabaseManager
-from bot.utils import create_embed, create_error_embed, create_success_embed
+from bot.utils import create_embed, create_error_embed, create_success_embed, join_capped
 from bot.locale import t, guild_language, available_languages, language_name, weekday_name
 from .permissions import get_bot_admin_role_name, check_admin_permission
 from .channel_config import ChannelModal, InactiveDaysModal, TimezoneModal, ReportsConfigModal
@@ -353,7 +353,7 @@ class ConfigView(discord.ui.View):
         if track_only_roles:
             try:
                 roles_list = json.loads(track_only_roles)
-                track_only_str = ", ".join(roles_list) if roles_list else t("admin.view_config.all_roles", lang)
+                track_only_str = join_capped(roles_list, lang) if roles_list else t("admin.view_config.all_roles", lang)
             except (json.JSONDecodeError, TypeError):
                 logger.error(f"Failed to parse track_only_roles JSON")
                 track_only_str = t("admin.view_config.error_parsing_roles", lang)
@@ -374,7 +374,7 @@ class ConfigView(discord.ui.View):
                             channel_mentions.append(channel.mention)
                         else:
                             channel_mentions.append(t("common.unknown_with_id", lang, id=ch_id))
-                    allowed_channels_str = ", ".join(channel_mentions)
+                    allowed_channels_str = join_capped(channel_mentions, lang)
                 else:
                     allowed_channels_str = t("admin.view_config.all_channels", lang)
             except (json.JSONDecodeError, TypeError):

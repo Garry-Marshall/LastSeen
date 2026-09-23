@@ -246,6 +246,23 @@ def chunk_list(items: list, chunk_size: int) -> list[list]:
     return [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
 
 
+def join_capped(items: list[str], lang: str = 'en', limit: int = 1024, sep: str = ", ") -> str:
+    """Join items, but keep the result within `limit` characters (Discord caps
+    an embed field value at 1024): items that don't fit are summarised as
+    "…and N more" instead of making the whole message fail to send."""
+    full = sep.join(items)
+    if len(full) <= limit:
+        return full
+    # Room for the summary, sized for the largest count it could show
+    reserve = len(sep) + len(t('common.and_more', lang, count=len(items)))
+    shown = []
+    for item in items:
+        if len(sep.join(shown + [item])) + reserve > limit:
+            break
+        shown.append(item)
+    return sep.join(shown + [t('common.and_more', lang, count=len(items) - len(shown))])
+
+
 def truncate_string(text: str, max_length: int, suffix: str = "...") -> str:
     """
     Truncate a string to a maximum length.

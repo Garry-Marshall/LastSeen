@@ -14,6 +14,7 @@
   "common.cancel": "Annuler",
   "common.cancelled": "Annulé",
   "common.unknown_with_id": "Inconnu ({id})",
+  "common.and_more": "…et {count:,} de plus",
 
   "weekday.monday": "lundi",
   "weekday.tuesday": "mardi",
