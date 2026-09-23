@@ -869,30 +869,49 @@ class TrackingCog(commands.Cog):
     async def on_user_update(self, before: discord.User, after: discord.User):
         """
         Called when a user's global profile is updated.
-        Tracks global username changes across all guilds.
+        Tracks global username and global display name changes across all guilds.
+
+        This is the only place a global display name change is visible:
+        discord.py's on_member_update gets a `before` that shares the already
+        updated user object, so its display-name comparison sees no change.
 
         Args:
             before: User state before update
             after: User state after update
         """
-        if after.bot:
+        if after.bot or after.id in self.bot.opted_out_users:
             return
 
-        # Check for username change
-        if str(before) != str(after):
-            logger.debug(f"Global username changed: {before} -> {after}")
+        name_changed = str(before) != str(after)
+        if not name_changed and before.global_name == after.global_name:
+            return  # avatar or other profile change: nothing stored
 
-            # Update username in all guilds where this user is a member
-            for guild in self.bot.guilds:
-                member = guild.get_member(after.id)
-                if member:
-                    guild_id = guild.id
-                    user_id = after.id
+        # The stored nickname is the guild display name (server nickname, else
+        # global name) when it differs from the username. A server nickname
+        # hides a global name change in that guild.
+        changes = []  # (guild_id, old display, new display)
+        for guild in self.bot.guilds:
+            member = guild.get_member(after.id)
+            if member is None:
+                continue
+            old_display = member.nick or before.global_name or before.name
+            old_display = old_display if old_display != str(before) else None
+            new_display = member.display_name if member.display_name != str(after) else None
+            changes.append((guild.id, old_display, new_display))
 
-                    # Update username in database
-                    if self.db.member_exists(guild_id, user_id):
-                        self.db.update_member_username(guild_id, user_id, str(after))
-                        logger.debug(f"Updated username for {after} in guild {guild.name}")
+        def apply():
+            # Updates of a member without a row (untracked) simply match nothing.
+            for guild_id, old_display, new_display in changes:
+                if name_changed:
+                    self.db.update_member_username(guild_id, after.id, str(after))
+                if old_display != new_display:
+                    self.db.update_nickname_history(guild_id, after.id, old_display, new_display)
+                    self.db.update_member_nickname(guild_id, after.id, new_display)
+
+        if changes:
+            logger.debug(f"Global profile changed for {after.id}: '{before}'/'{before.global_name}' -> "
+                         f"'{after}'/'{after.global_name}' in {len(changes)} guild(s)")
+            await asyncio.to_thread(apply)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
