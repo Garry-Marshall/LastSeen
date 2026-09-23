@@ -497,6 +497,7 @@
   "admin.role.user_input_placeholder": "p. ej., LastSeen User, Member, Verified",
   "admin.role.name_empty": "El nombre del rol no puede estar vacío.",
   "admin.role.name_too_long": "El nombre del rol es demasiado largo (máximo 100 caracteres).",
+  "admin.role.everyone_not_allowed": "@everyone no puede ser el rol de administrador del bot: todos los miembros lo tienen, así que todos serían administradores del bot. Elige un rol que solo tengan tus administradores.",
   "admin.role.not_exist_warning": "⚠️ Advertencia: El rol '{role}' no existe en este servidor.\n\nLa configuración se ha guardado, pero deberías crear este rol para que funcione correctamente.",
   "admin.role.bot_admin_set": "Rol de administrador del bot establecido en **{role}**",
   "admin.role.bot_admin_update_failed": "No se pudo actualizar el rol de administrador del bot. Ocurrió un error de base de datos. Inténtalo de nuevo o contacta con soporte.",

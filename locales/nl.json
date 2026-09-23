@@ -497,6 +497,7 @@
   "admin.role.user_input_placeholder": "bijv. LastSeen User, Member, Verified",
   "admin.role.name_empty": "Rolnaam mag niet leeg zijn.",
   "admin.role.name_too_long": "Rolnaam is te lang (maximaal 100 tekens).",
+  "admin.role.everyone_not_allowed": "@everyone kan niet de bot-adminrol zijn: elk lid heeft die rol, dus iedereen zou bot-admin worden. Kies een rol die alleen je admins hebben.",
   "admin.role.not_exist_warning": "⚠️ Waarschuwing: Rol '{role}' bestaat niet op deze server.\n\nDe instelling is opgeslagen, maar je moet deze rol aanmaken om goed te werken.",
   "admin.role.bot_admin_set": "Botbeheerdersrol ingesteld op **{role}**",
   "admin.role.bot_admin_update_failed": "Bijwerken van botbeheerdersrol mislukt. Er is een databasefout opgetreden. Probeer het opnieuw of neem contact op met support.",

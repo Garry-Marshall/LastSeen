@@ -166,8 +166,9 @@ def has_bot_admin_role(member: discord.Member, role_name: str) -> bool:
     if member.guild_permissions.administrator:
         return True
 
-    # Check for bot admin role
-    return discord.utils.get(member.roles, name=role_name) is not None
+    # Check for bot admin role. @everyone never counts: every member has it, so
+    # an admin role configured as "@everyone" would make everyone a bot admin.
+    return any(role.name == role_name and not role.is_default() for role in member.roles)
 
 
 def can_use_bot_commands(member: discord.Member, guild_config: dict) -> bool:
@@ -181,13 +182,8 @@ def can_use_bot_commands(member: discord.Member, guild_config: dict) -> bool:
     Returns:
         True if member can use bot commands
     """
-    # Guild administrators always have access
-    if member.guild_permissions.administrator:
-        return True
-
-    # Check if member has bot admin role (from guild config)
-    bot_admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin')
-    if discord.utils.get(member.roles, name=bot_admin_role_name):
+    # Guild administrators and bot admins always have access
+    if has_bot_admin_role(member, guild_config.get('bot_admin_role_name', 'LastSeen Admin')):
         return True
 
     # Check if user role is required

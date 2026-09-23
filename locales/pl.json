@@ -497,6 +497,7 @@
   "admin.role.user_input_placeholder": "np. LastSeen User, Member, Verified",
   "admin.role.name_empty": "Nazwa roli nie może być pusta.",
   "admin.role.name_too_long": "Nazwa roli jest za długa (maksymalnie 100 znaków).",
+  "admin.role.everyone_not_allowed": "@everyone nie może być rolą administratora bota: ma ją każdy członek, więc każdy zostałby administratorem bota. Wybierz rolę, którą mają tylko twoi administratorzy.",
   "admin.role.not_exist_warning": "⚠️ Ostrzeżenie: Rola '{role}' nie istnieje na tym serwerze.\n\nUstawienie zostało zapisane, ale powinieneś utworzyć tę rolę, aby działała poprawnie.",
   "admin.role.bot_admin_set": "Rolę administratora bota ustawiono na **{role}**",
   "admin.role.bot_admin_update_failed": "Nie udało się zaktualizować roli administratora bota. Wystąpił błąd bazy danych. Spróbuj ponownie lub skontaktuj się z pomocą techniczną.",

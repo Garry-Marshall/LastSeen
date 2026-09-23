@@ -67,6 +67,15 @@ class BotAdminRoleModal(discord.ui.Modal):
             )
             return
 
+        # @everyone would make every member a bot admin (and is ignored by the
+        # admin check anyway), so refuse it rather than save a no-op setting.
+        if role_name.lower() == interaction.guild.default_role.name.lower():
+            await interaction.response.send_message(
+                embed=create_error_embed(t("admin.role.everyone_not_allowed", lang), lang),
+                ephemeral=True
+            )
+            return
+
         # Check if role exists in guild (warning, not error)
         role = discord.utils.get(interaction.guild.roles, name=role_name)
         if not role:

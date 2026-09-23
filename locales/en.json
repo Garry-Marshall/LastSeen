@@ -497,6 +497,7 @@
   "admin.role.user_input_placeholder": "e.g., LastSeen User, Member, Verified",
   "admin.role.name_empty": "Role name cannot be empty.",
   "admin.role.name_too_long": "Role name is too long (maximum 100 characters).",
+  "admin.role.everyone_not_allowed": "@everyone can't be the bot admin role: every member has it, so everyone would become a bot admin. Pick a role that only your admins have.",
   "admin.role.not_exist_warning": "⚠️ Warning: Role '{role}' does not exist in this server.\n\nThe setting has been saved, but you should create this role for it to work properly.",
   "admin.role.bot_admin_set": "Bot admin role set to **{role}**",
   "admin.role.bot_admin_update_failed": "Failed to update bot admin role. Database error occurred. Please try again or contact support.",
