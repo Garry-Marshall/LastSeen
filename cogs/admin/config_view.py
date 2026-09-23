@@ -195,7 +195,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for allowed channels input
-        modal = AllowedChannelsModal(self.db, self.guild_id, await self._guild_config())
+        modal = AllowedChannelsModal(self.db, self.guild_id, await self._guild_config(), interaction.guild)
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Configure Reports", style=discord.ButtonStyle.primary, emoji="📊", row=3)

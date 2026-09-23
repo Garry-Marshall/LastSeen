@@ -216,7 +216,9 @@ class TrackOnlyRolesModal(discord.ui.Modal):
             default=current_roles or None,
             required=False,
             style=discord.TextStyle.paragraph,
-            max_length=500
+            # Discord's maximum: a prefill longer than max_length would stop
+            # the dialog from opening at all
+            max_length=4000
         )
         self.add_item(discord.ui.Label(
             text=t("admin.track_roles.input_label", self.lang),
