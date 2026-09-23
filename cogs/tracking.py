@@ -142,6 +142,13 @@ class TrackingCog(commands.Cog):
         # Flush when buffer reaches this size to cap memory usage between flush intervals
         self.MAX_BUFFER_SIZE = 10000
 
+        # Serialises flushes: the 30s loop and a forced flush from on_message
+        # must never run at once. Two flushes writing the same (guild, user,
+        # day) from different threads could both see "first message of the
+        # day" and double-count the journey summary's active days, or collide
+        # on its first insert and roll the whole write back.
+        self._flush_lock = asyncio.Lock()
+
         # Guard: run the stale-guild cleanup only on the first on_ready.
         # on_ready re-fires on reconnects; re-running the cleanup then is
         # wasteful DB churn and would trust READY payload completeness again.
@@ -959,7 +966,10 @@ class TrackingCog(commands.Cog):
             
             # Check if buffers are getting too large and force flush if needed
             total_buffer_size = len(self.daily_activity_buffer) + len(self.hourly_activity_buffer)
-            if total_buffer_size >= self.MAX_BUFFER_SIZE:
+            # If a flush is already running, don't queue another: it swapped the
+            # buffers out when it started, and whatever arrives meanwhile goes in
+            # the next one.
+            if total_buffer_size >= self.MAX_BUFFER_SIZE and not self._flush_lock.locked():
                 logger.warning(f"Buffer size limit reached ({total_buffer_size} entries), forcing flush")
                 # Trigger immediate flush by calling the task method directly
                 await self.flush_activity_buffer()
@@ -1236,7 +1246,14 @@ class TrackingCog(commands.Cog):
         """
         Background task that flushes activity buffers to database every 30 seconds.
         This reduces I/O overhead by batching multiple message events into single writes.
+        Also called directly by on_message when the buffers are full; the lock
+        makes the two wait for each other instead of overlapping.
         """
+        async with self._flush_lock:
+            await self._flush_activity_buffer()
+
+    async def _flush_activity_buffer(self):
+        """One flush pass. Only call via flush_activity_buffer (holds _flush_lock)."""
         try:
             # Heartbeat for member reconciliation: the last moment every shard
             # was connected. Not written while any shard is down, so after a
