@@ -936,9 +936,11 @@ class CommandsCog(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             return
 
-        # Calculate statistics
+        # Calculate statistics. The average is over the days they could have
+        # posted (since joining / the bot's arrival), not a flat 365.
         total_messages = sum(record['message_count'] for record in activity_trend)
-        avg_per_day = round(total_messages / 365, 1)
+        tracked_days = await asyncio.to_thread(self.db.get_member_days_with_data, guild_id, user_id, 365)
+        avg_per_day = round(total_messages / tracked_days, 1)
         max_day = max(activity_trend, key=lambda r: r['message_count'])
         min_day = min(activity_trend, key=lambda r: r['message_count'])
         max_day_str = format_utc_date(max_day['date'])
@@ -964,10 +966,10 @@ class CommandsCog(commands.Cog):
 
         # Calculate monthly breakdown for last 90 days
         if activity_trend:
-            now = datetime.now()
-            current_month_count = sum(r['message_count'] for r in activity_trend
-                                     if (now.year == datetime.fromtimestamp(r['date']).year and
-                                         now.month == datetime.fromtimestamp(r['date']).month))
+            # Calendar month in UTC, like the stored days (not the host's local time)
+            now = datetime.now(timezone.utc)
+            month_start = int(datetime(now.year, now.month, 1, tzinfo=timezone.utc).timestamp())
+            current_month_count = sum(r['message_count'] for r in activity_trend if r['date'] >= month_start)
 
             embed.description += t("commands.chat_history.recent_header", lang)
             embed.description += t("commands.chat_history.recent_month_user", lang, count=current_month_count)

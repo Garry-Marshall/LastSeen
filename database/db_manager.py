@@ -2731,7 +2731,10 @@ class DatabaseManager:
                 result = cursor.fetchone()
                 days_with_activity = result[0]
                 week_total = result[1]
-                avg_per_day = round(week_total / 7, 1) if days_with_activity > 0 else 0
+                # Over the days of the week they could have posted (joined
+                # 2 days ago -> divide by 2, not 7)
+                avg_per_day = (round(week_total / self._days_with_data(cursor, guild_id, 7, user_id), 1)
+                               if days_with_activity > 0 else 0)
                 
                 return {
                     'total': total,
@@ -2743,6 +2746,51 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get message activity for user {user_id}: {e}")
             return {'total': 0, 'today': 0, 'this_week': 0, 'this_month': 0, 'avg_per_day': 0}
+
+    def _days_with_data(self, cursor, guild_id: int, days: int, user_id: Optional[int] = None) -> int:
+        """How many days of the last `days` days could hold message data: the
+        denominator for "per day" averages, so a member who joined 20 days ago
+        (or a server that added the bot last week) isn't averaged over the full
+        window.
+
+        The window starts no earlier than the bot's arrival, the guild's
+        retention cutoff and, for a member, their join date, or their first
+        message in the window if that is earlier (a rejoiner's join_date is
+        their latest join). Always at least 1.
+        """
+        window = _day_window_start(days)
+        start = window
+        cursor.execute("SELECT added_at, message_retention_days FROM guilds WHERE guild_id = ?", (guild_id,))
+        g = cursor.fetchone()
+        if g:
+            start = max(start, g['added_at'] or 0)
+            if g['message_retention_days']:
+                # Cleanup deletes rows dated before this moment, so the oldest
+                # day still stored is the next midnight after it (round up).
+                cutoff = int(datetime.now(timezone.utc).timestamp()) - g['message_retention_days'] * SECONDS_PER_DAY
+                start = max(start, -(-cutoff // SECONDS_PER_DAY) * SECONDS_PER_DAY)
+        if user_id is not None:
+            cursor.execute("""
+                SELECT m.join_date,
+                       (SELECT MIN(date) FROM message_activity
+                        WHERE guild_id = m.guild_id AND user_id = m.user_id AND date >= ?) AS first_msg
+                FROM members m WHERE m.guild_id = ? AND m.user_id = ?
+            """, (window, guild_id, user_id))
+            m = cursor.fetchone()
+            if m and m['join_date']:
+                member_start = m['join_date'] if m['first_msg'] is None else min(m['join_date'], m['first_msg'])
+                start = max(start, member_start)
+        start -= start % SECONDS_PER_DAY
+        return max(1, (_day_window_start(1) - start) // SECONDS_PER_DAY + 1)
+
+    def get_member_days_with_data(self, guild_id: int, user_id: int, days: int) -> int:
+        """_days_with_data for one member (e.g. /chat-history's daily average)."""
+        try:
+            with self.get_connection() as conn:
+                return self._days_with_data(conn.cursor(), guild_id, days, user_id)
+        except Exception as e:
+            logger.error(f"Failed to get tracked days for user {user_id} in guild {guild_id}: {e}")
+            return days
 
     def get_guild_activity_totals(self, guild_id: int, days: int = 30) -> Dict[int, Dict[str, int]]:
         """Per-member message totals for a whole guild in one grouped query.
@@ -3126,10 +3174,11 @@ class DatabaseManager:
                 active_members_30d = cursor.fetchone()[0]
                 
                 # Average per day over the requested period. total_365d holds the
-                # sum over `days` days (cutoff_date uses `days`), so divide by
-                # `days`, not a fixed 365 — otherwise weekly/monthly reports show
-                # ~1/52 and ~1/12 of the true daily average.
-                avg_per_day = round(total_365d / days, 1) if total_365d > 0 else 0
+                # sum over `days` days (cutoff_date uses `days`), so divide by the
+                # days of that period the bot could record — not a fixed 365, and
+                # not the full period for a server that added the bot recently.
+                avg_per_day = (round(total_365d / self._days_with_data(cursor, guild_id, days), 1)
+                               if total_365d > 0 else 0)
                 
                 # Calculate messages per active member (30 days)
                 avg_per_member = round(total_30d / active_members_30d, 1) if active_members_30d > 0 else 0
