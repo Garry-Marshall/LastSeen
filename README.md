@@ -65,7 +65,7 @@ Configurable database backups with automatic retention management. Set your back
 - `/whois <user>` - Display detailed information about a user
 - `/lastseen <user>` - Check when a user was last seen online
 - `/seen <user>` - Alias for `/lastseen`
-- `/chat-history <user>` - Show message posting stats for the last year
+- `/chat-history <user>` - Show message posting stats for the last year (your own; bot admins: anyone)
 - `/mystats` - View your own activity statistics (always private/ephemeral)
 - `/forgetme` - Delete your tracked data and opt out of tracking
 - `/optin` - Re-enable activity tracking after a `/forgetme` opt-out

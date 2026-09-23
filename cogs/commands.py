@@ -839,7 +839,7 @@ class CommandsCog(commands.Cog):
         await interaction.followup.send(embed=embeds[0], view=view, ephemeral=not channels_restricted)
 
     @app_commands.command(name="chat-history", description="📈 View extended message activity history (365 days)")
-    @app_commands.describe(user="Username, nickname, or @mention (leave empty for server-wide stats)")
+    @app_commands.describe(user="Yourself, or anyone if you're a bot admin (leave empty for server-wide stats)")
     @app_commands.autocomplete(user=user_autocomplete)
     @app_commands.checks.cooldown(1, 5.0, key=lambda i: i.user.id)
     @app_commands.guild_only()
@@ -847,6 +847,10 @@ class CommandsCog(commands.Cog):
         """
         Display extended message activity history.
         Shows user stats if specified, or guild-wide stats if not.
+
+        Server-wide stats are open to everyone. A member's day-by-day history
+        is limited to bot admins and the member themselves, like the /whois
+        activity profile.
 
         Args:
             interaction: Discord interaction
@@ -857,6 +861,22 @@ class CommandsCog(commands.Cog):
         if not can_proceed:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
             return
+
+        # Resolve the member before answering, so a refusal can be private even
+        # where results are posted publicly (allowed_channels set).
+        member_data = None
+        if user is not None:
+            member_data = await asyncio.to_thread(
+                self.db.find_member_by_name, interaction.guild_id, parse_user_mention(user))
+            if member_data and member_data['user_id'] != interaction.user.id:
+                guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
+                admin_role = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+                if not has_bot_admin_role(interaction.user, admin_role):
+                    await interaction.response.send_message(
+                        embed=create_error_embed(t("commands.chat_history.others_admin_only", lang, role=admin_role), lang),
+                        ephemeral=True
+                    )
+                    return
 
         await interaction.response.defer(ephemeral=not channels_restricted, thinking=True)
 
@@ -911,12 +931,7 @@ class CommandsCog(commands.Cog):
             logger.info(f"User {interaction.user} used /chat-history (guild-wide) in guild {interaction.guild.name}")
             return
 
-        # User-specific stats (existing functionality)
-        search_term = parse_user_mention(user)
-
-        # Find member in database
-        member_data = await asyncio.to_thread(self.db.find_member_by_name, guild_id, search_term)
-
+        # User-specific stats (member_data was looked up above, before the admin check)
         if not member_data:
             await interaction.followup.send(
                 embed=create_error_embed(t("commands.role_history.not_found", lang), lang),
