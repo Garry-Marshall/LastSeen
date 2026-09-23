@@ -65,6 +65,20 @@ def _name_like_sql(column: str) -> str:
             f"({column} {_NON_ASCII_SQL} AND CASEFOLD({column}) LIKE ? ESCAPE '\\'))")
 
 
+def _day_window_start(days: int) -> int:
+    """Earliest message_activity.date in a "last `days` days" window.
+
+    message_activity holds one row per UTC calendar day. "Last N days" means
+    today (so far) plus the N-1 full days before it: exactly N day rows. Every
+    daily message-count window uses this, so /whois, /search, the leaderboard
+    and reports all count the same days for "the last 30 days". (Community
+    Pulse deliberately compares complete days only, excluding today.)
+    """
+    now = datetime.now(timezone.utc)
+    today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
+    return today_start - (days - 1) * SECONDS_PER_DAY
+
+
 def _casefold(value):
     """SQL CASEFOLD(): Unicode case folding for name matching (NULL stays NULL)."""
     return value.casefold() if isinstance(value, str) else value
@@ -2089,10 +2103,8 @@ class DatabaseManager:
     # NULL = never tracked, > 0 = unix time they last went offline.
 
     def _participation_window_start(self, window_days: int) -> int:
-        """Start-of-day cutoff `window_days` ago, matching message_activity dates."""
-        now = datetime.now(timezone.utc)
-        today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
-        return today_start - (window_days * SECONDS_PER_DAY)
+        """Start-of-day cutoff of the last `window_days` days, matching message_activity dates."""
+        return _day_window_start(window_days)
 
     def get_participation_segments(self, guild_id: int, window_days: int = 30) -> Dict[str, Any]:
         """
@@ -2679,8 +2691,8 @@ class DatabaseManager:
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
                 
                 # Calculate cutoff date
-                cutoff_date = today_start - (days * SECONDS_PER_DAY)  # Convert days to seconds
-                week_cutoff = today_start - (7 * SECONDS_PER_DAY)
+                cutoff_date = _day_window_start(days)
+                week_cutoff = _day_window_start(7)
                 
                 # Get total messages in period
                 cursor.execute("""
@@ -2744,8 +2756,8 @@ class DatabaseManager:
         try:
             now = datetime.now(timezone.utc)
             today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
-            cutoff = today_start - days * SECONDS_PER_DAY
-            week_cutoff = today_start - 7 * SECONDS_PER_DAY
+            cutoff = _day_window_start(days)
+            week_cutoff = _day_window_start(7)
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -2787,11 +2799,9 @@ class DatabaseManager:
         """
         MIN_RANKED = 5
         try:
-            # Match get_message_activity_period's cutoff exactly so the caller's
-            # total here lines up with the "this month" figure shown alongside it.
-            now = datetime.now(timezone.utc)
-            today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
-            cutoff_date = today_start - (days * SECONDS_PER_DAY)
+            # Same window as get_message_activity_period, so the caller's total
+            # here lines up with the "this month" figure shown alongside it.
+            cutoff_date = _day_window_start(days)
 
             with self._borrow(conn) as conn:
                 cursor = conn.cursor()
@@ -2860,12 +2870,7 @@ class DatabaseManager:
             with self._borrow(conn) as conn:
                 cursor = conn.cursor()
 
-                # Get today's date (start of day UTC)
-                now = datetime.now(timezone.utc)
-                today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
-
-                # Calculate cutoff date
-                cutoff_date = today_start - (days * SECONDS_PER_DAY)
+                cutoff_date = _day_window_start(days)
 
                 cursor.execute("""
                     SELECT date, message_count
@@ -3046,10 +3051,10 @@ class DatabaseManager:
                 today_start = int(datetime(now.year, now.month, now.day, tzinfo=timezone.utc).timestamp())
 
                 # Calculate cutoff dates
-                cutoff_date = today_start - (days * SECONDS_PER_DAY)
-                week_cutoff = today_start - (7 * SECONDS_PER_DAY)
-                month_cutoff = today_start - (30 * SECONDS_PER_DAY)
-                quarter_cutoff = today_start - (90 * SECONDS_PER_DAY)
+                cutoff_date = _day_window_start(days)
+                week_cutoff = _day_window_start(7)
+                month_cutoff = _day_window_start(30)
+                quarter_cutoff = _day_window_start(90)
 
                 # Get total messages for all periods
                 cursor.execute(f"""
@@ -3208,12 +3213,14 @@ class DatabaseManager:
                 """, (guild_id, month_start, bot_added_at))
                 leaves_this_month = cursor.fetchone()['leaves'] or 0
                 
-                # Get total message count for last 30 days
+                # Get total message count for last 30 days (daily rows: same
+                # window as every other 30-day message count)
+                month_window = _day_window_start(30)
                 cursor.execute("""
                     SELECT SUM(message_count) as total_messages
                     FROM message_activity
                     WHERE guild_id = ? AND date >= ?
-                """, (guild_id, thirty_days_ago))
+                """, (guild_id, month_window))
                 total_messages = cursor.fetchone()['total_messages'] or 0
                 
                 # Get most active member in last 30 days
@@ -3225,7 +3232,7 @@ class DatabaseManager:
                     GROUP BY ma.user_id
                     ORDER BY msg_count DESC
                     LIMIT 1
-                """, (guild_id, thirty_days_ago))
+                """, (guild_id, month_window))
                 most_active = cursor.fetchone()
                 most_active_user = most_active['username'] if most_active else 'N/A'
                 most_active_count = most_active['msg_count'] if most_active else 0
@@ -3869,9 +3876,8 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 
                 if days > 0:
-                    now = int(datetime.now(timezone.utc).timestamp())
-                    period_start = now - (days * SECONDS_PER_DAY)
-                    
+                    period_start = _day_window_start(days)
+
                     cursor.execute("""
                         SELECT 
                             m.user_id,
@@ -4133,7 +4139,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 fclause, fparams = self._member_filter_clause(user_ids, column="m.user_id")
-                cutoff = int(datetime.now(timezone.utc).timestamp()) - (days * SECONDS_PER_DAY)
+                cutoff = _day_window_start(days)
                 cursor.execute(f"""
                     SELECT m.user_id, m.username, m.nickname, SUM(ma.message_count) as total_messages
                     FROM message_activity ma
@@ -4796,13 +4802,11 @@ class DatabaseManager:
                 last_24h = cursor.fetchone()[0]
 
                 # 7 day buckets: today plus the 6 preceding days.
-                today = datetime.now(timezone.utc)
-                today_start = int(datetime(today.year, today.month, today.day, tzinfo=timezone.utc).timestamp())
                 cursor.execute("""
                     SELECT COALESCE(SUM(message_count), 0)
                     FROM message_activity
                     WHERE date >= ?
-                """, (today_start - (6 * SECONDS_PER_DAY),))
+                """, (_day_window_start(7),))
                 last_7d = cursor.fetchone()[0]
 
                 stats = {
