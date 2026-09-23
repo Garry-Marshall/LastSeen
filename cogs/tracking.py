@@ -1445,6 +1445,10 @@ class TrackingCog(commands.Cog):
                         now_local = now_utc.astimezone(guild_tz)
                     except (pytz.UnknownTimeZoneError, AttributeError):
                         logger.warning(f"Invalid timezone '{guild_tz_str}' for guild {guild_id}, using UTC")
+                        # Set guild_tz too: the dedup below converts with it, and
+                        # leaving it unset raised NameError (report never sent) or
+                        # reused the previous guild's timezone from this loop.
+                        guild_tz, guild_tz_str = pytz.UTC, 'UTC'
                         now_local = now_utc
                     
                     current_weekday = now_local.weekday()  # 0=Monday, 6=Sunday
