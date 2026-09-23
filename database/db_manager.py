@@ -4255,6 +4255,12 @@ class DatabaseManager:
                     DELETE FROM watchlists WHERE target_type = 'user' AND target_id = ?
                 """, (user_id,))
 
+                # Remove DM watches that deliver to this user: they would keep
+                # sending presence alerts to someone who asked to be forgotten.
+                cursor.execute("""
+                    DELETE FROM watchlists WHERE deliver_dm = 1 AND created_by = ?
+                """, (user_id,))
+
                 logger.info(
                     f"Purged user {user_id}: {counts['members']} member records, "
                     f"{counts['role_changes']} role changes, "
@@ -4337,6 +4343,21 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to remove watch {watch_id} in guild {guild_id}: {e}")
             return False
+
+    def remove_dm_watches_for_recipient(self, guild_id: int, user_id: int) -> int:
+        """Delete a guild's DM watches that deliver to user_id (who left the guild).
+        Returns the number removed."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM watchlists WHERE guild_id = ? AND deliver_dm = 1 AND created_by = ?",
+                    (guild_id, user_id)
+                )
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Failed to remove DM watches for {user_id} in guild {guild_id}: {e}")
+            return 0
 
     def get_guild_watches(self, guild_id: int) -> List[Dict[str, Any]]:
         """All watches configured in a guild, ordered by display number (for /watch list)."""

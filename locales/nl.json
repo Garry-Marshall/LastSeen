@@ -652,6 +652,7 @@
   "watch.replaced_existing": "\n\nℹ️ Dit heeft een bestaande watch voor dit doel vervangen.",
   "watch.replaced_existing_other": "\n\nℹ️ Dit heeft een watch vervangen die door {user} was ingesteld.",
   "watch.dest_dm_other": "DM's van {user}",
+  "watch.dm_paused": " · ⏸️ gepauzeerd: {user} is hier geen bot-admin meer",
   "watch.alert_footer": "Gebruik /watch remove {seq} om deze watch te verwijderen",
   "watch.err_no_watch": "❌ Dat lid heeft zich afgemeld om gevolgd te worden (`/no-watch`).",
   "watch.notified_target": "\n\nℹ️ {target} heeft een DM gekregen om te laten weten dat ze gevolgd worden.",

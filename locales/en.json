@@ -652,6 +652,7 @@
   "watch.replaced_existing": "\n\nℹ️ This replaced an existing watch on this target.",
   "watch.replaced_existing_other": "\n\nℹ️ This replaced a watch set by {user}.",
   "watch.dest_dm_other": "{user}'s DMs",
+  "watch.dm_paused": " · ⏸️ paused: {user} is no longer a bot admin here",
   "watch.alert_footer": "To remove this watch, use /watch remove {seq}",
   "watch.err_no_watch": "❌ That member has opted out of being watched (`/no-watch`).",
   "watch.notified_target": "\n\nℹ️ {target} has been sent a DM letting them know they're being watched.",

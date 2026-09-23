@@ -652,6 +652,7 @@
   "watch.replaced_existing": "\n\nℹ️ To zastąpiło istniejącą obserwację dla tego celu.",
   "watch.replaced_existing_other": "\n\nℹ️ To zastąpiło obserwację ustawioną przez {user}.",
   "watch.dest_dm_other": "wiadomości prywatne {user}",
+  "watch.dm_paused": " · ⏸️ wstrzymane: {user} nie jest już tutaj administratorem bota",
   "watch.alert_footer": "Aby usunąć tę obserwację, użyj /watch remove {seq}",
   "watch.err_no_watch": "❌ Ten użytkownik zrezygnował z bycia obserwowanym (`/no-watch`).",
   "watch.notified_target": "\n\nℹ️ {target} otrzymał(a) wiadomość prywatną z informacją, że jest obserwowany(a).",

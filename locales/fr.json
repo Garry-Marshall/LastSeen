@@ -652,6 +652,7 @@
   "watch.replaced_existing": "\n\nℹ️ Ceci a remplacé une surveillance existante pour cette cible.",
   "watch.replaced_existing_other": "\n\nℹ️ Ceci a remplacé une surveillance configurée par {user}.",
   "watch.dest_dm_other": "les MP de {user}",
+  "watch.dm_paused": " · ⏸️ en pause : {user} n'est plus administrateur du bot ici",
   "watch.alert_footer": "Pour supprimer cette surveillance, utilisez /watch remove {seq}",
   "watch.err_no_watch": "❌ Ce membre a choisi de ne pas être surveillé (`/no-watch`).",
   "watch.notified_target": "\n\nℹ️ {target} a reçu un MP l'informant qu'il/elle est surveillé(e).",

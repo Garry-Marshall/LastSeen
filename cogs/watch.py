@@ -108,6 +108,21 @@ class WatchCog(commands.Cog):
         self._suppress_online_until = int(datetime.now(timezone.utc).timestamp()) + STARTUP_GRACE_SECONDS
         logger.info(f"WatchCog: suppressing online-return alerts for {STARTUP_GRACE_SECONDS}s after (re)connect")
 
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        """Delete DM watches that deliver to a member who left the guild.
+
+        Losing admin rights only pauses a DM watch (see _dm_recipient); leaving
+        the guild is final, so the watch is removed instead of kept dead.
+        """
+        if member.guild.id not in self.bot.watch_guild_ids:
+            return
+        removed = await asyncio.to_thread(self.db.remove_dm_watches_for_recipient, member.guild.id, member.id)
+        if removed:
+            self._refresh_watch_guilds()
+            logger.info(f"Removed {removed} DM watch(es) delivering to {member} ({member.id}), "
+                        f"who left guild {member.guild.name}")
+
     def cog_unload(self):
         self.check_offline_watches.cancel()
 
@@ -359,7 +374,17 @@ class WatchCog(commands.Cog):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        lines = [self._format_watch_line(w, lang, interaction.user.id) for w in watches]
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
+        admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
+        lines = []
+        for w in watches:
+            line = self._format_watch_line(w, lang, interaction.user.id)
+            # Only judge "paused" once the member cache is complete; while it
+            # loads, a recipient can look absent without having left.
+            if (w['deliver_dm'] and interaction.guild.chunked
+                    and self._dm_recipient(interaction.guild, w, admin_role_name) is None):
+                line += t('watch.dm_paused', lang, user=f"<@{w['created_by']}>")
+            lines.append(line)
         embeds = []
         for i, page in enumerate(chunk_list(lines, WATCHES_PER_PAGE)):
             embed = create_embed(t('watch.list_title', lang), discord.Color.blue())
@@ -594,8 +619,9 @@ class WatchCog(commands.Cog):
         if w['state'] == 'triggered':
             return
         if now - last_seen >= w['threshold_seconds']:
-            await self._fire_alert(guild, w, f"<@{w['target_id']}>", offline_for=w['threshold_seconds'])
-            await asyncio.to_thread(self.db.update_watch_fire_state, w['id'], state='triggered')
+            # A paused DM watch stays armed, so it fires once resumed.
+            if await self._fire_alert(guild, w, f"<@{w['target_id']}>", offline_for=w['threshold_seconds']):
+                await asyncio.to_thread(self.db.update_watch_fire_state, w['id'], state='triggered')
 
     async def _sweep_role_watch(self, guild: discord.Guild, w: dict, now: int):
         role = guild.get_role(w['target_id'])
@@ -620,22 +646,43 @@ class WatchCog(commands.Cog):
                     newly.append(m)
         if newly:
             listing = "\n".join(f"• {m.mention}" for m in newly)
-            await self._fire_alert(guild, w, f"@{role.name}", role_offline=w['threshold_seconds'], members=listing)
+            if not await self._fire_alert(guild, w, f"@{role.name}", role_offline=w['threshold_seconds'], members=listing):
+                return  # paused DM watch: keep fired_targets so these members alert once resumed
         if new_fired != old_fired:
             await asyncio.to_thread(self.db.update_watch_fire_state, w['id'],
                                     fired_targets=json.dumps(sorted(new_fired)))
 
     # ==================== delivery ====================
 
+    @staticmethod
+    def _dm_recipient(guild: discord.Guild, w: dict, admin_role_name: str) -> Optional[discord.Member]:
+        """The member a DM watch delivers to, or None while the watch is paused.
+
+        A DM watch only delivers to someone who is still a member with bot-admin
+        rights, so an admin who is demoted or leaves stops receiving presence
+        alerts. Also None while the member cache is still loading after a
+        restart; the caller simply retries later.
+        """
+        member = guild.get_member(w['created_by'])
+        if member is None or not has_bot_admin_role(member, admin_role_name):
+            return None
+        return member
+
     async def _fire_alert(self, guild: discord.Guild, w: dict, target_mention: str, *,
                           online_away: Optional[int] = None,
                           offline_for: Optional[int] = None,
                           role_offline: Optional[int] = None,
-                          members: Optional[str] = None):
+                          members: Optional[str] = None) -> bool:
         """Build one alert embed and deliver it — to the watch's channel, or as a
-        DM to its creator when deliver_dm is set. A failed DM is logged and dropped
-        (there is no channel to fall back to)."""
-        lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, guild.id))
+        DM to its creator when deliver_dm is set. A failed send is logged and
+        dropped (there is no channel to fall back to).
+
+        Returns False only when a DM watch is paused (see _dm_recipient), so the
+        caller leaves its fire-state untouched and the alert fires once resumed.
+        """
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, guild.id)
+        lang = guild_language(guild_config)
+        admin_role_name = guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'
 
         if role_offline is not None:
             title = t('watch.alert_offline_title', lang)
@@ -666,15 +713,14 @@ class WatchCog(commands.Cog):
         origin = f"({w['alert_type']}, {w['target_type']}:{w['target_id']}) in guild {guild.name}"
 
         if w['deliver_dm']:
+            user = self._dm_recipient(guild, w, admin_role_name)
+            if user is None:
+                # Debug only: a paused offline_for watch is re-checked every sweep.
+                logger.debug(f"Watch #{w['seq']} {origin}: DM recipient {w['created_by']} is not a bot admin "
+                             f"in this guild (or not cached yet); paused")
+                return False
             # A DM has no channel context, so stamp the guild it's about.
             embed.set_footer(text=f"{guild.name} • {remove_hint}")
-            user = guild.get_member(w['created_by']) or self.bot.get_user(w['created_by'])
-            if user is None:
-                try:
-                    user = await self.bot.fetch_user(w['created_by'])
-                except Exception:
-                    logger.warning(f"Watch #{w['seq']}: DM recipient {w['created_by']} not found; alert dropped")
-                    return
             try:
                 await user.send(embed=embed)
                 logger.info(f"Watch #{w['seq']} fired {origin} -> DM {user}")
@@ -682,21 +728,22 @@ class WatchCog(commands.Cog):
                 logger.warning(f"Watch #{w['seq']}: can't DM {user} (DMs closed); alert dropped")
             except Exception as e:
                 logger.error(f"Watch #{w['id']}: failed to DM {w['created_by']}: {e}")
-            return
+            return True
 
         embed.set_footer(text=remove_hint)
         channel = guild.get_channel_or_thread(w['channel_id']) if w['channel_id'] else None
         if not channel:
             logger.warning(f"Watch #{w['id']}: channel {w['channel_id']} not found in guild {guild.name}; can't deliver")
-            return
+            return True
         if not channel.permissions_for(guild.me).send_messages:
             logger.warning(f"Watch #{w['id']}: no send permission in channel {channel.id}; can't deliver")
-            return
+            return True
         try:
             await channel.send(embed=embed)
             logger.info(f"Watch #{w['seq']} fired {origin} -> #{channel.name}")
         except Exception as e:
             logger.error(f"Watch #{w['id']}: failed to send alert to channel {channel.id}: {e}")
+        return True
 
 
 async def setup(bot: commands.Bot):

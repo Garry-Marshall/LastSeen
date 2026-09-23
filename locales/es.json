@@ -652,6 +652,7 @@
   "watch.replaced_existing": "\n\nℹ️ Esto reemplazó una vigilancia existente para este objetivo.",
   "watch.replaced_existing_other": "\n\nℹ️ Esto reemplazó una vigilancia configurada por {user}.",
   "watch.dest_dm_other": "los MD de {user}",
+  "watch.dm_paused": " · ⏸️ en pausa: {user} ya no es administrador del bot aquí",
   "watch.alert_footer": "Para eliminar esta vigilancia, usa /watch remove {seq}",
   "watch.err_no_watch": "❌ Ese miembro ha optado por no ser vigilado (`/no-watch`).",
   "watch.notified_target": "\n\nℹ️ {target} ha recibido un MD informándole de que está siendo vigilado.",
