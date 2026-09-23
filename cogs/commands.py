@@ -1477,6 +1477,19 @@ class CommandsCog(commands.Cog):
             )
             return
 
+        # Sort by last seen, most recent first: online now, then most recently
+        # offline, then never seen. (last_seen_ts is 0 for both online and
+        # never seen, which put online members at the very bottom.) Sorted
+        # before the cap below, so the members kept are the most recent ones.
+        def recency(result: dict) -> tuple:
+            last_seen = result.get('last_seen')
+            if last_seen == 0:
+                return (2, 0)          # online now
+            if last_seen is None:
+                return (0, 0)          # never seen
+            return (1, last_seen)
+        filtered.sort(key=recency, reverse=True)
+
         # Apply result limit
         MAX_RESULTS = 1000
         if len(filtered) > MAX_RESULTS:
@@ -1485,9 +1498,6 @@ class CommandsCog(commands.Cog):
                 ephemeral=not channels_restricted
             )
             filtered = filtered[:MAX_RESULTS]
-
-        # Sort by last_seen (most recent first)
-        filtered.sort(key=lambda x: x.get('last_seen_ts', 0), reverse=True)
 
         # Handle export or display
         if export.lower() in ["csv", "txt"]:
