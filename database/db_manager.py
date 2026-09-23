@@ -1915,9 +1915,15 @@ class DatabaseManager:
                 cursor.fetchone()
                 health['can_read'] = True
 
-                # Test write (using a harmless operation)
-                cursor.execute("SELECT 1")
-                cursor.fetchone()
+                # Test write: a real, committed write (a read like "SELECT 1"
+                # passed even on a read-only file, a full disk or a stuck lock).
+                # One bot-level row holding the time of the last check; no user data.
+                cursor.execute(
+                    "INSERT INTO bot_state (key, value) VALUES ('health_check', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (int(datetime.now(timezone.utc).timestamp()),)
+                )
+                conn.commit()
                 health['can_write'] = True
 
                 health['status'] = 'healthy'
