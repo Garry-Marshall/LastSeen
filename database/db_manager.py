@@ -26,6 +26,11 @@ HEALTH_SNAPSHOT_RETENTION_DAYS = 120
 # How long global /about statistics stay cached (seconds)
 BOT_STATS_CACHE_TTL = 300
 
+# Startup VACUUM runs only when at least this share of the file, and at least
+# this much space, is free pages (see vacuum_if_fragmented).
+VACUUM_MIN_FREE_RATIO = 0.20
+VACUUM_MIN_FREE_MB = 16
+
 # When a member left, for counting departures in a time window. left_date is
 # kept across a rejoin, so a leave followed by a rejoin counts as both a leave
 # and a join (the rejoin updates join_date). Departures recorded before the
@@ -4569,59 +4574,54 @@ class DatabaseManager:
             logger.error(f"Failed to cleanup old backups: {e}", exc_info=True)
             return 0
 
-    def vacuum_database(self) -> bool:
+    def vacuum_if_fragmented(self) -> bool:
         """
-        Run VACUUM on the database to reclaim space and optimize performance.
-        This should be called after significant deletions (e.g., removing stale guilds).
+        VACUUM the database if enough of it is free pages; call before connecting.
 
-        VACUUM requires an exclusive lock and can take time on large databases.
-        It's recommended to run this during low-activity periods (e.g., startup).
+        VACUUM rewrites the whole file under an exclusive write lock. While the
+        bot is connected that blocks every write for its duration (presence
+        writes then fail past busy_timeout and are lost), so it only runs at
+        startup, before any event can arrive. In between, SQLite reuses the
+        pages freed by removed guilds and pruned activity, so the file doesn't
+        grow; it just isn't shrunk until the next restart.
+
+        Uses its own autocommit connection (VACUUM can't run in a transaction),
+        so a failure can never leave a pooled connection in autocommit mode.
 
         Returns:
-            bool: True if VACUUM completed successfully, False otherwise
+            bool: True if VACUUM ran and completed, False if skipped or failed
         """
+        conn = sqlite3.connect(self.db_file, isolation_level=None)
         try:
-            logger.info("Starting database VACUUM operation...")
-            start_time = datetime.now(timezone.utc)
+            conn.execute("PRAGMA busy_timeout = 5000")
+            page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+            pages = conn.execute("PRAGMA page_count").fetchone()[0]
+            free = conn.execute("PRAGMA freelist_count").fetchone()[0]
+            free_mb = free * page_size / (1024 * 1024)
+            if not pages or free / pages < VACUUM_MIN_FREE_RATIO or free_mb < VACUUM_MIN_FREE_MB:
+                logger.info(f"Database has {free_mb:.1f} MB free ({free / pages:.0%} of file); no VACUUM needed"
+                            if pages else "Empty database; no VACUUM needed")
+                return False
 
-            # Get a connection from pool
-            # VACUUM cannot run in a transaction, so we handle this specially
-            conn = self._get_connection_from_pool()
-            try:
-                # Get database size before VACUUM
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA page_count")
-                page_count_before = cursor.fetchone()[0]
-                cursor.execute("PRAGMA page_size")
-                page_size = cursor.fetchone()[0]
-                size_before_mb = (page_count_before * page_size) / (1024 * 1024)
-
-                # Run VACUUM (this cannot be in a transaction)
-                conn.isolation_level = None  # Autocommit mode required for VACUUM
-                cursor.execute("VACUUM")
-                conn.isolation_level = ""  # Restore default
-
-                # Get database size after VACUUM
-                cursor.execute("PRAGMA page_count")
-                page_count_after = cursor.fetchone()[0]
-                size_after_mb = (page_count_after * page_size) / (1024 * 1024)
-
-                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-                reclaimed_mb = size_before_mb - size_after_mb
-
-                logger.info(
-                    f"VACUUM completed in {elapsed:.2f}s. "
-                    f"Database size: {size_before_mb:.2f}MB -> {size_after_mb:.2f}MB "
-                    f"(reclaimed {reclaimed_mb:.2f}MB)"
-                )
-                return True
-
-            finally:
-                self._return_connection_to_pool(conn)
-
+            logger.info(f"Database has {free_mb:.1f} MB free ({free / pages:.0%} of file); running VACUUM before connecting...")
+            start = datetime.now(timezone.utc)
+            conn.execute("VACUUM")
+            # In WAL mode VACUUM writes the rewritten database through the WAL;
+            # reset it now, while nothing else is reading, instead of leaving a
+            # database-sized -wal file for the periodic checkpoint to catch.
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            pages_after = conn.execute("PRAGMA page_count").fetchone()[0]
+            elapsed = (datetime.now(timezone.utc) - start).total_seconds()
+            logger.info(
+                f"VACUUM completed in {elapsed:.1f}s: "
+                f"{pages * page_size / (1024 * 1024):.1f} MB -> {pages_after * page_size / (1024 * 1024):.1f} MB"
+            )
+            return True
         except Exception as e:
-            logger.error(f"VACUUM operation failed: {e}", exc_info=True)
+            logger.error(f"VACUUM failed (the bot continues without it): {e}", exc_info=True)
             return False
+        finally:
+            conn.close()
 
     def get_bot_statistics(self) -> dict:
         """

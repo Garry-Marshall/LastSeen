@@ -83,6 +83,9 @@ def create_bot(config) -> commands.Bot:
     # Attach configuration and database to bot
     bot.config = config
     bot.db = DatabaseManager(config.db_file, pool_size=DB_WORKER_THREADS)
+    # Reclaim space freed by removed guilds and pruned activity. Only here,
+    # before connecting: VACUUM blocks all writes while it runs.
+    bot.db.vacuum_if_fragmented()
     # Global privacy opt-out list (/forgetme). Initialized here so it exists
     # whenever bot.db does; kept in memory because it is checked on hot event
     # paths (presence updates, messages).
