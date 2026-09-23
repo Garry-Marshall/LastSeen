@@ -35,6 +35,7 @@
   "errors.no_permission": "Necesitas el rol '{role}' o permiso de Administrador para usar este comando.",
   "errors.no_user_or_admin_permission": "Necesitas el rol '{role}' o permisos de administrador para usar este comando.",
   "errors.channel_not_allowed": "Los comandos del bot no están permitidos en este canal. Usa un canal permitido.",
+  "errors.not_your_panel": "Solo la persona que ejecutó este comando puede usar estos botones. Ejecuta el comando tú mismo para obtener tu propia vista.",
 
   "commands.forgetme.btn_confirm": "Sí, eliminar mis datos",
   "commands.forgetme.save_failed": "No se pudo guardar tu exclusión. No se eliminaron datos — inténtalo de nuevo más tarde.",

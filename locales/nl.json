@@ -35,6 +35,7 @@
   "errors.no_permission": "Je hebt de rol '{role}' of beheerdersrechten nodig om dit commando te gebruiken.",
   "errors.no_user_or_admin_permission": "Je hebt de rol '{role}' of adminrechten nodig om dit commando te gebruiken.",
   "errors.channel_not_allowed": "Botcommando's zijn niet toegestaan in dit kanaal. Gebruik een toegestaan kanaal.",
+  "errors.not_your_panel": "Alleen degene die dit commando heeft uitgevoerd kan deze knoppen gebruiken. Voer het commando zelf uit voor je eigen weergave.",
 
   "commands.forgetme.btn_confirm": "Ja, verwijder mijn gegevens",
   "commands.forgetme.save_failed": "Het opslaan van je afmelding is mislukt. Er zijn geen gegevens verwijderd — probeer het later opnieuw.",

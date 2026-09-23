@@ -35,6 +35,7 @@
   "errors.no_permission": "Vous avez besoin du rôle '{role}' ou de la permission Administrateur pour utiliser cette commande.",
   "errors.no_user_or_admin_permission": "Vous avez besoin du rôle '{role}' ou des permissions d'administrateur pour utiliser cette commande.",
   "errors.channel_not_allowed": "Les commandes du bot ne sont pas autorisées dans ce salon. Veuillez utiliser un salon autorisé.",
+  "errors.not_your_panel": "Seule la personne qui a lancé cette commande peut utiliser ces boutons. Lancez la commande vous-même pour obtenir votre propre vue.",
 
   "commands.forgetme.btn_confirm": "Oui, supprimer mes données",
   "commands.forgetme.save_failed": "Échec de l'enregistrement de votre désinscription. Aucune donnée n'a été supprimée — veuillez réessayer plus tard.",

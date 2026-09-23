@@ -35,6 +35,7 @@
   "errors.no_permission": "Potrzebujesz roli '{role}' lub uprawnień Administratora, aby użyć tego polecenia.",
   "errors.no_user_or_admin_permission": "Potrzebujesz roli '{role}' lub uprawnień administratora, aby użyć tego polecenia.",
   "errors.channel_not_allowed": "Polecenia bota nie są dozwolone na tym kanale. Użyj dozwolonego kanału.",
+  "errors.not_your_panel": "Tylko osoba, która użyła tego polecenia, może korzystać z tych przycisków. Użyj polecenia samodzielnie, aby zobaczyć własny widok.",
 
   "commands.forgetme.btn_confirm": "Tak, usuń moje dane",
   "commands.forgetme.save_failed": "Nie udało się zapisać rezygnacji. Nie usunięto żadnych danych — spróbuj ponownie później.",

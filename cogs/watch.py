@@ -369,7 +369,7 @@ class WatchCog(commands.Cog):
         if len(embeds) == 1:
             await interaction.response.send_message(embed=embeds[0], ephemeral=True)
         else:
-            view = PaginationView(embeds, lang=lang)
+            view = PaginationView(embeds, interaction.user.id, lang=lang)
             await interaction.response.send_message(embed=embeds[0], view=view, ephemeral=True)
 
     def _format_watch_line(self, w: dict, lang: str, viewer_id: int) -> str:

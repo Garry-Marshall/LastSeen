@@ -76,26 +76,46 @@ def build_activity_sparkline(trend: list, days: int = 30) -> str:
     return "".join(chars)
 
 
-class PaginationView(discord.ui.View):
+class OwnerOnlyView(discord.ui.View):
+    """A view only the user who ran the command can operate.
+
+    Command results are public when the guild restricts commands to allowed
+    channels, so without this anyone in the channel could press an admin
+    panel's buttons (exports, member lists, a member's journey).
+    """
+
+    def __init__(self, owner_id: int, lang: str = 'en', *, timeout: float = 180):
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+        self.lang = lang
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(t("errors.not_your_panel", self.lang), ephemeral=True)
+        return False
+
+
+class PaginationView(OwnerOnlyView):
     """Interactive pagination view for navigating through multiple pages."""
 
-    def __init__(self, embeds: list[discord.Embed], timeout: int = 180,
+    def __init__(self, embeds: list[discord.Embed], owner_id: int, timeout: int = 180,
                  export_members: list[dict] = None, lang: str = 'en'):
         """
         Initialize pagination view.
 
         Args:
             embeds: List of embeds to paginate through
+            owner_id: User who ran the command; the only one who can use the buttons
             timeout: Timeout in seconds (default 3 minutes)
             export_members: Optional member dicts to enable a CSV export button
             lang: Language code for the export button responses
         """
-        super().__init__(timeout=timeout)
+        super().__init__(owner_id, lang, timeout=timeout)
         self.embeds = embeds
         self.current_page = 0
         self.max_pages = len(embeds)
         self.export_members = export_members
-        self.lang = lang
 
         # Disable buttons if only one page
         if self.max_pages == 1:
@@ -530,7 +550,7 @@ class CommandsCog(commands.Cog):
         # Journey button — only for viewers allowed to see the profile above.
         view = discord.utils.MISSING
         if show_profile:
-            view = JourneyView(self, guild_id, member_data['user_id'], username, lang)
+            view = JourneyView(self, guild_id, member_data['user_id'], username, interaction.user.id, lang)
         await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
         logger.info(f"User {interaction.user} used /whois for '{user}' in guild {interaction.guild.name}")
 
@@ -814,7 +834,7 @@ class CommandsCog(commands.Cog):
             embeds.append(embed)
 
         # Send with pagination view
-        view = PaginationView(embeds, export_members=inactive_members, lang=lang)
+        view = PaginationView(embeds, interaction.user.id, export_members=inactive_members, lang=lang)
         await interaction.followup.send(embed=embeds[0], view=view, ephemeral=not channels_restricted)
 
     @app_commands.command(name="chat-history", description="📈 View extended message activity history (365 days)")
@@ -1066,7 +1086,7 @@ class CommandsCog(commands.Cog):
 
         embed.set_footer(text=t("commands.mystats.footer", lang))
 
-        view = JourneyView(self, guild_id, user_id, username, lang)
+        view = JourneyView(self, guild_id, user_id, username, user_id, lang)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         logger.info(f"User {interaction.user} used /mystats in guild {interaction.guild.name}")
 
@@ -1506,7 +1526,7 @@ class CommandsCog(commands.Cog):
             embed = await asyncio.to_thread(self._create_stats_overview_embed, stats, growth_rate, lang)
 
             # Create interactive view
-            view = UserStatsView(interaction.guild_id, self.db, lang)
+            view = UserStatsView(interaction.guild_id, self.db, interaction.user.id, lang)
 
             await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
             logger.info(f"User {interaction.user} viewed user-stats in guild {interaction.guild.name}")
@@ -1977,7 +1997,7 @@ class CommandsCog(commands.Cog):
     async def _display_search_results(self, interaction: discord.Interaction, results: list, filters: dict, channels_restricted: bool = False, lang: str = 'en'):
         """Display search results with pagination."""
         # Create SearchResultsView
-        view = SearchResultsView(results, filters, per_page=15, lang=lang)
+        view = SearchResultsView(results, filters, interaction.user.id, per_page=15, lang=lang)
         embed = view.create_embed()
         await interaction.followup.send(embed=embed, view=view, ephemeral=not channels_restricted)
 
@@ -2095,14 +2115,13 @@ class CommandsCog(commands.Cog):
         return '\n'.join(lines) if lines else None
 
 
-class SearchResultsView(discord.ui.View):
+class SearchResultsView(OwnerOnlyView):
     """Interactive pagination view for search results."""
 
-    def __init__(self, results: list, filters: dict, per_page: int = 15, lang: str = 'en'):
-        super().__init__(timeout=300)  # 5 minute timeout
+    def __init__(self, results: list, filters: dict, owner_id: int, per_page: int = 15, lang: str = 'en'):
+        super().__init__(owner_id, lang, timeout=300)  # 5 minute timeout
         self.results = results if results else []
         self.filters = filters
-        self.lang = lang
         self.per_page = max(1, per_page)  # Ensure at least 1 per page
         self.current_page = 0
         self.max_page = max(0, (len(self.results) - 1) // self.per_page) if self.results else 0
@@ -2341,22 +2360,22 @@ class SearchResultsView(discord.ui.View):
             await interaction.followup.send(t("commands.search_view.export_failed", self.lang, error=e), ephemeral=True)
 
 
-class JourneyView(discord.ui.View):
+class JourneyView(OwnerOnlyView):
     """A single 🧬 Journey button attached to /whois and /mystats results.
 
     Clicking it posts the member's participation journey as an ephemeral
     followup, leaving the original embed intact. Only added when the viewer is
-    allowed to see the member's profile (admin, or the member themselves).
+    allowed to see the member's profile (admin, or the member themselves), and
+    only that viewer (owner_id) can press it.
     """
 
     def __init__(self, cog: 'CommandsCog', guild_id: int, user_id: int,
-                 username: str, lang: str = 'en'):
-        super().__init__(timeout=300)
+                 username: str, owner_id: int, lang: str = 'en'):
+        super().__init__(owner_id, lang, timeout=300)
         self.cog = cog
         self.guild_id = guild_id
         self.user_id = user_id
         self.username = username
-        self.lang = lang
         self.journey_button.label = t("commands.journey.button", lang)
 
     @discord.ui.button(label="🧬 Journey", style=discord.ButtonStyle.primary)
@@ -2387,14 +2406,13 @@ class JourneyView(discord.ui.View):
             )
 
 
-class UserStatsView(discord.ui.View):
+class UserStatsView(OwnerOnlyView):
     """Interactive view for user statistics dashboard."""
 
-    def __init__(self, guild_id: int, db: DatabaseManager, lang: str = 'en'):
-        super().__init__(timeout=300)  # 5 minute timeout
+    def __init__(self, guild_id: int, db: DatabaseManager, owner_id: int, lang: str = 'en'):
+        super().__init__(owner_id, lang, timeout=300)  # 5 minute timeout
         self.guild_id = guild_id
         self.db = db
-        self.lang = lang
         self.current_view = 'overview'
 
         self.retention_button.label = t("commands.stats_view.btn_retention", lang)
@@ -2412,7 +2430,7 @@ class UserStatsView(discord.ui.View):
         Every sub-panel shares this, so the overview-rebuild logic lives in a
         single place instead of being copy-pasted into each button handler.
         """
-        view = discord.ui.View(timeout=300)
+        view = OwnerOnlyView(self.owner_id, self.lang, timeout=300)
         back_button = discord.ui.Button(
             label=t("commands.stats_view.btn_back", self.lang),
             style=discord.ButtonStyle.secondary
@@ -2431,7 +2449,7 @@ class UserStatsView(discord.ui.View):
 
         cog = interaction.client.get_cog('CommandsCog')
         overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-        overview_view = UserStatsView(self.guild_id, self.db, self.lang)
+        overview_view = UserStatsView(self.guild_id, self.db, self.owner_id, self.lang)
 
         await interaction.edit_original_response(embed=overview_embed, view=overview_view)
 
@@ -2478,7 +2496,7 @@ class UserStatsView(discord.ui.View):
         
         try:
             # Show leaderboard view with period selector
-            view = LeaderboardView(self.guild_id, self.db, self.lang)
+            view = LeaderboardView(self.guild_id, self.db, self.owner_id, self.lang)
             embed = await view.create_leaderboard_embed(days=30)
             
             await interaction.edit_original_response(embed=embed, view=view)
@@ -3040,14 +3058,13 @@ class UserStatsView(discord.ui.View):
         return embed
 
 
-class LeaderboardView(discord.ui.View):
+class LeaderboardView(OwnerOnlyView):
     """Interactive leaderboard view with period selection."""
 
-    def __init__(self, guild_id: int, db: DatabaseManager, lang: str = 'en'):
-        super().__init__(timeout=300)
+    def __init__(self, guild_id: int, db: DatabaseManager, owner_id: int, lang: str = 'en'):
+        super().__init__(owner_id, lang, timeout=300)
         self.guild_id = guild_id
         self.db = db
-        self.lang = lang
         self.current_period = 30
 
         self.back_button.label = t("commands.stats_view.btn_back", lang)
@@ -3134,8 +3151,8 @@ class LeaderboardView(discord.ui.View):
 
             cog = interaction.client.get_cog('CommandsCog')
             overview_embed = await asyncio.to_thread(cog._create_stats_overview_embed, stats, growth_rate, self.lang)
-            overview_view = UserStatsView(self.guild_id, self.db, self.lang)
-            
+            overview_view = UserStatsView(self.guild_id, self.db, self.owner_id, self.lang)
+
             await interaction.edit_original_response(embed=overview_embed, view=overview_view)
             
         except Exception as e:
