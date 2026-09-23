@@ -3239,11 +3239,18 @@ class DatabaseManager:
         """
         Get retention cohort analysis for members.
 
+        Only members who joined after the bot was added count: for earlier
+        joiners only the ones who stayed were ever imported, which would push
+        retention towards 100%. A cohort window that started before the bot
+        arrived therefore holds only its post-arrival part. Cohorts with fewer
+        than _ACTIVATION_MIN_COHORT joiners are left out as too noisy.
+
         Args:
             guild_id: Guild ID
 
         Returns:
-            Dictionary with retention statistics
+            Dictionary with retention statistics per cohort ('30d', '60d', '90d');
+            cohorts below the minimum size are omitted
         """
         try:
             with self.get_connection() as conn:
@@ -3252,18 +3259,22 @@ class DatabaseManager:
                 thirty_days_ago = now - (30 * SECONDS_PER_DAY)
                 sixty_days_ago = now - (60 * SECONDS_PER_DAY)
                 ninety_days_ago = now - (90 * SECONDS_PER_DAY)
-                
+
+                cursor.execute("SELECT added_at FROM guilds WHERE guild_id = ?", (guild_id,))
+                result = cursor.fetchone()
+                bot_added_at = result['added_at'] if result else 0
+
                 cohorts = {}
-                
+
                 # 30-day cohort
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         COUNT(*) as total_joined,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
                         SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ?
-                """, (thirty_days_ago, guild_id, thirty_days_ago))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date >= ?
+                """, (thirty_days_ago, guild_id, thirty_days_ago, bot_added_at))
                 row = cursor.fetchone()
                 cohorts['30d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3279,8 +3290,8 @@ class DatabaseManager:
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
                         SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND join_date < ?
-                """, (thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?
+                """, (thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago, bot_added_at))
                 row = cursor.fetchone()
                 cohorts['60d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3296,8 +3307,8 @@ class DatabaseManager:
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
                         SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND join_date < ?
-                """, (thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?
+                """, (thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago, bot_added_at))
                 row = cursor.fetchone()
                 cohorts['90d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3305,8 +3316,9 @@ class DatabaseManager:
                     'active_recently': row['active_recently'] or 0,
                     'retention_rate': (row['still_active'] / row['total_joined'] * 100) if row['total_joined'] > 0 else 0
                 }
-                
-                return cohorts
+
+                return {period: data for period, data in cohorts.items()
+                        if data['total_joined'] >= self._ACTIVATION_MIN_COHORT}
         except Exception as e:
             logger.error(f"Failed to get retention cohorts for guild {guild_id}: {e}")
             return {}
@@ -3328,8 +3340,8 @@ class DatabaseManager:
         after joining (see _ACTIVATION_ERAS). Each checkpoint's denominator is
         only members old enough to have lived through the end of that era
         ("matured"); bounding the cohort to join_date within the retention
-        window guarantees no era's activity rows have been pruned, so the curve
-        is unbiased. message_activity is the only signal here — a lurker who
+        window and after the bot was added guarantees every era's activity rows
+        were recorded and not yet pruned, so the curve is unbiased. message_activity is the only signal here — a lurker who
         never posts reads as not activated, by design.
 
         Returns:
@@ -3347,12 +3359,15 @@ class DatabaseManager:
                 now = int(datetime.now(timezone.utc).timestamp())
 
                 cursor.execute(
-                    "SELECT message_retention_days FROM guilds WHERE guild_id = ?",
+                    "SELECT message_retention_days, added_at FROM guilds WHERE guild_id = ?",
                     (guild_id,),
                 )
                 row = cursor.fetchone()
                 retention_days = (row['message_retention_days'] if row and row['message_retention_days'] else 365)
-                cutoff = now - retention_days * SECONDS_PER_DAY
+                # Also start no earlier than the bot's arrival: a member who joined
+                # before it has no message data for their first days and would
+                # read as never having posted.
+                cutoff = max(now - retention_days * SECONDS_PER_DAY, row['added_at'] if row else 0)
 
                 # Cohort: joiners inside the retention window. join_date floored to
                 # its UTC day-start so it lines up with message_activity.date
