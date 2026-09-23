@@ -15,19 +15,19 @@ logger = logging.getLogger(__name__)
 class BotAdminRoleModal(discord.ui.Modal):
     """Modal for setting the bot admin role name."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
 
         # Get current role name from database
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         lang = self.lang
         super().__init__(title=t("admin.role.bot_admin_modal_title", lang))
@@ -96,19 +96,19 @@ class BotAdminRoleModal(discord.ui.Modal):
 class UserRoleModal(discord.ui.Modal):
     """Modal for setting the user role name."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
 
         # Get current role name from database
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         lang = self.lang
         super().__init__(title=t("admin.role.user_modal_title", lang))
@@ -177,17 +177,17 @@ class UserRoleModal(discord.ui.Modal):
 class TrackOnlyRolesModal(discord.ui.Modal):
     """Modal for setting which roles to track (optional)."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         super().__init__(title=t("admin.track_roles.modal_title", self.lang))
 

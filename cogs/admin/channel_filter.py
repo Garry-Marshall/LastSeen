@@ -14,17 +14,18 @@ logger = logging.getLogger(__name__)
 class AllowedChannelsModal(discord.ui.Modal):
     """Modal for setting which channels can use commands (optional)."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
-        self.lang = guild_language(db.get_guild_config(guild_id))
+        self.lang = guild_language(guild_config)
         super().__init__(title=t("admin.allowed_channels.modal_title", self.lang))
 
         self.add_item(discord.ui.TextDisplay(t("admin.allowed_channels.info", self.lang)))

@@ -1,5 +1,6 @@
 """Quick Setup wizard for first-time configuration."""
 
+import asyncio
 import discord
 import logging
 from typing import Optional
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class QuickSetupView(discord.ui.View):
     """Interactive quick setup wizard with paginated steps."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int, config):
+    def __init__(self, db: DatabaseManager, guild_id: int, config, guild_config: dict | None):
         """
         Initialize quick setup view.
 
@@ -24,12 +25,15 @@ class QuickSetupView(discord.ui.View):
             db: Database manager
             guild_id: Discord guild ID
             config: Bot configuration
+            guild_config: The guild's config row, read by the caller off the event
+                loop; refreshed via _refresh_config as the wizard moves between steps
         """
         super().__init__(timeout=600)  # 10 minute timeout for setup
         self.db = db
         self.guild_id = guild_id
         self.config = config
-        self.lang = guild_language(db.get_guild_config(guild_id))
+        self.guild_config = guild_config
+        self.lang = guild_language(guild_config)
         self.current_step = 0
         self.max_steps = 5
 
@@ -112,7 +116,7 @@ class QuickSetupView(discord.ui.View):
         """Step 5: Setup summary."""
         embed = create_embed(t("admin.quick_setup.step5_title", self.lang), discord.Color.green())
 
-        config = self.db.get_guild_config(self.guild_id)
+        config = self.guild_config
         if config:
             summary = t(
                 "admin.quick_setup.step5_summary", self.lang,
@@ -130,31 +134,37 @@ class QuickSetupView(discord.ui.View):
 
     def _get_current_channel(self) -> str:
         """Get current notification channel setting."""
-        config = self.db.get_guild_config(self.guild_id)
+        config = self.guild_config
         if config and config.get('notification_channel_id'):
             return f"<#{config['notification_channel_id']}>"
         return t("common.not_set", self.lang)
 
     def _get_current_inactive_days(self) -> int:
         """Get current inactive days setting."""
-        config = self.db.get_guild_config(self.guild_id)
+        config = self.guild_config
         return config['inactive_days'] if config else 10
 
     def _get_current_admin_role(self) -> str:
         """Get current admin role setting."""
-        config = self.db.get_guild_config(self.guild_id)
+        config = self.guild_config
         return config.get('bot_admin_role_name', 'LastSeen Admin') if config else 'LastSeen Admin'
 
     def _get_current_timezone(self) -> str:
         """Get current timezone setting."""
-        config = self.db.get_guild_config(self.guild_id)
+        config = self.guild_config
         return config.get('timezone', 'UTC') if config else 'UTC'
+
+    async def _refresh_config(self) -> None:
+        """Re-read the guild config off the event loop: a step's modal may have
+        changed a setting since the wizard last showed it."""
+        self.guild_config = await asyncio.to_thread(self.db.get_guild_config, self.guild_id)
 
     @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.secondary, row=0)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Go to previous step."""
         self.current_step = max(0, self.current_step - 1)
         self._update_buttons()
+        await self._refresh_config()
         embed = self._get_step_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -169,6 +179,7 @@ class QuickSetupView(discord.ui.View):
         else:
             self.current_step = min(self.max_steps - 1, self.current_step + 1)
             self._update_buttons()
+            await self._refresh_config()
             embed = self._get_step_embed()
             await interaction.response.edit_message(embed=embed, view=self)
 
@@ -177,6 +188,7 @@ class QuickSetupView(discord.ui.View):
         """Skip optional step."""
         self.current_step = min(self.max_steps - 1, self.current_step + 1)
         self._update_buttons()
+        await self._refresh_config()
         embed = self._get_step_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
@@ -184,18 +196,19 @@ class QuickSetupView(discord.ui.View):
     async def configure_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Open configuration modal for current step."""
         modal = None
-        
+        await self._refresh_config()  # the modal prefills from the current settings
+
         if self.current_step == 0:
-            modal = ChannelModal(self.db, self.guild_id)
+            modal = ChannelModal(self.db, self.guild_id, self.guild_config)
             self.completed['channel'] = True
         elif self.current_step == 1:
-            modal = InactiveDaysModal(self.db, self.guild_id)
+            modal = InactiveDaysModal(self.db, self.guild_id, self.guild_config)
             self.completed['inactive_days'] = True
         elif self.current_step == 2:
-            modal = BotAdminRoleModal(self.db, self.guild_id)
+            modal = BotAdminRoleModal(self.db, self.guild_id, self.guild_config)
             self.completed['admin_role'] = True
         elif self.current_step == 3:
-            modal = TimezoneModal(self.db, self.guild_id)
+            modal = TimezoneModal(self.db, self.guild_id, self.guild_config)
             self.completed['timezone'] = True
         
         if modal:

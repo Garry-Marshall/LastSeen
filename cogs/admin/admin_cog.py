@@ -49,14 +49,15 @@ class AdminCog(commands.Cog):
         if not await check_admin_permission(interaction, self.db):
             return
 
-        lang = guild_language(await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id))
+        guild_config = await asyncio.to_thread(self.db.get_guild_config, interaction.guild_id)
+        lang = guild_language(guild_config)
 
         # Create embed
         embed = create_embed(t("admin.config.title", lang), discord.Color.gold())
         embed.description = t("admin.config.description", lang)
 
         # Create view
-        view = ConfigView(self.db, interaction.guild_id, self.config)
+        view = ConfigView(self.db, interaction.guild_id, self.config, guild_config)
 
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         logger.info(f"User {interaction.user} opened config panel in guild {interaction.guild.name}")

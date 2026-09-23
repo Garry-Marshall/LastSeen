@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class ConfigView(discord.ui.View):
     """Interactive view for bot configuration."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int, config):
+    def __init__(self, db: DatabaseManager, guild_id: int, config, guild_config: dict | None):
         """
         Initialize config view.
 
@@ -29,14 +29,14 @@ class ConfigView(discord.ui.View):
             db: Database manager
             guild_id: Discord guild ID
             config: Bot configuration
+            guild_config: The guild's config row, read by the caller off the event loop
+                (sets the toggle button colour and the language)
         """
         super().__init__(timeout=300)  # 5 minute timeout
         self.db = db
         self.guild_id = guild_id
         self.config = config
 
-        # Get guild config to set toggle button color
-        guild_config = self.db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         lang = self.lang
 
@@ -62,6 +62,11 @@ class ConfigView(discord.ui.View):
             state=t('common.on' if user_role_required else 'common.off', lang)
         )
 
+    async def _guild_config(self) -> dict | None:
+        """The guild's current config, read off the event loop (the dialogs
+        prefill from it, so it is read fresh each time one opens)."""
+        return await asyncio.to_thread(self.db.get_guild_config, self.guild_id)
+
 
     @discord.ui.button(label="Set Notification Channel", style=discord.ButtonStyle.primary, emoji="📢", row=0)
     async def set_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -70,7 +75,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for channel input
-        modal = ChannelModal(self.db, self.guild_id)
+        modal = ChannelModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Set Inactive Days", style=discord.ButtonStyle.primary, emoji="📅", row=0)
@@ -80,7 +85,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for days input
-        modal = InactiveDaysModal(self.db, self.guild_id)
+        modal = InactiveDaysModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Set Timezone", style=discord.ButtonStyle.primary, emoji="🌍", row=0)
@@ -90,7 +95,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for timezone input
-        modal = TimezoneModal(self.db, self.guild_id)
+        modal = TimezoneModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Set Language", style=discord.ButtonStyle.primary, emoji="🌐", row=0)
@@ -99,7 +104,7 @@ class ConfigView(discord.ui.View):
         if not await check_admin_permission(interaction, self.db, self.guild_id):
             return
 
-        view = LanguageSelectView(self.db, self.guild_id)
+        view = LanguageSelectView(self.db, self.guild_id, await self._guild_config())
         embed = create_embed(t("admin.language.prompt_title", self.lang), discord.Color.blurple())
         embed.description = t("admin.language.prompt_desc", self.lang)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
@@ -111,7 +116,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for bot admin role input
-        modal = BotAdminRoleModal(self.db, self.guild_id)
+        modal = BotAdminRoleModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Set User Role", style=discord.ButtonStyle.primary, emoji="👤", row=1)
@@ -121,7 +126,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for user role input
-        modal = UserRoleModal(self.db, self.guild_id)
+        modal = UserRoleModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="User Role Required = OFF", emoji="🔐", row=1)
@@ -181,7 +186,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for track only roles input
-        modal = TrackOnlyRolesModal(self.db, self.guild_id)
+        modal = TrackOnlyRolesModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Set Allowed Channels", style=discord.ButtonStyle.primary, emoji="📝", row=2)
@@ -191,7 +196,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for allowed channels input
-        modal = AllowedChannelsModal(self.db, self.guild_id)
+        modal = AllowedChannelsModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Configure Reports", style=discord.ButtonStyle.primary, emoji="📊", row=3)
@@ -201,7 +206,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create modal for reports configuration
-        modal = ReportsConfigModal(self.db, self.guild_id)
+        modal = ReportsConfigModal(self.db, self.guild_id, await self._guild_config())
         await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="Disable Reports", style=discord.ButtonStyle.danger, emoji="⏹️", row=3)
@@ -222,7 +227,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Show confirmation dialog
-        confirmation_view = DisableReportsConfirmView(self.db, self.guild_id)
+        confirmation_view = DisableReportsConfirmView(self.db, self.guild_id, guild_config)
         embed = create_embed(t("admin.config_view.confirm_disable_title", lang), discord.Color.orange())
         embed.description = t("admin.config_view.confirm_disable_desc", lang)
 
@@ -239,7 +244,7 @@ class ConfigView(discord.ui.View):
             return
 
         # Create wizard view
-        wizard_view = QuickSetupView(self.db, self.guild_id, self.config)
+        wizard_view = QuickSetupView(self.db, self.guild_id, self.config, await self._guild_config())
         embed = wizard_view._get_step_embed()
         
         await interaction.response.send_message(
@@ -389,11 +394,11 @@ class ConfigView(discord.ui.View):
 class DisableReportsConfirmView(discord.ui.View):
     """Confirmation view for disabling scheduled reports."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         super().__init__(timeout=60)
         self.db = db
         self.guild_id = guild_id
-        self.lang = guild_language(db.get_guild_config(guild_id))
+        self.lang = guild_language(guild_config)
         self.confirm_disable.label = t("admin.config_view.btn_confirm_disable", self.lang)
         self.cancel_disable.label = t("common.cancel", self.lang)
 
@@ -434,11 +439,10 @@ class LanguageSelectView(discord.ui.View):
     locales/<code>.json file makes it appear here with no code change.
     """
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         super().__init__(timeout=120)
         self.db = db
         self.guild_id = guild_id
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         current = guild_config.get('language', 'en') if guild_config else 'en'
 

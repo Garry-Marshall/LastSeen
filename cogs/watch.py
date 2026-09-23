@@ -144,7 +144,7 @@ class WatchCog(commands.Cog):
             return
         removed = await asyncio.to_thread(self.db.remove_dm_watches_for_recipient, member.guild.id, member.id)
         if removed:
-            self._refresh_watch_guilds()
+            await asyncio.to_thread(self._refresh_watch_guilds)
             logger.info(f"Removed {removed} DM watch(es) delivering to {member} ({member.id}), "
                         f"who left guild {member.guild.name}")
 
@@ -253,7 +253,7 @@ class WatchCog(commands.Cog):
                 embed=create_error_embed(t('watch.err_generic', lang), lang), ephemeral=True)
             return
 
-        self._refresh_watch_guilds()
+        await asyncio.to_thread(self._refresh_watch_guilds)
 
         # Reconfiguring keeps the same underlying watch id (add_watch upserts), so a
         # stale online_return cooldown from the previous configuration — e.g. a fire
@@ -525,7 +525,7 @@ class WatchCog(commands.Cog):
         for w in matched:
             if await asyncio.to_thread(self.db.remove_watch, interaction.guild_id, w['id']):
                 removed += 1
-        self._refresh_watch_guilds()
+        await asyncio.to_thread(self._refresh_watch_guilds)
 
         if by_num:
             msg = t('watch.removed', lang, id=int(raw))

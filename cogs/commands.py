@@ -413,14 +413,14 @@ class CommandsCog(commands.Cog):
         # Account creation date - admin only
         if is_admin and member and hasattr(member, 'created_at'):
             try:
-                account_created = format_timestamp(int(member.created_at.timestamp()), 'F', guild_id, self.db, lang)
+                account_created = format_timestamp(int(member.created_at.timestamp()), 'F', lang)
                 embed.description += t("commands.whois.account_created", lang, date=account_created)
             except (AttributeError, ValueError, OSError):
                 pass
 
         # Join info with position
         if member_data['join_date']:
-            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db, lang)
+            join_str = format_timestamp(member_data['join_date'], 'F', lang)
             join_position = member_data.get('join_position')
             if join_position:
                 embed.description += t("commands.whois.joined_with_position", lang, date=join_str, position=join_position)
@@ -473,7 +473,7 @@ class CommandsCog(commands.Cog):
             if hasattr(member, 'status') and member.status != discord.Status.offline:
                 embed.description += t("commands.whois.last_seen_online", lang)
             elif member_data['last_seen'] and member_data['last_seen'] != 0:
-                embed.description += t("commands.whois.last_seen", lang, date=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang))
+                embed.description += t("commands.whois.last_seen", lang, date=format_timestamp(member_data['last_seen'], 'R', lang))
             else:
                 embed.description += t("commands.whois.last_seen_unavailable", lang)
         else:
@@ -482,7 +482,7 @@ class CommandsCog(commands.Cog):
         # Boosting status
         if member and hasattr(member, 'premium_since') and member.premium_since:
             try:
-                boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F', guild_id, self.db, lang)
+                boost_date = format_timestamp(int(member.premium_since.timestamp()), 'F', lang)
                 embed.description += t("commands.whois.boosting_yes", lang, date=boost_date)
             except (AttributeError, ValueError, OSError):
                 pass
@@ -614,12 +614,12 @@ class CommandsCog(commands.Cog):
             if member_data['last_seen'] and member_data['last_seen'] != 0:
                 embed.add_field(
                     name=t("commands.lastseen.field_last_seen", lang),
-                    value=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang),
+                    value=format_timestamp(member_data['last_seen'], 'R', lang),
                     inline=False
                 )
                 embed.add_field(
                     name=t("commands.lastseen.field_exact_time", lang),
-                    value=format_timestamp(member_data['last_seen'], 'F', guild_id, self.db, lang),
+                    value=format_timestamp(member_data['last_seen'], 'F', lang),
                     inline=False
                 )
             else:
@@ -737,7 +737,7 @@ class CommandsCog(commands.Cog):
             # Format action with emoji
             action_emoji = "➕" if action == "added" else "➖"
             action_text = t("commands.role_history.added", lang) if action == "added" else t("commands.role_history.removed", lang)
-            time_str = format_timestamp(timestamp, 'R', guild_id, self.db, lang)
+            time_str = format_timestamp(timestamp, 'R', lang)
 
             embed.description += t("commands.role_history.line", lang, emoji=action_emoji, action=action_text, role=escaped_role_name, time=time_str)
 
@@ -827,7 +827,7 @@ class CommandsCog(commands.Cog):
                 # Create a field for each member
                 username = member_data['username'] if member_data['username'] else t("common.unknown", lang)
                 nickname = member_data['nickname'] if member_data['nickname'] else t("common.not_set", lang)
-                last_seen = format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang) if member_data['last_seen'] else t("common.never", lang)
+                last_seen = format_timestamp(member_data['last_seen'], 'R', lang) if member_data['last_seen'] else t("common.never", lang)
 
                 member_info = t("commands.inactive.member_info", lang, nickname=nickname, last_seen=last_seen)
                 embed.add_field(name=username, value=member_info, inline=False)
@@ -1018,7 +1018,7 @@ class CommandsCog(commands.Cog):
 
         # ===== MEMBERSHIP SECTION =====
         if member_data['join_date']:
-            join_str = format_timestamp(member_data['join_date'], 'F', guild_id, self.db, lang)
+            join_str = format_timestamp(member_data['join_date'], 'F', lang)
             join_position = member_data.get('join_position')
             if join_position:
                 embed.description += t("commands.whois.joined_with_position", lang, date=join_str, position=join_position)
@@ -1045,7 +1045,7 @@ class CommandsCog(commands.Cog):
         if member and member.status != discord.Status.offline:
             embed.description += t("commands.whois.last_seen_online", lang)
         elif member_data['last_seen'] and member_data['last_seen'] != 0:
-            embed.description += t("commands.whois.last_seen", lang, date=format_timestamp(member_data['last_seen'], 'R', guild_id, self.db, lang))
+            embed.description += t("commands.whois.last_seen", lang, date=format_timestamp(member_data['last_seen'], 'R', lang))
         else:
             embed.description += t("commands.whois.last_seen_unavailable", lang)
 
@@ -1639,7 +1639,7 @@ class CommandsCog(commands.Cog):
         return embed
 
     def _create_journey_embed(self, journey: dict, member, username: str,
-                              guild_id: int, lang: str = 'en') -> discord.Embed:
+                              lang: str = 'en') -> discord.Embed:
         """Render a member's participation journey (from get_member_journey).
 
         Milestones and durations built entirely from message-activity rollups
@@ -1650,14 +1650,14 @@ class CommandsCog(commands.Cog):
 
         if journey['join_date']:
             embed.description += t("commands.journey.joined", lang,
-                                   date=format_timestamp(journey['join_date'], 'R', guild_id, self.db, lang))
+                                   date=format_timestamp(journey['join_date'], 'R', lang))
 
         if journey['first_active']:
             # "Same day" when the first message lands on the UTC day they joined.
             same_day = (journey['join_date']
                         and journey['first_active'] // 86400 == journey['join_date'] // 86400)
             when = (t("commands.journey.same_day", lang) if same_day
-                    else format_timestamp(journey['first_active'], 'R', guild_id, self.db, lang))
+                    else format_timestamp(journey['first_active'], 'R', lang))
             embed.description += t("commands.journey.first_activity", lang, when=when)
             embed.description += t("commands.journey.active_days", lang, days=journey['active_days'])
             embed.description += t("commands.journey.messages", lang, count=journey['total_messages'])
@@ -1672,13 +1672,13 @@ class CommandsCog(commands.Cog):
 
         if journey['last_active']:
             embed.description += t("commands.journey.last_message", lang,
-                                   when=format_timestamp(journey['last_active'], 'R', guild_id, self.db, lang))
+                                   when=format_timestamp(journey['last_active'], 'R', lang))
 
         if member and member.status != discord.Status.offline:
             embed.description += t("commands.journey.last_seen_online", lang)
         elif journey['last_seen']:
             embed.description += t("commands.journey.last_seen", lang,
-                                   when=format_timestamp(journey['last_seen'], 'R', guild_id, self.db, lang))
+                                   when=format_timestamp(journey['last_seen'], 'R', lang))
 
         embed.set_footer(text=t("commands.journey.footer", lang))
         return embed
@@ -2416,7 +2416,7 @@ class JourneyView(OwnerOnlyView):
                 return
             member = interaction.guild.get_member(self.user_id)
             embed = self.cog._create_journey_embed(
-                journey, member, self.username, self.guild_id, self.lang
+                journey, member, self.username, self.lang
             )
             # Show the member's avatar next to their name
             avatar_user = member or self.cog.bot.get_user(self.user_id)
@@ -2912,7 +2912,7 @@ class UserStatsView(OwnerOnlyView):
                 when = t("commands.stats_view.participation_online_now", lang)
             elif m['last_seen']:
                 when = t("commands.stats_view.participation_last_seen", lang,
-                         when=format_timestamp(m['last_seen'], 'R', self.guild_id, self.db, lang))
+                         when=format_timestamp(m['last_seen'], 'R', lang))
             else:
                 when = t("commands.stats_view.participation_never_seen", lang)
             lurker_lines.append(t("commands.stats_view.participation_line", lang, name=display_name(m), detail=when))
@@ -2929,7 +2929,7 @@ class UserStatsView(OwnerOnlyView):
         for m in ghosts:
             if m['last_seen']:
                 when = t("commands.stats_view.participation_last_seen", lang,
-                         when=format_timestamp(m['last_seen'], 'R', self.guild_id, self.db, lang))
+                         when=format_timestamp(m['last_seen'], 'R', lang))
             else:
                 when = t("commands.stats_view.participation_never_seen", lang)
             ghost_lines.append(t("commands.stats_view.participation_line", lang, name=display_name(m), detail=when))
@@ -2948,7 +2948,7 @@ class UserStatsView(OwnerOnlyView):
             for r in returns:
                 display = r['nickname'] if r.get('nickname') else r['username']
                 days = r['away_seconds'] // 86400
-                returned = format_timestamp(r['returned_at'], 'R', self.guild_id, self.db, lang)
+                returned = format_timestamp(r['returned_at'], 'R', lang)
                 return_lines.append(t("commands.stats_view.returns_line", lang, name=display, days=days, returned=returned))
             if returns_count > len(returns):
                 return_lines.append(t("commands.stats_view.returns_more", lang, count=returns_count - len(returns)))

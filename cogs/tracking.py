@@ -207,7 +207,7 @@ class TrackingCog(commands.Cog):
 
         try:
             # Check if already initialized
-            if not force and self.db.guild_positions_initialized(guild_id):
+            if not force and await asyncio.to_thread(self.db.guild_positions_initialized, guild_id):
                 logger.info(f"Member positions already initialized for guild {guild.name}")
                 return True
 
@@ -236,7 +236,7 @@ class TrackingCog(commands.Cog):
 
             updated_count = await asyncio.to_thread(assign_positions)
 
-            if self.db.mark_positions_initialized(guild_id):
+            if await asyncio.to_thread(self.db.mark_positions_initialized, guild_id):
                 logger.info(f"Initialized join positions for {updated_count} members in {guild.name}")
                 return True
             else:
@@ -558,12 +558,8 @@ class TrackingCog(commands.Cog):
         """
         logger.info(f"Joined guild: {guild.name} (ID: {guild.id})")
 
-        # Add guild to database
-        self.db.add_guild(
-            guild_id=guild.id,
-            guild_name=guild.name,
-            inactive_days=self.config.default_inactive_days
-        )
+        # Add guild to database (before enumeration, which needs the guild row)
+        await asyncio.to_thread(self.db.add_guild, guild.id, guild.name, self.config.default_inactive_days)
 
         # Process members in background to avoid blocking the event loop
         self._start_member_enumeration(guild)
@@ -584,7 +580,8 @@ class TrackingCog(commands.Cog):
         """
         logger.info(f"Bot left guild: {guild.name} ({guild.id}). Cleaning up database...")
 
-        success = self.db.remove_guild_data(guild.id)
+        # Off the loop: the cascade delete of a large guild can take a while.
+        success = await asyncio.to_thread(self.db.remove_guild_data, guild.id)
 
         # Allow a future rejoin to re-enumerate this guild's members.
         self._enumerating.discard(guild.id)
@@ -631,7 +628,7 @@ class TrackingCog(commands.Cog):
         # Check if guild name changed
         if before.name != after.name:
             logger.info(f"Guild name changed from '{before.name}' to '{after.name}' (ID: {after.id})")
-            self.db.update_guild_name(after.id, after.name)
+            await asyncio.to_thread(self.db.update_guild_name, after.id, after.name)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -654,40 +651,44 @@ class TrackingCog(commands.Cog):
         user_id = member.id
         roles = get_member_roles(member)
         join_date = int(member.joined_at.timestamp()) if member.joined_at else int(datetime.now(timezone.utc).timestamp())
+        nickname = member.display_name if member.display_name != str(member) else None
+        username = str(member)
+        is_online = member.status != discord.Status.offline
 
-        # Check if member already exists (rejoining)
-        if self.db.member_exists(guild_id, user_id):
-            logger.info(f"Member {member} is rejoining guild {member.guild.name}")
-            # Reactivate with the new join date and position. The prior
-            # left_date is kept, so the departure and this rejoin both count.
-            nickname = member.display_name if member.display_name != str(member) else None
-            self.db.rejoin_member(guild_id, user_id, str(member), nickname, join_date, roles,
-                                  member.status != discord.Status.offline)
-        else:
+        def record_join():
+            """All DB work for the join, off the event loop."""
+            # Check if member already exists (rejoining)
+            if self.db.member_exists(guild_id, user_id):
+                logger.info(f"Member {username} is rejoining guild {guild_id}")
+                # Reactivate with the new join date and position. The prior
+                # left_date is kept, so the departure and this rejoin both count.
+                self.db.rejoin_member(guild_id, user_id, username, nickname, join_date, roles, is_online)
+                return
+
             # Add new member
-            nickname = member.display_name if member.display_name != str(member) else None
             self.db.add_member(
                 guild_id=guild_id,
                 user_id=user_id,
-                username=str(member),
+                username=username,
                 nickname=nickname,
                 join_date=join_date,
                 roles=roles
             )
-            
+
             # Check their initial status and set last_seen accordingly
-            if member.status != discord.Status.offline:
+            if is_online:
                 # Member joined while online - set last_seen to 0
                 self.db.update_last_seen(guild_id, user_id, 0)
-                logger.debug(f"New member {member} joined while {member.status} - set last_seen to 0")
             # If offline, leave as NULL (never seen online yet)
-            
-            # If positions are already initialized, assign position to this new member
+
+            # If positions are already initialized, assign this member's position
+            # (1 + members who joined earlier; an indexed count, not a full load)
             if self.db.guild_positions_initialized(guild_id):
-                # Get total member count (approximate position for new member)
-                total_members = len(self.db.get_all_guild_members(guild_id))
-                self.db.set_member_join_position(guild_id, user_id, total_members)
-                logger.debug(f"Assigned join position {total_members} to new member {member}")
+                position = self.db.calculate_join_position(guild_id, join_date)
+                if position is not None:
+                    self.db.set_member_join_position(guild_id, user_id, position)
+
+        await asyncio.to_thread(record_join)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -705,25 +706,28 @@ class TrackingCog(commands.Cog):
 
         guild_id = member.guild.id
         user_id = member.id
+        current_time = int(datetime.now(timezone.utc).timestamp())
 
-        # Get member data from database
-        member_data = self.db.get_member(guild_id, user_id)
+        def record_leave():
+            """All DB work for the departure, off the event loop.
+            Returns (member_data, guild_config); member_data None if untracked."""
+            member_data = self.db.get_member(guild_id, user_id)
+            if not member_data:
+                return None, None
+            # Mark member as inactive
+            self.db.set_member_inactive(guild_id, user_id)
+            # Update last_seen to now (current time when they left)
+            self.db.update_last_seen(guild_id, user_id, current_time)
+            # Record when they left so departure reports can find them
+            self.db.set_member_left_date(guild_id, user_id, current_time)
+            return member_data, self.db.get_guild_config(guild_id)
+
+        member_data, guild_config = await asyncio.to_thread(record_leave)
         if not member_data:
             logger.warning(f"Member {user_id} not found in database for guild {guild_id}")
             return
 
-        # Mark member as inactive
-        self.db.set_member_inactive(guild_id, user_id)
-
-        # Update last_seen to now (current time when they left)
-        current_time = int(datetime.now(timezone.utc).timestamp())
-        self.db.update_last_seen(guild_id, user_id, current_time)
-
-        # Record when they left so departure reports can find them
-        self.db.set_member_left_date(guild_id, user_id, current_time)
-
-        # Get guild config for notification channel
-        guild_config = self.db.get_guild_config(guild_id)
+        # Notification channel
         if not guild_config or not guild_config['notification_channel_id']:
             logger.info(f"No notification channel set for guild {member.guild.name}")
             return
@@ -816,54 +820,49 @@ class TrackingCog(commands.Cog):
         guild_id = after.guild.id
         user_id = after.id
 
-        # Ensure member exists in database
-        if self._ensure_member_exists(after):
-            return  # Member was just added, no need to check for updates
-
-        # If _ensure_member_exists returned False but the member still isn't in the
-        # DB, it means they're untracked or the guild isn't registered — skip.
-        if not self.db.member_exists(guild_id, user_id):
-            return
-
-        # Check for display name change (includes server nickname and global display name)
+        # Read everything needed from the discord objects here on the loop;
+        # the DB work below runs in a worker thread.
+        # Display name change (includes server nickname and global display name)
         before_display = before.display_name if before.display_name != str(before) else None
         after_display = after.display_name if after.display_name != str(after) else None
+        username_changed = str(before) != str(after)
+        new_username = str(after)
+        roles_changed = before.roles != after.roles
+        roles = get_member_roles(after) if roles_changed else None
+        # Individual role changes for history
+        before_role_names = {role.name for role in before.roles if role.name}  # Filter out None
+        after_role_names = {role.name for role in after.roles if role.name}
+        valid = lambda name: name and name != "@everyone" and name.strip()  # Validate role name
+        added_roles = [n for n in after_role_names - before_role_names if valid(n)]
+        removed_roles = [n for n in before_role_names - after_role_names if valid(n)]
 
-        if before_display != after_display:
-            logger.debug(f"Display name changed: {before_display} -> {after_display} for {after}")
-            # Track nickname in history BEFORE updating the database
-            self.db.update_nickname_history(guild_id, user_id, before_display, after_display)
-            # Update the nickname in database
-            self.db.update_member_nickname(guild_id, user_id, after_display)
+        def record_update():
+            # Ensure member exists in database
+            if self._ensure_member_exists(after):
+                return  # Member was just added, no need to check for updates
 
-        # Check for username change (display name)
-        if str(before) != str(after):
-            logger.debug(f"Username changed: {before} -> {after}")
-            self.db.update_member_username(guild_id, user_id, str(after))
+            # If _ensure_member_exists returned False but the member still isn't in the
+            # DB, it means they're untracked or the guild isn't registered — skip.
+            if not self.db.member_exists(guild_id, user_id):
+                return
 
-        # Check for role changes
-        if before.roles != after.roles:
-            roles = get_member_roles(after)
-            logger.debug(f"Roles changed for {after}: {roles}")
-            self.db.update_member_roles(guild_id, user_id, roles)
-            
-            # Track individual role changes for history
-            before_role_names = {role.name for role in before.roles if role.name}  # Filter out None
-            after_role_names = {role.name for role in after.roles if role.name}  # Filter out None
-            
-            # Detect added roles
-            added_roles = after_role_names - before_role_names
-            for role_name in added_roles:
-                if role_name and role_name != "@everyone" and role_name.strip():  # Validate role name
+            if before_display != after_display:
+                # Track nickname in history BEFORE updating the database
+                self.db.update_nickname_history(guild_id, user_id, before_display, after_display)
+                # Update the nickname in database
+                self.db.update_member_nickname(guild_id, user_id, after_display)
+
+            if username_changed:
+                self.db.update_member_username(guild_id, user_id, new_username)
+
+            if roles_changed:
+                self.db.update_member_roles(guild_id, user_id, roles)
+                for role_name in added_roles:
                     self.db.record_role_change(guild_id, user_id, role_name, "added")
-                    logger.debug(f"Recorded: Role '{role_name}' added to {after}")
-            
-            # Detect removed roles
-            removed_roles = before_role_names - after_role_names
-            for role_name in removed_roles:
-                if role_name and role_name != "@everyone" and role_name.strip():  # Validate role name
+                for role_name in removed_roles:
                     self.db.record_role_change(guild_id, user_id, role_name, "removed")
-                    logger.debug(f"Recorded: Role '{role_name}' removed from {after}")
+
+        await asyncio.to_thread(record_update)
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User):
@@ -1437,7 +1436,7 @@ class TrackingCog(commands.Cog):
             import json
             import pytz
             
-            guilds_with_reports = self.db.get_guilds_with_reports_enabled()
+            guilds_with_reports = await asyncio.to_thread(self.db.get_guilds_with_reports_enabled)
             
             if not guilds_with_reports:
                 return
@@ -1526,7 +1525,7 @@ class TrackingCog(commands.Cog):
                             # otherwise retry every hour until midnight. A genuine miss
                             # (bot down at the scheduled hour) still catches up, since
                             # no attempt was recorded then.
-                            self.db.update_last_report_time(guild_id, 'weekly')
+                            await asyncio.to_thread(self.db.update_last_report_time, guild_id, 'weekly')
                             if not success:
                                 logger.warning(f"Weekly report for guild {guild.name} failed to send; will retry at next scheduled occurrence")
                     
@@ -1549,7 +1548,7 @@ class TrackingCog(commands.Cog):
                             logger.info(f"Sending monthly report for guild {guild.name} at {current_hour:02d}:00 {guild_tz_str}")
                             success = await send_scheduled_report(guild, channel_id, self.db, report_types, 30)
                             # Mark as attempted even on failure — see the weekly note above.
-                            self.db.update_last_report_time(guild_id, 'monthly')
+                            await asyncio.to_thread(self.db.update_last_report_time, guild_id, 'monthly')
                             if not success:
                                 logger.warning(f"Monthly report for guild {guild.name} failed to send; will retry at next scheduled occurrence")
                 

@@ -15,17 +15,17 @@ logger = logging.getLogger(__name__)
 class RetentionDaysModal(discord.ui.Modal):
     """Modal for setting message activity retention period."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         lang = self.lang
         super().__init__(title=t("channel_config.retention.modal_title", lang))
@@ -81,17 +81,17 @@ class RetentionDaysModal(discord.ui.Modal):
 class TimezoneModal(discord.ui.Modal):
     """Modal for setting the server timezone."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         lang = self.lang
         super().__init__(title=t("channel_config.timezone.modal_title", lang))
@@ -157,17 +157,17 @@ class TimezoneModal(discord.ui.Modal):
 class ReportsConfigModal(discord.ui.Modal):
     """Modal for configuring scheduled reports."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         lang = self.lang
         super().__init__(title=t("channel_config.reports.modal_title", lang))
@@ -423,17 +423,17 @@ class ReportsConfigModal(discord.ui.Modal):
 class ChannelModal(discord.ui.Modal):
     """Modal for setting the notification channel."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         super().__init__(title=t("channel_config.channel.modal_title", self.lang))
 
@@ -533,17 +533,17 @@ class ChannelModal(discord.ui.Modal):
 class InactiveDaysModal(discord.ui.Modal):
     """Modal for setting the inactive days threshold."""
 
-    def __init__(self, db: DatabaseManager, guild_id: int):
+    def __init__(self, db: DatabaseManager, guild_id: int, guild_config: dict | None):
         """
         Initialize modal.
 
         Args:
             db: Database manager
             guild_id: Discord guild ID
+            guild_config: The guild's config row, read by the caller off the event loop
         """
         self.db = db
         self.guild_id = guild_id
-        guild_config = db.get_guild_config(guild_id)
         self.lang = guild_language(guild_config)
         super().__init__(title=t("channel_config.inactive_days.modal_title", self.lang))
 
