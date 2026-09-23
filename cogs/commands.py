@@ -1517,7 +1517,7 @@ class CommandsCog(commands.Cog):
                 return
 
             # Get previous month stats for comparison
-            prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, interaction.guild_id, days=60)
+            prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, interaction.guild_id, days=30)
             growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
             # Add guild_id to stats for distribution chart
@@ -1548,12 +1548,15 @@ class CommandsCog(commands.Cog):
         growth_text = t("commands.user_stats.vs_last_month", lang, indicator=growth_indicator, pct=abs(growth_rate)) if growth_rate != 0 else t("commands.user_stats.no_change", lang)
 
         # Member counts section
-        active_pct = (stats['active_30d'] / stats['total_members'] * 100) if stats['total_members'] > 0 else 0
-        inactive_pct = (stats['inactive_30d'] / stats['total_members'] * 100) if stats['total_members'] > 0 else 0
+        # Current members only: departed members stay stored but aren't members.
+        # Active + inactive split exactly this total.
+        current = stats['active_members']
+        active_pct = (stats['active_30d'] / current * 100) if current > 0 else 0
+        inactive_pct = (stats['inactive_30d'] / current * 100) if current > 0 else 0
 
         embed.description = t(
             "commands.user_stats.overview_desc", lang,
-            total=stats['total_members'], growth=growth_text,
+            total=current, growth=growth_text,
             active=stats['active_30d'], active_pct=active_pct,
             inactive=stats['inactive_30d'], inactive_pct=inactive_pct
         )
@@ -2445,7 +2448,7 @@ class UserStatsView(OwnerOnlyView):
         await interaction.response.defer()
         stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
         stats['guild_id'] = self.guild_id
-        prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
+        prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=30)
         growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
         cog = interaction.client.get_cog('CommandsCog')
@@ -2599,7 +2602,7 @@ class UserStatsView(OwnerOnlyView):
             # Overview
             output.write("OVERVIEW\n")
             output.write("-" * 80 + "\n")
-            output.write(f"Total Members:     {stats['total_members']}\n")
+            output.write(f"Total Members:     {stats['active_members']}\n")
             output.write(f"Active (30d):      {stats['active_30d']}\n")
             output.write(f"Inactive (30d):    {stats['inactive_30d']}\n\n")
             
@@ -3147,7 +3150,7 @@ class LeaderboardView(OwnerOnlyView):
         try:
             stats = await asyncio.to_thread(self.db.get_server_snapshot_stats, self.guild_id)
             stats['guild_id'] = self.guild_id
-            prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=60)
+            prev_stats = await asyncio.to_thread(self.db.get_member_growth_stats, self.guild_id, days=30)
             growth_rate = prev_stats.get('growth_rate', 0) if prev_stats else 0
 
             cog = interaction.client.get_cog('CommandsCog')

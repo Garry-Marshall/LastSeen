@@ -38,6 +38,14 @@ VACUUM_MIN_FREE_MB = 16
 # to the same moment.
 LEFT_TS_SQL = "COALESCE(left_date, CASE WHEN is_active = 0 THEN last_seen END)"
 
+# Seen online since a cutoff: online now (last_seen = 0) or went offline after
+# it. A member never seen online (NULL) counts only while the bot hasn't been
+# able to observe them for the whole window yet (join or bot arrival after the
+# cutoff) — the exact complement of get_inactive_members, so "active" here and
+# /inactive never disagree. Params: (cutoff, guild added_at, cutoff).
+SEEN_SINCE_SQL = ("(last_seen = 0 OR last_seen > ? "
+                  "OR (last_seen IS NULL AND MAX(COALESCE(join_date, 0), ?) > ?))")
+
 
 class DatabaseManager:
     """Manages SQLite database connections and operations."""
@@ -3087,33 +3095,32 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
                 thirty_days_ago = now - (30 * SECONDS_PER_DAY)
-                
-                # Total and active member counts
-                cursor.execute("""
-                    SELECT 
-                        COUNT(*) as total_members,
-                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_members,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_30d
-                    FROM members
-                    WHERE guild_id = ?
-                """, (thirty_days_ago, guild_id))
-                
-                row = cursor.fetchone()
-                total_members = row['total_members'] or 0
-                active_members = row['active_members'] or 0
-                active_30d = row['active_30d'] or 0
-                
-                # Get this month's joins and leaves
-                now_utc = datetime.now(timezone.utc)
-                month_start = int(datetime(now_utc.year, now_utc.month, 1, tzinfo=timezone.utc).timestamp())
-                
+
                 # Get when bot was added to guild to filter out historical joins/leaves
+                # (and to judge members never seen online, see SEEN_SINCE_SQL)
                 cursor.execute("""
                     SELECT added_at FROM guilds WHERE guild_id = ?
                 """, (guild_id,))
                 result = cursor.fetchone()
                 bot_added_at = result['added_at'] if result else 0
-                
+
+                # Total and active member counts
+                cursor.execute(f"""
+                    SELECT
+                        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_members,
+                        SUM(CASE WHEN is_active = 1 AND {SEEN_SINCE_SQL} THEN 1 ELSE 0 END) as active_30d
+                    FROM members
+                    WHERE guild_id = ?
+                """, (thirty_days_ago, bot_added_at, thirty_days_ago, guild_id))
+
+                row = cursor.fetchone()
+                active_members = row['active_members'] or 0
+                active_30d = row['active_30d'] or 0
+
+                # Get this month's joins and leaves
+                now_utc = datetime.now(timezone.utc)
+                month_start = int(datetime(now_utc.year, now_utc.month, 1, tzinfo=timezone.utc).timestamp())
+
                 # Count joins this month (only after bot was added)
                 cursor.execute("""
                     SELECT COUNT(*) as joins
@@ -3153,7 +3160,6 @@ class DatabaseManager:
                 most_active_count = most_active['msg_count'] if most_active else 0
                 
                 return {
-                    'total_members': total_members,
                     'active_members': active_members,
                     'active_30d': active_30d,
                     'inactive_30d': active_members - active_30d,
@@ -3267,14 +3273,14 @@ class DatabaseManager:
                 cohorts = {}
 
                 # 30-day cohort
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT
                         COUNT(*) as total_joined,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                        SUM(CASE WHEN is_active = 1 AND {SEEN_SINCE_SQL} THEN 1 ELSE 0 END) as active_recently
                     FROM members
                     WHERE guild_id = ? AND join_date >= ? AND join_date >= ?
-                """, (thirty_days_ago, guild_id, thirty_days_ago, bot_added_at))
+                """, (thirty_days_ago, bot_added_at, thirty_days_ago, guild_id, thirty_days_ago, bot_added_at))
                 row = cursor.fetchone()
                 cohorts['30d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3284,14 +3290,14 @@ class DatabaseManager:
                 }
                 
                 # 60-day cohort
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT 
                         COUNT(*) as total_joined,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                        SUM(CASE WHEN is_active = 1 AND {SEEN_SINCE_SQL} THEN 1 ELSE 0 END) as active_recently
                     FROM members
                     WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?
-                """, (thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago, bot_added_at))
+                """, (thirty_days_ago, bot_added_at, thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago, bot_added_at))
                 row = cursor.fetchone()
                 cohorts['60d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3301,14 +3307,14 @@ class DatabaseManager:
                 }
                 
                 # 90-day cohort
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT 
                         COUNT(*) as total_joined,
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
-                        SUM(CASE WHEN is_active = 1 AND (last_seen IS NULL OR last_seen = 0 OR last_seen > ?) THEN 1 ELSE 0 END) as active_recently
+                        SUM(CASE WHEN is_active = 1 AND {SEEN_SINCE_SQL} THEN 1 ELSE 0 END) as active_recently
                     FROM members
                     WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?
-                """, (thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago, bot_added_at))
+                """, (thirty_days_ago, bot_added_at, thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago, bot_added_at))
                 row = cursor.fetchone()
                 cohorts['90d'] = {
                     'total_joined': row['total_joined'] or 0,
