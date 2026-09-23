@@ -18,6 +18,7 @@ from bot.utils import (
     create_error_embed,
     create_success_embed,
     format_timestamp,
+    format_utc_date,
     chunk_list,
     can_use_bot_commands,
     is_channel_allowed,
@@ -879,11 +880,11 @@ class CommandsCog(commands.Cog):
             embed.description += t("commands.chat_history.avg_day", lang, avg=stats['avg_per_day'])
 
             if stats['busiest_day']:
-                busiest_str = format_timestamp(stats['busiest_day']['date'], 'D', guild_id, self.db, lang)
+                busiest_str = format_utc_date(stats['busiest_day']['date'])
                 embed.description += t("commands.chat_history.busiest_day", lang, count=stats['busiest_day']['count'], date=busiest_str)
 
             if stats['quietest_day']:
-                quietest_str = format_timestamp(stats['quietest_day']['date'], 'D', guild_id, self.db, lang)
+                quietest_str = format_utc_date(stats['quietest_day']['date'])
                 embed.description += t("commands.chat_history.quietest_day", lang, count=stats['quietest_day']['count'], date=quietest_str)
 
             embed.description += "\n" + t("commands.chat_history.period_header", lang)
@@ -940,8 +941,8 @@ class CommandsCog(commands.Cog):
         avg_per_day = round(total_messages / 365, 1)
         max_day = max(activity_trend, key=lambda r: r['message_count'])
         min_day = min(activity_trend, key=lambda r: r['message_count'])
-        max_day_str = format_timestamp(max_day['date'], 'D', guild_id, self.db, lang)
-        min_day_str = format_timestamp(min_day['date'], 'D', guild_id, self.db, lang)
+        max_day_str = format_utc_date(max_day['date'])
+        min_day_str = format_utc_date(min_day['date'])
 
         # Get summary statistics
         activity_stats_30 = await asyncio.to_thread(self.db.get_message_activity_period, guild_id, user_id, days=30)
@@ -1066,7 +1067,7 @@ class CommandsCog(commands.Cog):
         if activity_trend:
             total_365 = sum(r['message_count'] for r in activity_trend)
             busiest = max(activity_trend, key=lambda r: r['message_count'])
-            busiest_str = format_timestamp(busiest['date'], 'D', guild_id, self.db, lang)
+            busiest_str = format_utc_date(busiest['date'])
             embed.description += t("commands.mystats.activity_365", lang, count=total_365)
             embed.description += t("commands.mystats.activity_busiest", lang, count=busiest['message_count'], date=busiest_str)
 

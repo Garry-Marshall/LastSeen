@@ -56,6 +56,16 @@ def format_timestamp(timestamp: Optional[int], style: str = 'F', guild_id: Optio
         return t('common.invalid_date', lang)
 
 
+def format_utc_date(timestamp: int) -> str:
+    """Plain-text date (YYYY-MM-DD) for a UTC day bucket such as message_activity.date.
+
+    Deliberately not a Discord <t:...> timestamp: Discord renders those in each
+    viewer's timezone, so a UTC-midnight day start would show as the previous
+    date for anyone west of UTC.
+    """
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime('%Y-%m-%d')
+
+
 def format_relative_time(timestamp: Optional[int], guild_id: Optional[int] = None, db = None, lang: str = 'en') -> str:
     """
     Format a timestamp as relative time (e.g., '2 hours ago').

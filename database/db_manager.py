@@ -3822,10 +3822,16 @@ class DatabaseManager:
             tz_str: Timezone name for local-day bucketing (default UTC), so the
                 weekday matches the guild's own clock like the /user-stats heatmap
 
+        Reads the hourly table, not the daily one: a daily row is a UTC day, and
+        converting its UTC-midnight start to a timezone west of UTC lands on the
+        previous weekday. Hourly buckets convert to the correct local weekday.
+        Summed per hour in SQL, so this is at most 24 rows per day of the period.
+
         Returns:
             Dictionary mapping day name to message count
         """
         import pytz
+        day_names = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
         try:
             try:
                 tz = pytz.timezone(tz_str) if tz_str in pytz.all_timezones else pytz.UTC
@@ -3839,19 +3845,17 @@ class DatabaseManager:
                 period_start = now - (days * SECONDS_PER_DAY)
 
                 cursor.execute(f"""
-                    SELECT date, SUM(message_count) as count
-                    FROM message_activity
-                    WHERE guild_id = ? AND date >= ?{fclause}
-                    GROUP BY date
+                    SELECT timestamp, SUM(message_count) as count
+                    FROM message_activity_hourly
+                    WHERE guild_id = ? AND timestamp >= ?{fclause}
+                    GROUP BY timestamp
                 """, (guild_id, period_start, *fparams))
 
-                day_counts = {'Monday': 0, 'Tuesday': 0, 'Wednesday': 0, 'Thursday': 0,
-                             'Friday': 0, 'Saturday': 0, 'Sunday': 0}
+                day_counts = {name: 0 for name in day_names}
 
                 for row in cursor.fetchall():
-                    date_dt = datetime.fromtimestamp(row['date'], tz=timezone.utc).astimezone(tz)
-                    day_name = date_dt.strftime('%A')
-                    day_counts[day_name] += row['count'] or 0
+                    local = datetime.fromtimestamp(row['timestamp'], tz=timezone.utc).astimezone(tz)
+                    day_counts[day_names[local.weekday()]] += row['count'] or 0
 
                 return day_counts
         except Exception as e:
