@@ -1634,14 +1634,13 @@ class TrackingCog(commands.Cog):
             # Check if it's time to backup based on configured interval
             backup_interval_hours = self.config.backup_interval_hours
             
-            # Get the last backup time (use a simple file check or track in memory)
-            # For simplicity, we'll backup at the configured interval
-            # Store last backup time as an attribute
-            if not hasattr(self, '_last_backup_time'):
-                self._last_backup_time = 0
-            
+            # When the newest backup on disk was made. Not tracked in memory: that
+            # reset on every start, so each restart took a backup, and a crash
+            # loop could rotate every good backup out within minutes.
+            last_backup = await asyncio.to_thread(self.db.get_latest_backup_time, str(self.config.backup_folder))
+
             current_time = datetime.now(timezone.utc).timestamp()
-            time_since_last_backup = (current_time - self._last_backup_time) / 3600  # hours
+            time_since_last_backup = (current_time - (last_backup or 0)) / 3600  # hours
             
             if time_since_last_backup >= backup_interval_hours:
                 logger.info(f"Starting database backup (interval: {backup_interval_hours}h)...")
@@ -1658,9 +1657,6 @@ class TrackingCog(commands.Cog):
                     
                     if deleted > 0:
                         logger.info(f"Deleted {deleted} old backup(s), keeping {retention_count} most recent")
-                    
-                    # Update last backup time
-                    self._last_backup_time = current_time
                 else:
                     logger.error("Database backup failed")
                     

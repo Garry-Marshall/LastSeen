@@ -4650,6 +4650,15 @@ class DatabaseManager:
             logger.error(f"Failed to create database backup: {e}", exc_info=True)
             return None
 
+    def get_latest_backup_time(self, backup_folder: str) -> Optional[float]:
+        """Modification time of the newest backup file, or None if there is none."""
+        from pathlib import Path
+        try:
+            return max((p.stat().st_mtime for p in Path(backup_folder).glob("lastseen_backup_*.db")), default=None)
+        except OSError as e:
+            logger.error(f"Failed to read backup folder {backup_folder}: {e}")
+            return None
+
     def cleanup_old_backups(self, backup_folder: str, retention_count: int) -> int:
         """
         Delete old backup files, keeping only the most recent backups.
