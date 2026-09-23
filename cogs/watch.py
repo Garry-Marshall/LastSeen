@@ -665,7 +665,10 @@ class WatchCog(commands.Cog):
         if w['target_id'] in self.bot.no_watch_users:
             return
         member_data = await asyncio.to_thread(self.db.get_member, guild.id, w['target_id'])
-        if not member_data:
+        # Skip a target who isn't in the server: their last_seen is the moment
+        # they left, so "offline for" would be false. The watch is kept (state
+        # untouched) and applies again if they rejoin.
+        if not member_data or not member_data['is_active']:
             return
         last_seen = member_data['last_seen']
         # last_seen: 0 = online, None = never seen. Re-arm on return; only fire
