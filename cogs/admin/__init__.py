@@ -8,7 +8,7 @@ from .config_view import ConfigView
 from .channel_config import ChannelModal, InactiveDaysModal
 from .role_config import BotAdminRoleModal, UserRoleModal, TrackOnlyRolesModal
 from .channel_filter import AllowedChannelsModal
-from .permissions import check_admin_permission, get_bot_admin_role_name
+from .permissions import check_admin_permission
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,5 @@ __all__ = [
     'TrackOnlyRolesModal',
     'AllowedChannelsModal',
     'check_admin_permission',
-    'get_bot_admin_role_name',
     'setup'
 ]

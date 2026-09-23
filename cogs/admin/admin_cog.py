@@ -15,7 +15,7 @@ from database import DatabaseManager
 from bot.utils import create_embed, create_error_embed, has_bot_admin_role, can_use_bot_commands
 from bot.locale import t, guild_language
 from .config_view import ConfigView
-from .permissions import check_admin_permission, get_bot_admin_role_name
+from .permissions import check_admin_permission
 
 logger = logging.getLogger(__name__)
 

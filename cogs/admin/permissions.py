@@ -50,18 +50,3 @@ async def check_admin_permission(
         return False
 
     return True
-
-
-def get_bot_admin_role_name(db: DatabaseManager, guild_id: int) -> str:
-    """
-    Get the configured bot admin role name for a guild.
-
-    Args:
-        db: Database manager
-        guild_id: Guild ID
-
-    Returns:
-        str: Bot admin role name (defaults to 'LastSeen Admin')
-    """
-    guild_config = db.get_guild_config(guild_id)
-    return guild_config.get('bot_admin_role_name', 'LastSeen Admin') if guild_config else 'LastSeen Admin'

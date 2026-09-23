@@ -8,7 +8,7 @@ import json
 from database import DatabaseManager
 from bot.utils import create_embed, create_error_embed, create_success_embed, join_capped
 from bot.locale import t, guild_language, available_languages, language_name, weekday_name
-from .permissions import get_bot_admin_role_name, check_admin_permission
+from .permissions import check_admin_permission
 from .channel_config import ChannelModal, InactiveDaysModal, TimezoneModal, ReportsConfigModal
 from .role_config import BotAdminRoleModal, UserRoleModal, TrackOnlyRolesModal
 from .channel_filter import AllowedChannelsModal
