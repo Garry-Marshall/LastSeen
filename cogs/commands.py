@@ -309,7 +309,8 @@ class CommandsCog(commands.Cog):
         if guild_config:
             allowed_channels_json = guild_config.get('allowed_channels')
             channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
-            if not is_channel_allowed(interaction.channel_id, guild_config):
+            if not is_channel_allowed(interaction.channel_id, guild_config,
+                                      getattr(interaction.channel, 'parent_id', None)):
                 error = create_error_embed(
                     t("errors.channel_not_allowed", lang), lang
                 )
@@ -1379,7 +1380,8 @@ class CommandsCog(commands.Cog):
         channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
 
         # Check if command is allowed in current channel
-        if not is_channel_allowed(interaction.channel_id, guild_config):
+        if not is_channel_allowed(interaction.channel_id, guild_config,
+                                  getattr(interaction.channel, 'parent_id', None)):
             await interaction.response.send_message(
                 t("commands.search.channel_not_allowed", lang),
                 ephemeral=True
@@ -1520,7 +1522,8 @@ class CommandsCog(commands.Cog):
         channels_restricted = bool(allowed_channels_json) if allowed_channels_json else False
 
         # Check if command is allowed in current channel
-        if not is_channel_allowed(interaction.channel_id, guild_config):
+        if not is_channel_allowed(interaction.channel_id, guild_config,
+                                  getattr(interaction.channel, 'parent_id', None)):
             await interaction.response.send_message(
                 t("commands.search.channel_not_allowed", lang),
                 ephemeral=True

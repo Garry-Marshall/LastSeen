@@ -197,13 +197,15 @@ def can_use_bot_commands(member: discord.Member, guild_config: dict) -> bool:
     return discord.utils.get(member.roles, name=user_role_name) is not None
 
 
-def is_channel_allowed(channel_id: int, guild_config: dict) -> bool:
+def is_channel_allowed(channel_id: int, guild_config: dict, parent_id: Optional[int] = None) -> bool:
     """
     Check if a channel is allowed for bot commands based on guild configuration.
 
     Args:
         channel_id: Discord channel ID
         guild_config: Guild configuration from database
+        parent_id: For a thread (or forum post), its parent channel's ID: a
+            thread inside an allowed channel is allowed too.
 
     Returns:
         True if channel is allowed for commands
@@ -224,8 +226,8 @@ def is_channel_allowed(channel_id: int, guild_config: dict) -> bool:
         if not allowed_channels:
             return True  # Empty list means all channels allowed
 
-        # Check if current channel is in allowed list
-        return channel_id in allowed_channels
+        # Check if current channel, or the channel a thread lives in, is allowed
+        return channel_id in allowed_channels or (parent_id is not None and parent_id in allowed_channels)
     except (json.JSONDecodeError, TypeError):
         return True  # If error parsing, default to allowing
 
