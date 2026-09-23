@@ -681,6 +681,7 @@ class TrackingCog(commands.Cog):
         logger.info(f"Member joined: {member} in guild {member.guild.name}")
 
         guild_id = member.guild.id
+        guild_name = member.guild.name
         user_id = member.id
         roles = get_member_roles(member)
         join_date = int(member.joined_at.timestamp()) if member.joined_at else int(datetime.now(timezone.utc).timestamp())
@@ -697,7 +698,7 @@ class TrackingCog(commands.Cog):
                     # that follows it (applied by the presence queue, which can
                     # get there first): not a rejoin.
                     return
-                logger.info(f"Member {username} is rejoining guild {guild_id}")
+                logger.info(f"Member {username} is rejoining guild {guild_name}")
                 # Reactivate with the new join date and position. The prior
                 # left_date is kept, so the departure and this rejoin both count.
                 self.db.rejoin_member(guild_id, user_id, username, nickname, join_date, roles, is_online)
