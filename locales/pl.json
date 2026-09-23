@@ -623,7 +623,7 @@
   "admin.help.search_detail_title": "🔍 /search - Zaawansowane wyszukiwanie członków",
   "admin.help.search_detail_desc": "Wyszukuj i filtruj członków serwera według wielu kryteriów. Łącz filtry, aby zawęzić wyniki. **Tylko dla administratorów.**",
   "admin.help.search_detail_filters_title": "Filtry",
-  "admin.help.search_detail_filters": "`roles` — jedna lub więcej ról, np. `@Moderator,@Admin`\n`status` — `online`, `offline`, `idle`, `dnd` lub `all`\n`inactive` — dni od ostatniej obecności, np. `>30`, `<7`, `=14`\n`activity` — wiadomości z ostatnich 30 dni, np. `>100`, `<10`\n`joined` — data dołączenia, np. `>2025-01-01`, `<2024-06-01`\n`username` — częściowe dopasowanie, bez rozróżniania wielkości liter\n`export` — `csv` lub `txt`",
+  "admin.help.search_detail_filters": "`roles` — jedna lub więcej ról, np. `@Moderator,@Admin`\n`status` — `online`, `offline`, `idle`, `dnd` lub `all`\n`inactive` — dni od ostatniej obecności, np. `>30`, `<7`, `=14`\n`activity` — wiadomości z ostatnich 30 dni, np. `>100`, `<10`\n`joined` — data dołączenia, np. `>2025-01-01`, `<2024-06-01`\n`departed` — data odejścia (pokazuje członków, którzy odeszli), np. `>2025-01-01`, `=2025-03-15`\n`username` — częściowe dopasowanie, bez rozróżniania wielkości liter\n`export` — `csv` lub `txt`",
   "admin.help.search_detail_examples_title": "Przykłady",
   "admin.help.search_detail_examples": "• `/search roles:@Moderator status:online`\n• `/search inactive:>30 activity:<10`\n• `/search joined:>2025-01-01 export:csv`\n• `/search roles:@Member status:offline inactive:>7 activity:<50`",
   "admin.help.search_detail_notes_title": "Warto wiedzieć",

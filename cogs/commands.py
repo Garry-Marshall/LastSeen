@@ -1411,6 +1411,10 @@ class CommandsCog(commands.Cog):
         # so this may be partial shortly after startup — misses are tolerated below)
         discord_members = {m.id: m for m in guild.members}
 
+        # When the bot arrived: the inactive filter's starting point for
+        # members never seen online.
+        added_at = (guild_config.get('added_at') or 0) if guild_config else 0
+
         # Apply filters. Enrichment and the activity filter hit the DB per
         # member, so the whole loop runs off the event loop in one batch.
         def _apply_filters() -> tuple[list, int]:
@@ -1427,11 +1431,11 @@ class CommandsCog(commands.Cog):
                         # Skip - these filters require Discord data
                         continue
                     # Database-only filters still work
-                    if self._matches_db_filters(member_data, filters):
+                    if self._matches_db_filters(member_data, filters, added_at):
                         results.append(self._create_db_only_result(member_data, lang))
                 else:
                     # Full Discord data available
-                    if self._matches_all_filters(member_data, discord_member, filters):
+                    if self._matches_all_filters(member_data, discord_member, filters, added_at):
                         results.append(self._enrich_member_data(member_data, discord_member, lang))
 
             return results, misses
@@ -1815,7 +1819,22 @@ class CommandsCog(commands.Cog):
         else:  # '='
             return actual == expected
 
-    def _matches_db_filters(self, member_data: dict, filters: dict) -> bool:
+    @staticmethod
+    def _compare_date(timestamp: int, filter_spec: dict) -> bool:
+        """Compare a timestamp against a date filter as whole UTC days.
+
+        filter_spec['value'] is the chosen day's 00:00 UTC. '=' matches anything
+        on that day, '>' anything after it, '<' anything before it.
+        """
+        day_start = filter_spec['value']
+        operator = filter_spec['operator']
+        if operator == '>':
+            return timestamp >= day_start + 86400
+        if operator == '<':
+            return timestamp < day_start
+        return day_start <= timestamp < day_start + 86400
+
+    def _matches_db_filters(self, member_data: dict, filters: dict, added_at: int = 0) -> bool:
         """Check if member matches database-only filters (no Discord data needed)."""
         # Username filter (searches both username and nickname/display_name)
         if filters.get('username'):
@@ -1827,26 +1846,26 @@ class CommandsCog(commands.Cog):
             if search_term not in username_lower and search_term not in nickname_lower:
                 return False
 
-        # Inactive filter
+        # Inactive filter, in whole days (so '=14' can match)
         if filters.get('inactive'):
             last_seen = member_data.get('last_seen')
-            if last_seen and last_seen > 0:
-                # Member has been seen before, calculate days since
-                days_inactive = (datetime.now(timezone.utc).timestamp() - last_seen) / 86400
-                if not self._compare(days_inactive, filters['inactive']):
-                    return False
+            if last_seen == 0:
+                days_inactive = 0  # online now
             else:
-                # No last_seen data or last_seen = 0 (currently online/never tracked)
-                # Treat as 0 days inactive
-                if not self._compare(0, filters['inactive']):
-                    return False
+                # Never seen online: inactive since the bot could first observe
+                # them (join or bot arrival, whichever is later) — the same rule
+                # as /inactive.
+                since = last_seen or max(member_data.get('join_date') or 0, added_at)
+                days_inactive = int((datetime.now(timezone.utc).timestamp() - since) // 86400)
+            if not self._compare(days_inactive, filters['inactive']):
+                return False
 
         # Joined filter
         if filters.get('joined'):
             # Database uses 'join_date' column, not 'joined_at'
             joined_at = member_data.get('join_date') or member_data.get('joined_at')
             if joined_at:
-                if not self._compare(joined_at, filters['joined']):
+                if not self._compare_date(joined_at, filters['joined']):
                     return False
             else:
                 # No join date data - exclude from filter
@@ -1861,15 +1880,16 @@ class CommandsCog(commands.Cog):
             if member_data.get('is_active', 1) != 0:
                 return False  # still a member, not a departure
             departure_ts = member_data.get('left_date') or member_data.get('last_seen')
-            if not departure_ts or not self._compare(departure_ts, filters['departed']):
+            if not departure_ts or not self._compare_date(departure_ts, filters['departed']):
                 return False
 
         return True
 
-    def _matches_all_filters(self, member_data: dict, discord_member: discord.Member, filters: dict) -> bool:
+    def _matches_all_filters(self, member_data: dict, discord_member: discord.Member, filters: dict,
+                             added_at: int = 0) -> bool:
         """Check if member matches all filters (both DB and Discord data)."""
         # First check database filters
-        if not self._matches_db_filters(member_data, filters):
+        if not self._matches_db_filters(member_data, filters, added_at):
             return False
 
         # Role filter (Discord data)

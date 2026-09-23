@@ -623,7 +623,7 @@
   "admin.help.search_detail_title": "🔍 /search - Geavanceerd zoeken naar leden",
   "admin.help.search_detail_desc": "Zoek en filter serverleden op meerdere criteria. Combineer filters om de resultaten te verfijnen. **Alleen beheerders.**",
   "admin.help.search_detail_filters_title": "Filters",
-  "admin.help.search_detail_filters": "`roles` — één of meer rollen, bijv. `@Moderator,@Admin`\n`status` — `online`, `offline`, `idle`, `dnd` of `all`\n`inactive` — dagen sinds laatst gezien, bijv. `>30`, `<7`, `=14`\n`activity` — berichten in de laatste 30 dagen, bijv. `>100`, `<10`\n`joined` — lidmaatschapsdatum, bijv. `>2025-01-01`, `<2024-06-01`\n`username` — gedeeltelijke match, hoofdletterongevoelig\n`export` — `csv` of `txt`",
+  "admin.help.search_detail_filters": "`roles` — één of meer rollen, bijv. `@Moderator,@Admin`\n`status` — `online`, `offline`, `idle`, `dnd` of `all`\n`inactive` — dagen sinds laatst gezien, bijv. `>30`, `<7`, `=14`\n`activity` — berichten in de laatste 30 dagen, bijv. `>100`, `<10`\n`joined` — lidmaatschapsdatum, bijv. `>2025-01-01`, `<2024-06-01`\n`departed` — vertrekdatum (toont leden die vertrokken zijn), bijv. `>2025-01-01`, `=2025-03-15`\n`username` — gedeeltelijke match, hoofdletterongevoelig\n`export` — `csv` of `txt`",
   "admin.help.search_detail_examples_title": "Voorbeelden",
   "admin.help.search_detail_examples": "• `/search roles:@Moderator status:online`\n• `/search inactive:>30 activity:<10`\n• `/search joined:>2025-01-01 export:csv`\n• `/search roles:@Member status:offline inactive:>7 activity:<50`",
   "admin.help.search_detail_notes_title": "Goed om te weten",
