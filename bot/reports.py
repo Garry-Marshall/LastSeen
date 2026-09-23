@@ -298,12 +298,10 @@ async def send_scheduled_report(guild: discord.Guild, channel_id: int, db: Datab
                     logger.error(f"Report channel {channel_id} not found or not a text channel in guild {guild.name}")
                     return False
 
-                # The activity report is the only embed; member join/leave counts
-                # are folded into it, so there is no report content without it.
-                if 'activity' not in report_types:
-                    logger.info(f"No report content to send for guild {guild.name}")
-                    return True
-
+                # The activity overview is the report's base and is always sent;
+                # report_types only switches the optional sections (members,
+                # departures, retention). 'activity' is still accepted in the
+                # config for compatibility but no longer gates anything.
                 embed = await asyncio.to_thread(generate_activity_report, guild, db, days, report_types)
                 await channel.send(embed=embed)
                 _last_report_send[guild.id] = datetime.now(timezone.utc).timestamp()

@@ -212,6 +212,7 @@ class ReportsConfigModal(discord.ui.Modal):
         ))
         self.add_item(discord.ui.Label(
             text=t("channel_config.reports.types_label", lang),
+            description=t("channel_config.reports.types_label_desc", lang),
             component=self.report_types_input
         ))
         self.add_item(discord.ui.Label(

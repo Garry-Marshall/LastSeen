@@ -95,7 +95,7 @@ Configurable database backups with automatic retention management. Set your back
   - Configure scheduled reports - Set up automated weekly/monthly reports
     - Choose report channel
     - Select frequency (weekly, monthly, or both)
-    - Pick report types (activity, new members, departures)
+    - Pick optional report sections (new members, departures, retention); the activity overview is always included
     - Set delivery day (day of week for weekly, day of month for monthly)
   - Update all members in database
   - View current configuration
@@ -272,7 +272,7 @@ Prefer to configure individual settings? Use the other buttons in `/config`:
 - **Automated Reports**: Configure weekly and/or monthly automated reports
   - **Report Channel**: Choose which channel receives the reports
   - **Frequency**: Weekly, monthly, or both
-  - **Report Types**:
+  - **Report Types** (the activity overview is always included; the others are optional sections):
     - **Activity Report**: Message statistics, peak day, top 5 contributors
     - **New Members**: List of members who joined during the period
     - **Departures**: Members who left during the period (with last seen info)
