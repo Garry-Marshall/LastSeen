@@ -13,7 +13,6 @@ from .channel_config import ChannelModal, InactiveDaysModal, TimezoneModal, Repo
 from .role_config import BotAdminRoleModal, UserRoleModal, TrackOnlyRolesModal
 from .channel_filter import AllowedChannelsModal
 from .quick_setup import QuickSetupView
-from . import member_mgmt
 
 logger = logging.getLogger(__name__)
 
