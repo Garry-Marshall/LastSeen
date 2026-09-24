@@ -119,6 +119,35 @@ async def main():
     db.release.set()
     await slow_join
 
+    # 7. Presence update right behind a (slow) join: queued only once the join is
+    #    stored, so the presence queue never adds the member itself ("joined late")
+    cog._presence_queue, cog._presence_dropped = asyncio.Queue(), 0
+    late = []
+    real_late = cog._calculate_and_set_join_position
+    cog._calculate_and_set_join_position = lambda m: late.append(m.id) or real_late(m)
+    db.slow, db.release = {30}, threading.Event()
+    offline, online = FakeMember(30, guild, online=False), FakeMember(30, guild, online=True)
+    join = dispatch(TrackingCog.on_member_join(cog, offline))   # a new member's cache entry has no presence yet
+    p1 = dispatch(TrackingCog.on_presence_update(cog, offline, online))
+    p2 = dispatch(TrackingCog.on_presence_update(cog, online, offline))
+    drain = lambda: [cog._presence_queue.get_nowait() for _ in range(cog._presence_queue.qsize())]
+    await asyncio.sleep(0.05)
+    early = drain()   # the queue consumer applies whatever arrives, join or not
+    await asyncio.to_thread(cog._apply_presence_batch, early)
+    check(not early, "presence updates wait while the join is still being written")
+    db.release.set()
+    await asyncio.gather(join, p1, p2)
+    queued = drain()
+    check([went_offline for _, went_offline, _ in early + queued] == [False, True],
+          "then queued in arrival order (online, offline)")
+    await asyncio.to_thread(cog._apply_presence_batch, queued)
+    check(not late and 30 not in db.rejoins and row(30)['last_seen'] and row(30)['join_position'],
+          f"no 'joined late', no rejoin; presence applied to the stored join -> late={late}")
+
+    # 8. Presence update with nothing pending for that member: queued straight away
+    await TrackingCog.on_presence_update(cog, offline, online)
+    check(cog._presence_queue.qsize() == 1, "no pending join: presence queued immediately")
+
     check(cog._member_locks == {}, "no per-member lock entries left behind")
     real.close_pool()
 

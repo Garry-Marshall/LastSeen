@@ -1043,6 +1043,13 @@ class TrackingCog(commands.Cog):
         # never skews the recorded last_seen.
         went_offline = after.status == discord.Status.offline
         timestamp = int(datetime.now(timezone.utc).timestamp())
+        # A join/leave/update of this member still being written (typically
+        # the join this presence update follows): wait for it, so the queue
+        # finds the member stored instead of adding them as a "late" join.
+        # Just a dict lookup otherwise.
+        if (after.guild.id, after.id) in self._member_locks:
+            async with self._member_order(after.guild.id, after.id):
+                pass
         try:
             self._presence_queue.put_nowait((after, went_offline, timestamp))
         except asyncio.QueueFull:
