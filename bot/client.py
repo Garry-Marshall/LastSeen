@@ -1,6 +1,7 @@
 """Bot client setup and initialization."""
 
 import asyncio
+import inspect
 import discord
 from discord.ext import commands
 import logging
@@ -52,6 +53,29 @@ class LastSeenBot(commands.AutoShardedBot):
             logger.error(f"Error closing database pool: {e}", exc_info=True)
 
 
+def _chunk_with_presences(state) -> None:
+    """Make discord.py request presences when it chunks a guild.
+
+    Guild.chunk() asks for members without presences, so every member it
+    adds is cached as offline. In huge guilds the members in GUILD_CREATE are
+    only a fraction of those online, so most online members stayed "offline"
+    in the cache: reconciliation then marked them offline, and their real
+    offline events were swallowed (before.status == after.status).
+
+    Wraps the private ConnectionState.chunker (which Guild.chunk() calls);
+    fails at startup if a discord.py upgrade changed it.
+    """
+    original = state.chunker
+    if 'presences' not in inspect.signature(original).parameters:
+        raise RuntimeError("discord.py ConnectionState.chunker has no 'presences' parameter; "
+                           "update _chunk_with_presences in bot/client.py")
+
+    async def chunker(guild_id, query='', limit=0, presences=True, **kwargs):
+        return await original(guild_id, query, limit, presences, **kwargs)
+
+    state.chunker = chunker
+
+
 def create_bot(config) -> commands.Bot:
     """
     Create and configure the Discord bot.
@@ -79,6 +103,7 @@ def create_bot(config) -> commands.Bot:
         chunk_guilds_at_startup=False,  # Chunked in background after on_ready instead
         shard_count=config.shard_count  # None = use Discord's recommended count
     )
+    _chunk_with_presences(bot._connection)
 
     # Attach configuration and database to bot
     bot.config = config
@@ -264,7 +289,8 @@ async def _chunk_guilds_background(bot: commands.Bot):
         async with semaphore:
             try:
                 await asyncio.wait_for(guild.chunk(), timeout=CHUNK_TIMEOUT)
-                logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached")
+                online = sum(1 for m in guild.members if m.status != discord.Status.offline)
+                logger.info(f"  ✓ {guild.name}: {len(guild.members)}/{guild.member_count} members cached, {online} online")
                 bot.dispatch('lastseen_guild_chunked', guild)
             except asyncio.TimeoutError:
                 failed += 1
