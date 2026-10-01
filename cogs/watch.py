@@ -4,7 +4,7 @@ Admin-configured presence alerts. Two alert types cover every use case:
 
   * online_return — edge-triggered from the offline->online transition. Fires
     once per return (naturally), optionally gated on a minimum time-away, with a
-    per-watch cooldown to suppress rapid presence flicker.
+    5m away floor and a per-watch cooldown to suppress rapid presence flicker.
   * offline_for  — swept hourly; fires once when a target crosses an offline
     threshold, re-arming when the target next comes online.
 
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Alert delivery / abuse bounds
 MAX_WATCHES_PER_GUILD = 50
 ONLINE_COOLDOWN_SECONDS = 3600      # suppress re-firing an online_return watch within 1h
+ONLINE_MIN_AWAY_SECONDS = 5 * 60    # ignore returns from shorter absences (e.g. restarting Discord)
 MIN_DURATION_SECONDS = 5 * 60       # 5m
 MAX_DURATION_SECONDS = 365 * 86400  # 365d
 # The offline_for sweep runs on this cadence, so it also bounds how late an
@@ -569,6 +570,10 @@ class WatchCog(commands.Cog):
                     threshold = w['threshold_seconds'] or 0
                     # Away-gated watches only fire on a confirmed long-enough absence.
                     if threshold and (away is None or away < threshold):
+                        continue
+                    # Every watch ignores brief disconnects (restarting Discord,
+                    # a network blip) so they don't each produce an alert.
+                    if away is not None and away < ONLINE_MIN_AWAY_SECONDS:
                         continue
                     # Per-member cooldown to suppress repeated returns. Set before
                     # firing so the check-and-set is atomic (no await between them),
