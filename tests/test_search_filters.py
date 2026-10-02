@@ -16,7 +16,7 @@ D = 86400
 NOW = int(datetime.now(timezone.utc).timestamp())
 
 def f(**kw):
-    return cog._parse_search_filters(roles=None, status=None, inactive=kw.get('inactive'), activity=None,
+    return cog._parse_search_filters(roles=None, status=None, inactive=kw.get('inactive'), activity=None, silent=kw.get('silent'),
                                      joined=kw.get('joined'), departed=kw.get('departed'),
                                      username=None, guild=None)
 
@@ -24,7 +24,7 @@ def m(last_seen=None, join_date=None, is_active=1, left_date=None):
     return {'username': 'u', 'nickname': None, 'last_seen': last_seen, 'join_date': join_date,
             'is_active': is_active, 'left_date': left_date}
 
-match = lambda member, flt, added_at=0: cog._matches_db_filters(member, flt, added_at)
+match = lambda member, flt, added_at=0, last_active=None: cog._matches_db_filters(member, flt, added_at, None, last_active)
 
 # inactive: whole days
 seen_14_5 = m(last_seen=NOW - int(14.5 * D))
@@ -52,4 +52,16 @@ check(match(m(join_date=day - 1), f(joined='<2025-01-15')) and not match(morning
 check(match(m(is_active=0, left_date=day + 5 * 3600), f(departed='=2025-01-15')), "departed:=date matches a leave that day")
 check(match(m(is_active=0, left_date=None, last_seen=day + 5 * 3600), f(departed='=2025-01-15')), "departed falls back to last_seen for legacy rows")
 check(not match(m(is_active=1, left_date=day + 5 * 3600), f(departed='=2025-01-15')), "rejoined member (active) not listed as departed")
+
+# silent: days since max(last message, join, bot arrival)
+U = 1
+member_400d = m(join_date=NOW - 400 * D) | {'user_id': U}
+check(match(member_400d, f(silent='>60'), NOW - 500 * D, {U: NOW - 90 * D}), "last posted 90d ago: matches silent:>60")
+check(not match(member_400d, f(silent='>60'), NOW - 500 * D, {U: NOW - 30 * D}), "last posted 30d ago: not silent:>60")
+check(match(member_400d, f(silent='>60'), NOW - 500 * D, {}), "never posted, joined 400d ago: matches silent:>60")
+member_10d = m(join_date=NOW - 10 * D) | {'user_id': U}
+check(not match(member_10d, f(silent='>60'), NOW - 500 * D, {}), "never posted, joined 10d ago: recent joiner excluded")
+check(not match(member_10d, f(silent='>60'), NOW - 500 * D, {U: NOW - 200 * D}), "rejoined 10d ago, last posted 200d ago: excluded")
+check(not match(member_400d, f(silent='>60'), NOW - 20 * D, {}), "never posted, bot added 20d ago: not silent:>60")
+check(match(member_400d, f(silent='=90'), NOW - 500 * D, {U: NOW - 90 * D}), "silent:=90 matches whole days")
 print("\nALL PASSED" if not failures else f"\n{len(failures)} FAILED"); sys.exit(1 if failures else 0)

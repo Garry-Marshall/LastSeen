@@ -2829,6 +2829,25 @@ class DatabaseManager:
             logger.error(f"Failed to get activity totals for guild {guild_id}: {e}")
             return {}
 
+    def get_guild_last_active(self, guild_id: int) -> Dict[int, int]:
+        """Each member's most recent active day (UTC day-start) for a guild.
+
+        Read from the durable member_activity_summary rollup, so it is not
+        bounded by message_activity retention. Members who haven't posted
+        since tracking began are absent from the result.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT user_id, last_active FROM member_activity_summary
+                    WHERE guild_id = ? AND last_active IS NOT NULL
+                """, (guild_id,))
+                return {row['user_id']: row['last_active'] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Failed to get last active days for guild {guild_id}: {e}")
+            return {}
+
     def get_activity_percentile(self, guild_id: int, user_id: int, days: int = 30,
                                 conn: Optional[sqlite3.Connection] = None) -> Optional[Dict[str, Any]]:
         """

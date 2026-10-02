@@ -417,6 +417,7 @@ Advanced member search with multiple filter options. Combine filters to find spe
 - `status` - Filter by presence: `online`, `offline`, `idle`, `dnd`, or `all`
 - `inactive` - Days since last seen (e.g., `>30`, `<7`, `=14`)
 - `activity` - Message count in last 30 days (e.g., `>100`, `<10`)
+- `silent` - Days since last message, recent joiners excluded (e.g., `>60`)
 - `joined` - Filter by join date (e.g., `>2025-01-01`, `<2024-06-01`)
 - `username` - Search username (partial match, case-insensitive)
 - `export` - Export results as `csv` or `txt` format

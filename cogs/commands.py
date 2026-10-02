@@ -1338,6 +1338,7 @@ class CommandsCog(commands.Cog):
         status="Filter by presence: online, offline, idle, dnd, or all",
         inactive="Days since last seen - use >30 (more than), <7 (less than), or =14 (exactly)",
         activity="Messages in last 30 days - examples: >100, <10, =50",
+        silent="Days since last message (recent joiners excluded) - use >60 (more than), <7, or =14",
         joined="Join date filter - format: >2024-01-01, <2023-06-01, =2025-01-15",
         departed="Left-date filter (lists members who left) - format: >2024-01-01, <2023-06-01, =2025-01-15",
         username="Search username (partial match, case-insensitive)",
@@ -1350,6 +1351,7 @@ class CommandsCog(commands.Cog):
         status: str = None,
         inactive: str = None,
         activity: str = None,
+        silent: str = None,
         joined: str = None,
         departed: str = None,
         username: str = None,
@@ -1405,6 +1407,7 @@ class CommandsCog(commands.Cog):
                 status=status,
                 inactive=inactive,
                 activity=activity,
+                silent=silent,
                 joined=joined,
                 departed=departed,
                 username=username,
@@ -1440,6 +1443,7 @@ class CommandsCog(commands.Cog):
             # the activity filter and the result rows (was ~4 queries per member,
             # twice with the activity filter).
             activity = self.db.get_guild_activity_totals(guild_id, 30)
+            last_active = self.db.get_guild_last_active(guild_id) if 'silent' in filters else None
             results = []
             misses = 0
 
@@ -1453,11 +1457,11 @@ class CommandsCog(commands.Cog):
                         # Skip - these filters require Discord data
                         continue
                     # Database-only filters still work
-                    if self._matches_db_filters(member_data, filters, added_at, activity):
+                    if self._matches_db_filters(member_data, filters, added_at, activity, last_active):
                         results.append(self._create_db_only_result(member_data, lang, activity))
                 else:
                     # Full Discord data available
-                    if self._matches_all_filters(member_data, discord_member, filters, added_at, activity):
+                    if self._matches_all_filters(member_data, discord_member, filters, added_at, activity, last_active):
                         results.append(self._enrich_member_data(member_data, discord_member, lang, activity))
 
             return results, misses
@@ -1716,7 +1720,7 @@ class CommandsCog(commands.Cog):
         embed.set_footer(text=t("commands.journey.footer", lang))
         return embed
 
-    def _parse_search_filters(self, roles, status, inactive, activity, joined, departed, username, guild, lang='en') -> dict:
+    def _parse_search_filters(self, roles, status, inactive, activity, silent, joined, departed, username, guild, lang='en') -> dict:
         """Parse and validate all filter parameters."""
         filters = {}
 
@@ -1783,6 +1787,10 @@ class CommandsCog(commands.Cog):
         # Parse activity (message count)
         if activity:
             filters['activity'] = self._parse_filter_value(activity, 'messages', lang)
+
+        # Parse silent (days since last message)
+        if silent:
+            filters['silent'] = self._parse_filter_value(silent, 'days', lang)
 
         # Parse joined date
         if joined:
@@ -1868,11 +1876,13 @@ class CommandsCog(commands.Cog):
         return day_start <= timestamp < day_start + 86400
 
     def _matches_db_filters(self, member_data: dict, filters: dict, added_at: int = 0,
-                            activity: dict | None = None) -> bool:
+                            activity: dict | None = None, last_active: dict | None = None) -> bool:
         """Check if member matches database-only filters (no Discord data needed).
 
         activity: get_guild_activity_totals() result for the guild (members
         without messages in the window are absent and count as 0).
+        last_active: get_guild_last_active() result for the guild (members
+        who haven't posted since tracking began are absent).
         """
         # Username filter (searches both username and nickname/display_name)
         if filters.get('username'):
@@ -1928,13 +1938,25 @@ class CommandsCog(commands.Cog):
             if not self._compare(total, filters['activity']):
                 return False
 
+        # Silent filter: whole days since the later of the last message, the
+        # join, or bot arrival. Counting from the join excludes recent joiners
+        # (and rejoiners) who simply haven't had time to post; counting from
+        # bot arrival keeps a recently added bot from flagging everyone.
+        if filters.get('silent'):
+            since = max((last_active or {}).get(member_data['user_id'], 0),
+                        member_data.get('join_date') or 0, added_at)
+            days_silent = int((datetime.now(timezone.utc).timestamp() - since) // 86400)
+            if not self._compare(days_silent, filters['silent']):
+                return False
+
         return True
 
     def _matches_all_filters(self, member_data: dict, discord_member: discord.Member, filters: dict,
-                             added_at: int = 0, activity: dict | None = None) -> bool:
+                             added_at: int = 0, activity: dict | None = None,
+                             last_active: dict | None = None) -> bool:
         """Check if member matches all filters (both DB and Discord data)."""
         # First check database filters (including activity)
-        if not self._matches_db_filters(member_data, filters, added_at, activity):
+        if not self._matches_db_filters(member_data, filters, added_at, activity, last_active):
             return False
 
         # Role filter (Discord data)
@@ -2145,6 +2167,8 @@ class CommandsCog(commands.Cog):
             lines.append(f"  • Inactive: {filters['inactive']['operator']}{filters['inactive']['value']} days")
         if filters.get('activity'):
             lines.append(f"  • Activity: {filters['activity']['operator']}{filters['activity']['value']} messages")
+        if filters.get('silent'):
+            lines.append(f"  • Silent: {filters['silent']['operator']}{filters['silent']['value']} days")
         if filters.get('joined'):
             try:
                 date_str = datetime.fromtimestamp(filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
@@ -2269,6 +2293,8 @@ class SearchResultsView(OwnerOnlyView):
             lines.append(t("commands.search_view.filter_inactive", lang, op=self.filters['inactive']['operator'], value=self.filters['inactive']['value']))
         if self.filters.get('activity'):
             lines.append(t("commands.search_view.filter_activity", lang, op=self.filters['activity']['operator'], value=self.filters['activity']['value']))
+        if self.filters.get('silent'):
+            lines.append(t("commands.search_view.filter_silent", lang, op=self.filters['silent']['operator'], value=self.filters['silent']['value']))
         if self.filters.get('joined'):
             try:
                 date_str = datetime.fromtimestamp(self.filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
@@ -2364,6 +2390,8 @@ class SearchResultsView(OwnerOnlyView):
                 filter_lines.append(f"  • Inactive: {self.filters['inactive']['operator']}{self.filters['inactive']['value']} days")
             if self.filters.get('activity'):
                 filter_lines.append(f"  • Activity: {self.filters['activity']['operator']}{self.filters['activity']['value']} messages")
+            if self.filters.get('silent'):
+                filter_lines.append(f"  • Silent: {self.filters['silent']['operator']}{self.filters['silent']['value']} days")
             if self.filters.get('joined'):
                 date_str = datetime.fromtimestamp(self.filters['joined']['value'], tz=timezone.utc).strftime('%Y-%m-%d')
                 filter_lines.append(f"  • Joined: {self.filters['joined']['operator']}{date_str}")
