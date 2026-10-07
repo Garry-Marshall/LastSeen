@@ -102,6 +102,44 @@ def format_away(seconds: int) -> str:
     return f"{max(seconds // 60, 0)}m"
 
 
+class WatchConfirmView(discord.ui.View):
+    """Proceed/Cancel prompt before creating a watch that DMs its target."""
+
+    def __init__(self, cog: 'WatchCog', interaction: discord.Interaction, lang: str, watch: dict):
+        super().__init__(timeout=60)
+        self.cog, self.interaction, self.lang, self.watch = cog, interaction, lang, watch
+        self.proceed_button.label = t('watch.btn_proceed', lang)
+        self.cancel_button.label = t('common.cancel', lang)
+
+    def _cancelled_embed(self) -> discord.Embed:
+        embed = create_embed(t('common.cancelled', self.lang), discord.Color.blue())
+        embed.description = t('watch.confirm_cancelled', self.lang)
+        return embed
+
+    @discord.ui.button(label="Proceed", style=discord.ButtonStyle.success)
+    async def proceed_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.defer()
+        embed, notify = await self.cog._save_watch(interaction, self.lang, prior=None, **self.watch)
+        await interaction.edit_original_response(embed=embed, view=None)
+        # Sent after the admin confirmation so the DM's latency can't delay it.
+        # Best-effort; a closed DM is fine.
+        if notify:
+            await self.cog._notify_watched_user(interaction.guild, self.watch['target_id'],
+                                                self.watch['alert_type'])
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(embed=self._cancelled_embed(), view=None)
+
+    async def on_timeout(self):
+        try:
+            await self.interaction.edit_original_response(embed=self._cancelled_embed(), view=None)
+        except discord.HTTPException:
+            pass
+
+
 class WatchCog(commands.Cog):
     """Watchlist commands, the online-return listener, and the offline sweep."""
 
@@ -245,14 +283,34 @@ class WatchCog(commands.Cog):
                 ephemeral=True)
             return
 
+        watch = dict(target_type=target_type, target_id=target_id, alert_type=alert_type,
+                     threshold_seconds=threshold_seconds, dest=dest, dm=dm)
+
+        # Transparency: a new watch on a user DMs that member a heads-up (roles
+        # aren't notified; a reconfigure isn't re-notified). Ask the admin to
+        # confirm first so the DM never comes as a surprise.
+        if target_type == 'user' and prior is None:
+            embed = create_embed(t('watch.confirm_title', lang), discord.Color.orange())
+            embed.description = t('watch.confirm_desc', lang, target=f"<@{target_id}>")
+            view = WatchConfirmView(self, interaction, lang, watch)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            return
+
+        embed, _ = await self._save_watch(interaction, lang, prior=prior, **watch)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    async def _save_watch(self, interaction: discord.Interaction, lang: str, *,
+                          target_type: str, target_id: int, alert_type: str,
+                          threshold_seconds: Optional[int], dest, dm: bool,
+                          prior: Optional[dict]) -> Tuple[discord.Embed, bool]:
+        """Persist a validated watch. Returns the confirmation (or error) embed
+        and whether the watched member should now be DM'd."""
         seq = await asyncio.to_thread(
             self.db.add_watch, interaction.guild_id, target_type, target_id,
             alert_type, threshold_seconds, (None if dm else dest.id), interaction.user.id, dm,
         )
         if seq is None:
-            await interaction.response.send_message(
-                embed=create_error_embed(t('watch.err_generic', lang), lang), ephemeral=True)
-            return
+            return create_error_embed(t('watch.err_generic', lang), lang), False
 
         await asyncio.to_thread(self._refresh_watch_guilds)
 
@@ -292,9 +350,7 @@ class WatchCog(commands.Cog):
             else:
                 desc += t('watch.replaced_existing', lang)
 
-        # Transparency: a new watch on a user DMs that member a heads-up (roles
-        # aren't notified; a reconfigure isn't re-notified). Tell the admin it's
-        # happening so a watch is never a silent action.
+        # The admin already confirmed the DM (WatchConfirmView); keep a receipt.
         notify_target = target_type == 'user' and prior is None
         if notify_target:
             desc += t('watch.notified_target', lang, target=target_mention)
@@ -302,13 +358,8 @@ class WatchCog(commands.Cog):
         embed = create_embed(t('watch.added_title', lang), discord.Color.green())
         embed.description = desc
         embed.set_footer(text=f"#{seq}")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
         logger.info(f"Watch #{seq} ({alert_type}, {target_type}:{target_id}, {'dm' if dm else 'channel'}) created in guild {interaction.guild.name} by {interaction.user}")
-
-        # Sent after the admin confirmation so the DM's latency can't push the
-        # interaction response past its window. Best-effort; a closed DM is fine.
-        if notify_target:
-            await self._notify_watched_user(interaction.guild, target_id, alert_type)
+        return embed, notify_target
 
     async def _notify_watched_user(self, guild: discord.Guild, user_id: int, alert_type: str) -> None:
         """DM a user that an admin set a presence watch on them (best-effort).
