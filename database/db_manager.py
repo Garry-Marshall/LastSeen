@@ -4719,13 +4719,26 @@ class DatabaseManager:
                 # Perform the backup
                 with backup_conn:
                     source_conn.backup(backup_conn)
-                
-                logger.info(f"Database backup created successfully: {backup_file.name}")
-                return str(backup_file)
+
+                # The backup API copies pages verbatim, so corruption in the live
+                # DB lands in every backup. Check the copy itself; quick_check is
+                # not enough, it skips the index-vs-table comparison that caught
+                # the 2026-10 bit flip.
+                problems = [row[0] for row in backup_conn.execute("PRAGMA integrity_check(10)")]
             finally:
                 source_conn.close()
                 backup_conn.close()
-                
+
+            if problems != ["ok"]:
+                # Returning None makes the caller skip rotation, so older clean
+                # backups are kept.
+                backup_file.unlink(missing_ok=True)
+                logger.error(f"Database integrity check failed; backup discarded, old backups kept: {'; '.join(problems)}")
+                return None
+
+            logger.info(f"Database backup created successfully: {backup_file.name}")
+            return str(backup_file)
+
         except Exception as e:
             logger.error(f"Failed to create database backup: {e}", exc_info=True)
             return None
