@@ -47,7 +47,7 @@ cog._down_shards = set()
 guild = SimpleNamespace(id=G, name="G")
 
 def message(uid):
-    return SimpleNamespace(author=SimpleNamespace(id=uid, bot=False), guild=guild)
+    return SimpleNamespace(author=SimpleNamespace(id=uid, bot=False), guild=guild, webhook_id=None)
 
 async def main():
     cog._flush_lock = asyncio.Lock()

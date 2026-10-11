@@ -966,6 +966,12 @@ class TrackingCog(commands.Cog):
         # Skip if message is from a bot
         if message.author.bot:
             return
+
+        # Skip webhook messages: the author is the webhook (proxy, bridge or
+        # confession bots create them on the fly), never a member, and isn't
+        # flagged as a bot — its entries would only be dropped at flush time.
+        if message.webhook_id is not None:
+            return
         
         # Skip if message is a DM (no guild)
         if message.guild is None:
@@ -1283,6 +1289,10 @@ class TrackingCog(commands.Cog):
                     if isinstance(item, _GuildReconcile):
                         self._reconcile_queued.discard(item.guild_id)
 
+    def _describe_members(self, keys):
+        """'Guild name (user_id)' for each (guild_id, user_id), for log lines."""
+        return ", ".join(f"{getattr(self.bot.get_guild(gid), 'name', gid)} ({uid})" for gid, uid in keys)
+
     @tasks.loop(seconds=30)
     async def flush_activity_buffer(self):
         """
@@ -1336,7 +1346,7 @@ class TrackingCog(commands.Cog):
             def flush_daily():
                 failed = {}
                 success = 0
-                dropped = 0
+                dropped = []
                 for (gid, uid, date), count in daily_to_flush.items():
                     if self.db.increment_message_activity(gid, uid, date, count):
                         success += 1
@@ -1344,7 +1354,7 @@ class TrackingCog(commands.Cog):
                         # Member row is confirmed gone (left + purged, or
                         # /forgetme) — drop the entry instead of retrying it
                         # forever. Transient DB errors fall through to retry.
-                        dropped += 1
+                        dropped.append((gid, uid))
                     else:
                         failed[(gid, uid, date)] = count
                 return success, failed, dropped
@@ -1352,7 +1362,8 @@ class TrackingCog(commands.Cog):
             daily_success, daily_failed, daily_dropped = await asyncio.to_thread(flush_daily)
             self.failed_daily_writes.update(daily_failed)
             if daily_dropped:
-                logger.info(f"Dropped {daily_dropped} daily activity entries for members no longer in the database")
+                logger.info(f"Dropped {len(daily_dropped)} daily activity entries for members no longer in the database: "
+                            f"{self._describe_members(daily_dropped)}")
             if daily_failed:
                 logger.warning(f"Failed to flush {len(daily_failed)}/{daily_count} daily entries, will retry")
             logger.debug(f"Flushed {daily_success}/{daily_count} daily activity entries")
@@ -1361,7 +1372,7 @@ class TrackingCog(commands.Cog):
             def flush_hourly():
                 failed = {}
                 success = 0
-                dropped = 0
+                dropped = []
                 for (gid, uid, timestamp, hour), count in hourly_to_flush.items():
                     if self.db.increment_message_activity_hourly(gid, uid, timestamp, hour, count):
                         success += 1
@@ -1369,7 +1380,7 @@ class TrackingCog(commands.Cog):
                         # Member row is confirmed gone (left + purged, or
                         # /forgetme) — drop the entry instead of retrying it
                         # forever. Transient DB errors fall through to retry.
-                        dropped += 1
+                        dropped.append((gid, uid))
                     else:
                         failed[(gid, uid, timestamp, hour)] = count
                 return success, failed, dropped
@@ -1377,7 +1388,8 @@ class TrackingCog(commands.Cog):
             hourly_success, hourly_failed, hourly_dropped = await asyncio.to_thread(flush_hourly)
             self.failed_hourly_writes.update(hourly_failed)
             if hourly_dropped:
-                logger.info(f"Dropped {hourly_dropped} hourly activity entries for members no longer in the database")
+                logger.info(f"Dropped {len(hourly_dropped)} hourly activity entries for members no longer in the database: "
+                            f"{self._describe_members(hourly_dropped)}")
             if hourly_failed:
                 logger.warning(f"Failed to flush {len(hourly_failed)}/{hourly_count} hourly entries, will retry")
             logger.debug(f"Flushed {hourly_success}/{hourly_count} hourly activity entries")
