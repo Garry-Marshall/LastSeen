@@ -810,7 +810,19 @@ class CommandsCog(commands.Cog):
 
         if not inactive_members:
             embed = create_embed(t("commands.inactive.empty_title", lang), discord.Color.blue())
-            embed.description = t("commands.inactive.empty_desc", lang, days=inactive_days)
+            # The bot has no presence data from before it joined, so a lookback
+            # longer than its time here can't find anyone yet.
+            added_at = guild_config.get('added_at') or 0
+            tracked_days = int((datetime.now(timezone.utc).timestamp() - added_at) // 86400)
+            if inactive_days > tracked_days:
+                embed.description = t("commands.inactive.too_early_desc", lang,
+                                      days=inactive_days, tracked_days=tracked_days,
+                                      joined=format_timestamp(added_at, 'R', lang),
+                                      ready=format_timestamp(added_at + inactive_days * 86400, 'R', lang))
+                if tracked_days >= 1:
+                    embed.description += t("commands.inactive.too_early_hint", lang, tracked_days=tracked_days)
+            else:
+                embed.description = t("commands.inactive.empty_desc", lang, days=inactive_days)
             await interaction.followup.send(embed=embed, ephemeral=not channels_restricted)
             return
 

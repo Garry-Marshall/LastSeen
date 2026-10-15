@@ -306,6 +306,8 @@
   "commands.inactive.no_guild_config": "Serverconfiguratie niet gevonden. Neem contact op met een beheerder.",
   "commands.inactive.empty_title": "Inactieve leden",
   "commands.inactive.empty_desc": "Geen leden zijn langer dan {days} dagen inactief geweest.\n\n**Let op:** De bot kan de 'laatst gezien'-tijd van een lid pas bijhouden nadat het minstens één keer offline is gegaan. Leden die al offline waren toen de bot toetrad en sindsdien niet online zijn geweest, verschijnen hier nog niet.",
+  "commands.inactive.too_early_desc": "LastSeen is {joined} aan deze server toegevoegd en volgt de activiteit dus pas **{tracked_days} dagen**. Niemand kan nog {days} dagen inactief zijn: de bot heeft geen gegevens van vóór zijn komst.\n\nTerugkijken over {days} dagen werkt {ready}.",
+  "commands.inactive.too_early_hint": "\n\nProbeer voorlopig `/inactive days:{tracked_days}`.",
   "commands.inactive.page_title": "Inactieve leden (>{days} dagen) - {count} gevonden - Pagina {page}/{total}",
   "commands.inactive.member_info": "**Bijnaam:** {nickname}\n**Laatst gezien:** {last_seen}",
 
