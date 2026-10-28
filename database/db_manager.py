@@ -526,6 +526,7 @@ class DatabaseManager:
             #   state      : offline_for user watches — 'armed' | 'triggered'
             #   fired_targets: JSON user_id list already alerted (role offline_for dedupe)
             #   last_fired_at: online_return cooldown bookkeeping
+            #   failed_deliveries: consecutive undeliverable channel alerts
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS watchlists (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -539,6 +540,7 @@ class DatabaseManager:
                     deliver_dm INTEGER DEFAULT 0,
                     state TEXT DEFAULT 'armed',
                     fired_targets TEXT,
+                    failed_deliveries INTEGER DEFAULT 0,
                     created_by INTEGER NOT NULL,
                     created_at INTEGER NOT NULL,
                     UNIQUE(guild_id, target_type, target_id, alert_type),
@@ -734,6 +736,12 @@ class DatabaseManager:
             if 'deliver_dm' not in watch_cols:
                 cursor.execute("ALTER TABLE watchlists ADD COLUMN deliver_dm INTEGER DEFAULT 0")
                 logger.info("Added deliver_dm column to watchlists table")
+
+            # Migration: consecutive failed channel deliveries (channel deleted or
+            # send permission revoked); the watch is removed at a threshold.
+            if 'failed_deliveries' not in watch_cols:
+                cursor.execute("ALTER TABLE watchlists ADD COLUMN failed_deliveries INTEGER DEFAULT 0")
+                logger.info("Added failed_deliveries column to watchlists table")
 
             conn.commit()
             logger.info(f"Database initialized: {self.db_file}")
@@ -4504,7 +4512,8 @@ class DatabaseManager:
                         deliver_dm = excluded.deliver_dm,
                         created_by = excluded.created_by,
                         state = 'armed',
-                        fired_targets = NULL
+                        fired_targets = NULL,
+                        failed_deliveries = 0
                 """, (guild_id, seq, target_type, target_id, alert_type,
                       threshold_seconds, channel_id, 1 if deliver_dm else 0, created_by, now))
                 # Re-read to return the true seq (the INSERT's seq is discarded on
@@ -4685,6 +4694,36 @@ class DatabaseManager:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Failed to update fire-state for watch {watch_id}: {e}")
+            return False
+
+    def record_watch_delivery_failure(self, watch_id: int) -> int:
+        """Increment a watch's consecutive failed-delivery count and return the
+        new value (0 if the watch no longer exists or on error)."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE watchlists SET failed_deliveries = COALESCE(failed_deliveries, 0) + 1 WHERE id = ?",
+                    (watch_id,)
+                )
+                cursor.execute("SELECT failed_deliveries FROM watchlists WHERE id = ?", (watch_id,))
+                row = cursor.fetchone()
+                return row[0] if row else 0
+        except Exception as e:
+            logger.error(f"Failed to record delivery failure for watch {watch_id}: {e}")
+            return 0
+
+    def reset_watch_delivery_failures(self, watch_id: int) -> bool:
+        """Clear a watch's failed-delivery count after a successful delivery."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE watchlists SET failed_deliveries = 0 WHERE id = ?", (watch_id,)
+                )
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to reset delivery failures for watch {watch_id}: {e}")
             return False
 
     # ==================== Database Backup Operations ====================

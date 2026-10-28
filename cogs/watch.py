@@ -61,6 +61,9 @@ ROLE_DIGEST_SECONDS = 600
 # each on_ready so a restart (or reconnect) doesn't spam the channel. offline_for
 # needs no such window — its armed/triggered + fired_targets state is persisted.
 STARTUP_GRACE_SECONDS = 120
+# A channel watch whose channel is gone or no longer sendable is removed after
+# this many consecutive failed alerts (reset by any successful delivery).
+MAX_DELIVERY_FAILURES = 10
 
 _DURATION_RE = re.compile(r'^\s*(\d+)\s*([mhd])\s*$', re.IGNORECASE)
 _UNIT_SECONDS = {'m': 60, 'h': 3600, 'd': 86400}
@@ -793,7 +796,8 @@ class WatchCog(commands.Cog):
                           members: Optional[List[Tuple[str, Optional[int]]]] = None) -> bool:
         """Build one alert embed and deliver it — to the watch's channel, or as a
         DM to its creator when deliver_dm is set. A failed send is logged and
-        dropped (there is no channel to fall back to).
+        dropped (there is no channel to fall back to); a channel that is gone or
+        unsendable counts towards removing the watch (_record_delivery_failure).
 
         members: for role alerts, (mention, away seconds or None) per member;
         listed up to ALERT_LIST_MAX, the rest summarised.
@@ -867,16 +871,37 @@ class WatchCog(commands.Cog):
         channel = guild.get_channel_or_thread(w['channel_id']) if w['channel_id'] else None
         if not channel:
             logger.warning(f"Watch #{w['id']}: channel {w['channel_id']} not found in guild {guild.name}; can't deliver")
+            await self._record_delivery_failure(guild, w)
             return True
         if not channel.permissions_for(guild.me).send_messages:
             logger.warning(f"Watch #{w['id']}: no send permission in channel {channel.id}; can't deliver")
+            await self._record_delivery_failure(guild, w)
             return True
         try:
             await channel.send(embed=embed)
             logger.info(f"Watch #{w['seq']} fired {origin} -> #{channel.name}")
+            if w.get('failed_deliveries'):
+                await asyncio.to_thread(self.db.reset_watch_delivery_failures, w['id'])
+        except (discord.Forbidden, discord.NotFound) as e:
+            logger.warning(f"Watch #{w['id']}: can't send alert to channel {channel.id}: {e}")
+            await self._record_delivery_failure(guild, w)
         except Exception as e:
+            # Transient (5xx, rate limit, network): not counted towards removal.
             logger.error(f"Watch #{w['id']}: failed to send alert to channel {channel.id}: {e}")
         return True
+
+    async def _record_delivery_failure(self, guild: discord.Guild, w: dict) -> None:
+        """Count a failed channel delivery; remove the watch at MAX_DELIVERY_FAILURES."""
+        # During a Discord outage the guild's channels can be missing from cache.
+        if guild.unavailable:
+            return
+        failures = await asyncio.to_thread(self.db.record_watch_delivery_failure, w['id'])
+        if failures < MAX_DELIVERY_FAILURES:
+            return
+        if await asyncio.to_thread(self.db.remove_watch, guild.id, w['id']):
+            await asyncio.to_thread(self._refresh_watch_guilds)
+            logger.info(f"Removed watch #{w['seq']} ({w['alert_type']}, {w['target_type']}:{w['target_id']}) "
+                        f"in guild {guild.name}: {failures} consecutive failed deliveries to channel {w['channel_id']}")
 
 
 async def setup(bot: commands.Bot):
