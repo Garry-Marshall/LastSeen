@@ -12,12 +12,15 @@ def check(c, m):
 D = 86400; NOW = int(datetime.now(timezone.utc).timestamp())
 db = DatabaseManager(os.path.join(tempfile.mkdtemp(), "n.db"), pool_size=2)
 
-def guild(gid, added_days_ago, members):
+def guild(gid, added_days_ago, members, posted=()):
+    """posted: (user_id, days_ago) — last message day, as member_activity_summary stores it."""
     db.add_guild(gid, f"G{gid}")
     with db.get_connection() as c:
         c.execute("UPDATE guilds SET added_at = ? WHERE guild_id = ?", (NOW - added_days_ago * D, gid))
         c.executemany("INSERT INTO members (guild_id,user_id,username,join_date,last_seen,is_active,roles) VALUES (?,?,?,?,?,1,'[]')",
                       [(gid, uid, f"u{uid}", NOW - j * D, ls) for uid, j, ls in members])
+        c.executemany("INSERT INTO member_activity_summary (guild_id,user_id,first_active,last_active,total_messages) VALUES (?,?,?,?,1)",
+                      [(gid, uid, (NOW - d * D) // D * D, (NOW - d * D) // D * D) for uid, d in posted])
 
 # Guild with the bot for 400 days
 guild(1, 400, [
@@ -35,16 +38,30 @@ guild(2, 10, [(10, 700, None), (11, 700, NOW - 3 * D)])
 s = db.get_server_snapshot_stats(2)
 check(s['active_30d'] == 2, f"young guild: never-seen member within grace counts active -> {s['active_30d']}")
 
+# Posting counts as activity: invisible members are reported to bots as offline
+guild(4, 400, [
+    (40, 300, NOW - 40 * D),   # seen 40 days ago, posted 2 days ago   -> active
+    (41, 300, None),           # never seen (invisible), posted today  -> active
+    (42, 300, NOW - 40 * D),   # seen 40 days ago, posted 40 days ago  -> inactive
+    (43, 300, NOW - 40 * D),   # seen 40 days ago, posted on cutoff day -> active (day granularity)
+], posted=[(40, 2), (41, 0), (42, 40), (43, 30)])
+listed = {m['user_id'] for m in db.get_inactive_members(4, 30)}
+check(listed == {42}, f"/inactive skips members who posted within the threshold -> {sorted(listed)}")
+s = db.get_server_snapshot_stats(4)
+check((s['active_30d'], s['inactive_30d']) == (3, 1), f"overview counts posters as active -> {s['active_30d']}, {s['inactive_30d']}")
+
 # Property: for random members, active_30d == members not listed by /inactive 30
 random.seed(7)
-rows = []
+rows, posted = [], []
 for uid in range(100, 400):
     joined = random.randint(0, 900)
     ls = random.choice([0, None, NOW - random.randint(0, 200) * D, NOW - 30 * D])
     rows.append((uid, joined, ls))
+    if random.random() < 0.5:
+        posted.append((uid, random.choice([0, 29, 30, 31, random.randint(0, 200)])))
 for added in (5, 29, 30, 31, 400):
     gid = 1000 + added
-    guild(gid, added, rows)
+    guild(gid, added, rows, posted)
     active = db.get_server_snapshot_stats(gid)['active_30d']
     inactive = len(db.get_inactive_members(gid, 30))
     check(active + inactive == len(rows), f"bot added {added:>3}d ago: {active} active + {inactive} /inactive = {len(rows)} members")
