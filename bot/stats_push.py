@@ -60,11 +60,15 @@ async def push_stats(bot):
         return
 
     try:
+        # Bounded: to_thread shares the DB worker pool, so a hung ssh must not
+        # hold a thread forever. BatchMode fails instead of waiting on a prompt.
         result = await asyncio.to_thread(
             subprocess.run,
-            ["scp", "-i", ssh_key, str(STATS_LOCAL), destination],
+            ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+             "-i", ssh_key, str(STATS_LOCAL), destination],
             capture_output=True,
             text=True,
+            timeout=60,
         )
         if result.returncode == 0:
             logger.info(

@@ -13,6 +13,7 @@ from typing import Optional, Dict, Tuple, List, NamedTuple
 from collections import defaultdict
 
 from database import DatabaseManager
+from bot.client import CHUNK_TIMEOUT
 from bot.utils import get_member_roles, create_embed
 from bot.locale import t, guild_language
 from bot.reports import purge_guild_state
@@ -33,6 +34,8 @@ WAL_TRUNCATE_EVERY_N_CHECKPOINTS = 4  # Attempt a full TRUNCATE (file reset) hou
 STATUS_ROTATE_INTERVAL_MINUTES = 3  # How often to cycle the bot's presence message
 STATS_PUSH_INTERVAL_MINUTES = 10  # How often to push stats.json to the LAN webserver
 RETURN_THRESHOLD_SECONDS = 30 * 86400  # Min absence before a re-appearance counts as a "return"
+ENUM_CHUNK_ATTEMPTS = 3  # Chunk attempts before a new guild's member enumeration gives up
+ENUM_CHUNK_RETRY_DELAY = 60  # Wait before the first chunk retry; doubles after each failure
 
 # Presence write queue: on_presence_update only enqueues; a single consumer
 # applies events to the DB off-loop in arrival order (FIFO), so an offline
@@ -164,7 +167,8 @@ class TrackingCog(commands.Cog):
         # on_ready re-fires on reconnects, so without this an empty guild (e.g.
         # a role filter matching nobody) would be re-scanned on every reconnect,
         # and a reconnect during a running import would spawn a duplicate task.
-        # Cleared per-guild on leave so a rejoin re-enumerates.
+        # Cleared per-guild on leave so a rejoin re-enumerates, and when an
+        # enumeration fails so the next on_ready retries it.
         self._enumerating: set = set()
 
         # Endless cycle over STATUS_MESSAGES for the presence rotation loop.
@@ -266,7 +270,8 @@ class TrackingCog(commands.Cog):
         Guards against on_ready re-firing on reconnects (re-scanning empty guilds)
         and against a reconnect spawning a second import while one is still running.
         The guild stays marked for the process lifetime; on_guild_remove clears it
-        so a later rejoin re-enumerates.
+        so a later rejoin re-enumerates, and a failed enumeration clears it so
+        the next on_ready retries.
         """
         if guild.id in self._enumerating:
             return
@@ -284,10 +289,24 @@ class TrackingCog(commands.Cog):
         try:
             # With chunk_guilds_at_startup disabled, a newly joined guild's
             # member cache is not populated automatically — chunk it first so
-            # enumeration sees all members.
+            # enumeration sees all members. guild.chunk() itself never times
+            # out, so bound each attempt; never enumerate a partial cache.
             if not guild.chunked:
                 logger.info(f"Chunking {guild.name} before member enumeration...")
-                await guild.chunk()
+                delay = ENUM_CHUNK_RETRY_DELAY
+                for attempt in range(1, ENUM_CHUNK_ATTEMPTS + 1):
+                    try:
+                        await asyncio.wait_for(guild.chunk(), timeout=CHUNK_TIMEOUT)
+                        break
+                    except Exception as e:  # includes the wait_for timeout
+                        logger.warning(f"Chunking {guild.name} failed (attempt {attempt}/{ENUM_CHUNK_ATTEMPTS}): {e!r}")
+                    if attempt < ENUM_CHUNK_ATTEMPTS:
+                        await asyncio.sleep(delay)
+                        delay *= 2
+                else:
+                    logger.error(f"Gave up chunking {guild.name}; member enumeration will retry on the next on_ready")
+                    self._enumerating.discard(guild.id)
+                    return
 
             logger.info(f"Starting member enumeration for {guild.name} ({len(guild.members)} cached members)...")
 
@@ -359,6 +378,7 @@ class TrackingCog(commands.Cog):
 
         except Exception as e:
             logger.error(f"Failed to process members for guild {guild.name}: {e}", exc_info=True)
+            self._enumerating.discard(guild.id)
 
     def purge_user_from_buffers(self, user_id: int) -> None:
         """Discard buffered activity entries for a user (used by /forgetme).

@@ -98,10 +98,9 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
         embed.description += t('report.peak_day', lang, day=weekday_name(peak_day[0], lang), count=peak_day[1])
 
     # Peak hour of day (guild timezone, period-scoped). Sourced from
-    # get_server_activity_windows so the report agrees with the /user-stats
-    # heatmap. No track_only_roles filter — the hourly table is guild-wide,
-    # matching that heatmap.
-    windows = db.get_server_activity_windows(guild_id, days, guild_tz)
+    # get_server_activity_windows, the same computation as the /user-stats
+    # heatmap, but scoped to the tracked members like the rest of the report.
+    windows = db.get_server_activity_windows(guild_id, days, guild_tz, user_ids=tracked)
     peak_hour = windows['peak_hour']
     if peak_hour is not None and windows['by_hour'][peak_hour] > 0:
         hour_label = f"{peak_hour:02d}:00-{(peak_hour + 1) % 24:02d}:00"
@@ -143,9 +142,9 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
             embed.description += t('report.left', lang, count=left)
         if show_joined and show_left:
             embed.description += t('report.net', lang, count=joined - left)
-        # Growth rate over the period (guild-wide, like /user-stats). Complements
-        # the raw counts above with the net change as a percentage.
-        growth = db.get_member_growth_stats(guild_id, days)
+        # Growth rate over the period. Complements the raw counts above with
+        # the net change as a percentage.
+        growth = db.get_member_growth_stats(guild_id, days, user_ids=tracked)
         if growth:
             rate = growth.get('growth_rate', 0)
             indicator = "📈" if rate > 0 else "📉" if rate < 0 else "➡️"
@@ -156,7 +155,7 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
     # reports compare weeks, monthly reports compare months). Only rendered
     # once the prior window is fully covered by data, so a young guild's
     # report never shows misleading deltas.
-    health = db.get_server_health(guild_id)
+    health = db.get_server_health(guild_id, user_ids=tracked)
     if health:
         if days <= 7 and health['weekly_comparable']:
             embed.description += t('report.trends_header_weekly', lang)
@@ -183,7 +182,7 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
     # (lurkers) and never-active (ghosts). Breadth is cadence-matched — 7-day
     # posters for weekly reports, 30-day for monthly — and reuses the health
     # snapshot already fetched above.
-    segments = db.get_participation_segments(guild_id, window_days=days)
+    segments = db.get_participation_segments(guild_id, window_days=days, user_ids=tracked)
     have_segments = bool(segments and (segments['lurkers'] or segments['ghosts']))
     breadth_members = health['active_members'] if health else 0
     breadth_posters = (health['posters_7d'] if days <= 7 else health['posters_30d']) if health else 0
@@ -201,7 +200,7 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
     # New-member retention cohorts — opt-in, monthly only. The cohort windows are
     # fixed at 30/60/90 days, so they don't map onto a 7-day weekly period.
     if 'retention' in report_types and days >= 30:
-        cohorts = db.get_retention_cohorts(guild_id)
+        cohorts = db.get_retention_cohorts(guild_id, user_ids=tracked)
         if cohorts and any(c['total_joined'] > 0 for c in cohorts.values()):
             embed.description += t('report.retention_header', lang)
             period_labels = {
@@ -223,7 +222,7 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
     # above. Windowed "still posting" share at each age; has its own min-cohort
     # guard, so an empty checkpoint list just means nothing to show.
     if 'retention' in report_types and days >= 30:
-        funnel = db.get_activation_funnel(guild_id)
+        funnel = db.get_activation_funnel(guild_id, user_ids=tracked)
         checkpoints = funnel.get('checkpoints') if funnel else None
         if checkpoints:
             embed.description += t('report.funnel_header', lang)
@@ -242,7 +241,7 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
     # above. Same opt-in/monthly gate; summarised to a single line (the full
     # tenure-bucket chart lives in /user-stats).
     if 'retention' in report_types and days >= 30:
-        lifespan = db.get_departure_lifespan(guild_id)
+        lifespan = db.get_departure_lifespan(guild_id, user_ids=tracked)
         if lifespan['sample'] >= 3:
             embed.description += t('report.lifespan_header', lang)
             embed.description += t('report.lifespan_line', lang, median=lifespan['median_days'],
@@ -262,6 +261,11 @@ def generate_activity_report(guild: discord.Guild, db: DatabaseManager, days: in
 
     # Pointer to the interactive command for anyone who wants to drill in.
     embed.description += t('report.more_info', lang)
+
+    # Discord rejects descriptions over 4096 characters. Every section shown
+    # stays well under that today; cut rather than fail every send if not.
+    if len(embed.description) > 4096:
+        embed.description = embed.description[:4095] + "…"
 
     return embed
 

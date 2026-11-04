@@ -2134,12 +2134,16 @@ class DatabaseManager:
         """Start-of-day cutoff of the last `window_days` days, matching message_activity dates."""
         return _day_window_start(window_days)
 
-    def get_participation_segments(self, guild_id: int, window_days: int = 30) -> Dict[str, Any]:
+    def get_participation_segments(self, guild_id: int, window_days: int = 30,
+                                   user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Count active members split into participants, lurkers, and ghosts.
 
         Cheap COUNT-only queries suitable for the stats overview. See the block
         comment above for the segment definitions.
+
+        Args:
+            user_ids: Optional member filter (track_only_roles scope)
 
         Returns:
             Dict with 'total_active', 'lurkers', 'ghosts', and 'lurker_pct'.
@@ -2147,17 +2151,18 @@ class DatabaseManager:
         result = {'total_active': 0, 'lurkers': 0, 'ghosts': 0, 'lurker_pct': 0.0}
         try:
             window_start = self._participation_window_start(window_days)
+            fclause, fparams = self._member_filter_clause(user_ids, column="m.user_id")
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                cursor.execute("""
-                    SELECT COUNT(*) FROM members
-                    WHERE guild_id = ? AND is_active = 1
-                """, (guild_id,))
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM members m
+                    WHERE m.guild_id = ? AND m.is_active = 1{fclause}
+                """, (guild_id, *fparams))
                 result['total_active'] = cursor.fetchone()[0]
 
                 # Lurker: established, seen within window, no messages in window.
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members m
                     WHERE m.guild_id = ? AND m.is_active = 1
                       AND (m.join_date IS NULL OR m.join_date < ?)
@@ -2166,12 +2171,12 @@ class DatabaseManager:
                           SELECT 1 FROM message_activity ma
                           WHERE ma.guild_id = m.guild_id AND ma.user_id = m.user_id
                             AND ma.date >= ?
-                      )
-                """, (guild_id, window_start, window_start, window_start))
+                      ){fclause}
+                """, (guild_id, window_start, window_start, window_start, *fparams))
                 result['lurkers'] = cursor.fetchone()[0]
 
                 # Ghost: established, not seen within window, never any message.
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) FROM members m
                     WHERE m.guild_id = ? AND m.is_active = 1
                       AND (m.join_date IS NULL OR m.join_date < ?)
@@ -2179,8 +2184,8 @@ class DatabaseManager:
                       AND NOT EXISTS (
                           SELECT 1 FROM message_activity ma
                           WHERE ma.guild_id = m.guild_id AND ma.user_id = m.user_id
-                      )
-                """, (guild_id, window_start, window_start))
+                      ){fclause}
+                """, (guild_id, window_start, window_start, *fparams))
                 result['ghosts'] = cursor.fetchone()[0]
 
             if result['total_active'] > 0:
@@ -3349,53 +3354,56 @@ class DatabaseManager:
             logger.error(f"Failed to get server snapshot stats for guild {guild_id}: {e}")
             return {}
 
-    def get_member_growth_stats(self, guild_id: int, days: int = 30) -> Dict[str, Any]:
+    def get_member_growth_stats(self, guild_id: int, days: int = 30,
+                                user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Get member growth statistics over specified period.
 
         Args:
             guild_id: Guild ID
             days: Number of days to look back
+            user_ids: Optional member filter (track_only_roles scope)
 
         Returns:
             Dictionary with growth statistics
         """
         try:
+            fclause, fparams = self._member_filter_clause(user_ids)
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
                 period_start = now - (days * SECONDS_PER_DAY)
-                
+
                 # Get when bot was added to guild to filter out historical joins
                 cursor.execute("""
                     SELECT added_at FROM guilds WHERE guild_id = ?
                 """, (guild_id,))
                 result = cursor.fetchone()
                 bot_added_at = result['added_at'] if result else 0
-                
+
                 # Members who joined in this period (but only after the bot was added)
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) as joins
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND join_date >= ?
-                """, (guild_id, period_start, bot_added_at))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date >= ?{fclause}
+                """, (guild_id, period_start, bot_added_at, *fparams))
                 joins = cursor.fetchone()['joins'] or 0
-                
+
                 # Members who left in this period, including those who have
                 # since rejoined. Only count leaves after bot was added
                 cursor.execute(f"""
                     SELECT COUNT(*) as leaves
                     FROM members
-                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} >= ?
-                """, (guild_id, period_start, bot_added_at))
+                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} >= ?{fclause}
+                """, (guild_id, period_start, bot_added_at, *fparams))
                 leaves = cursor.fetchone()['leaves'] or 0
-                
+
                 # Current total members
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT COUNT(*) as total
                     FROM members
-                    WHERE guild_id = ? AND is_active = 1
-                """, (guild_id,))
+                    WHERE guild_id = ? AND is_active = 1{fclause}
+                """, (guild_id, *fparams))
                 current_total = cursor.fetchone()['total'] or 0
                 
                 # Calculate previous total
@@ -3415,7 +3423,7 @@ class DatabaseManager:
             logger.error(f"Failed to get member growth stats for guild {guild_id}: {e}")
             return {}
 
-    def get_retention_cohorts(self, guild_id: int) -> Dict[str, Any]:
+    def get_retention_cohorts(self, guild_id: int, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Get retention cohort analysis for members.
 
@@ -3427,12 +3435,14 @@ class DatabaseManager:
 
         Args:
             guild_id: Guild ID
+            user_ids: Optional member filter (track_only_roles scope)
 
         Returns:
             Dictionary with retention statistics per cohort ('30d', '60d', '90d');
             cohorts below the minimum size are omitted
         """
         try:
+            fclause, fparams = self._member_filter_clause(user_ids)
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 now = int(datetime.now(timezone.utc).timestamp())
@@ -3453,8 +3463,8 @@ class DatabaseManager:
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
                         SUM(CASE WHEN is_active = 1 AND {SEEN_SINCE_SQL} THEN 1 ELSE 0 END) as active_recently
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND join_date >= ?
-                """, (thirty_days_ago, bot_added_at, thirty_days_ago, thirty_days_ago, guild_id, thirty_days_ago, bot_added_at))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date >= ?{fclause}
+                """, (thirty_days_ago, bot_added_at, thirty_days_ago, thirty_days_ago, guild_id, thirty_days_ago, bot_added_at, *fparams))
                 row = cursor.fetchone()
                 cohorts['30d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3470,8 +3480,8 @@ class DatabaseManager:
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
                         SUM(CASE WHEN is_active = 1 AND {SEEN_SINCE_SQL} THEN 1 ELSE 0 END) as active_recently
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?
-                """, (thirty_days_ago, bot_added_at, thirty_days_ago, thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago, bot_added_at))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?{fclause}
+                """, (thirty_days_ago, bot_added_at, thirty_days_ago, thirty_days_ago, guild_id, sixty_days_ago, thirty_days_ago, bot_added_at, *fparams))
                 row = cursor.fetchone()
                 cohorts['60d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3487,8 +3497,8 @@ class DatabaseManager:
                         SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as still_active,
                         SUM(CASE WHEN is_active = 1 AND {SEEN_SINCE_SQL} THEN 1 ELSE 0 END) as active_recently
                     FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?
-                """, (thirty_days_ago, bot_added_at, thirty_days_ago, thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago, bot_added_at))
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ? AND join_date >= ?{fclause}
+                """, (thirty_days_ago, bot_added_at, thirty_days_ago, thirty_days_ago, guild_id, ninety_days_ago, sixty_days_ago, bot_added_at, *fparams))
                 row = cursor.fetchone()
                 cohorts['90d'] = {
                     'total_joined': row['total_joined'] or 0,
@@ -3511,7 +3521,7 @@ class DatabaseManager:
     # Below this many recent joiners the percentages are too noisy to show.
     _ACTIVATION_MIN_COHORT = 5
 
-    def get_activation_funnel(self, guild_id: int) -> Dict[str, Any]:
+    def get_activation_funnel(self, guild_id: int, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Windowed new-member activation funnel built from message activity.
 
@@ -3523,6 +3533,8 @@ class DatabaseManager:
         window and after the bot was added guarantees every era's activity rows
         were recorded and not yet pruned, so the curve is unbiased. message_activity is the only signal here — a lurker who
         never posts reads as not activated, by design.
+
+        user_ids optionally restricts the cohort (track_only_roles scope).
 
         Returns:
             {
@@ -3552,10 +3564,13 @@ class DatabaseManager:
                 # Cohort: joiners inside the retention window. join_date floored to
                 # its UTC day-start so it lines up with message_activity.date
                 # (which is stored as start-of-day UTC).
-                cursor.execute("""
+                # The activity pass below only keeps cohort members, so filtering
+                # the cohort here scopes the whole funnel.
+                fclause, fparams = self._member_filter_clause(user_ids)
+                cursor.execute(f"""
                     SELECT user_id, join_date FROM members
-                    WHERE guild_id = ? AND join_date IS NOT NULL AND join_date >= ?
-                """, (guild_id, cutoff))
+                    WHERE guild_id = ? AND join_date IS NOT NULL AND join_date >= ?{fclause}
+                """, (guild_id, cutoff, *fparams))
                 join_day: Dict[int, int] = {}
                 for r in cursor.fetchall():
                     jd = r['join_date']
@@ -3617,7 +3632,7 @@ class DatabaseManager:
             logger.error(f"Failed to get activation funnel for guild {guild_id}: {e}")
             return {'cohort_size': 0, 'checkpoints': [], 'largest_dropoff': None}
 
-    def get_departure_lifespan(self, guild_id: int) -> Dict[str, Any]:
+    def get_departure_lifespan(self, guild_id: int, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Analyse how long departed members stayed before leaving.
 
@@ -3631,6 +3646,7 @@ class DatabaseManager:
         sample >= MIN_SAMPLE: 'median_days', 'avg_days', 'buckets' (non-overlapping
         tenure ranges), and 'early_churn_pct' (share who left within a week).
         Below MIN_SAMPLE the stats stay zeroed so callers can show a placeholder.
+        user_ids optionally restricts the departures (track_only_roles scope).
         """
         MIN_SAMPLE = 3
         EARLY_CHURN_DAYS = 7
@@ -3642,15 +3658,16 @@ class DatabaseManager:
             'early_churn_pct': 0.0,
         }
         try:
+            fclause, fparams = self._member_filter_clause(user_ids)
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT (left_date - join_date) AS tenure
                     FROM members
                     WHERE guild_id = ? AND is_active = 0
                       AND left_date IS NOT NULL AND join_date IS NOT NULL
-                      AND left_date > join_date
-                """, (guild_id,))
+                      AND left_date > join_date{fclause}
+                """, (guild_id, *fparams))
                 tenures = sorted(row['tenure'] for row in cursor.fetchall())
 
             n = len(tenures)
@@ -3690,11 +3707,12 @@ class DatabaseManager:
     _HEALTH_WEEK_HISTORY_DAYS = 14
     _HEALTH_MONTH_HISTORY_DAYS = 60
 
-    def get_server_health(self, guild_id: int) -> Dict[str, Any]:
+    def get_server_health(self, guild_id: int, user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """
         Server vitals for the health panel: each metric for the current window
         and the immediately preceding one, so the caller can render deltas.
-        No scoring — just the raw window-vs-window numbers.
+        No scoring — just the raw window-vs-window numbers. user_ids optionally
+        restricts every member-derived count (track_only_roles scope).
 
         Message-derived windows (posters, messages, breadth, activation) are
         aligned to complete UTC days ending at the last UTC midnight, so both
@@ -3740,14 +3758,16 @@ class DatabaseManager:
                     'monthly_comparable': added_at <= now - self._HEALTH_MONTH_HISTORY_DAYS * d,
                 }
 
+                fclause, fparams = self._member_filter_clause(user_ids)
+
                 # Distinct posters and message totals per day-aligned window.
                 def message_window(start: int, end: int) -> tuple:
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT COUNT(DISTINCT user_id) AS posters,
                                COALESCE(SUM(message_count), 0) AS messages
                         FROM message_activity
-                        WHERE guild_id = ? AND date >= ? AND date < ?
-                    """, (guild_id, start, end))
+                        WHERE guild_id = ? AND date >= ? AND date < ?{fclause}
+                    """, (guild_id, start, end, *fparams))
                     r = cursor.fetchone()
                     return r['posters'], r['messages']
 
@@ -3756,26 +3776,26 @@ class DatabaseManager:
                 result['posters_30d'], result['messages_30d'] = message_window(today_start - 30 * d, today_start)
                 result['posters_prev_30d'], result['messages_prev_30d'] = message_window(today_start - 60 * d, today_start - 30 * d)
 
-                cursor.execute("""
-                    SELECT COUNT(*) AS n FROM members WHERE guild_id = ? AND is_active = 1
-                """, (guild_id,))
+                cursor.execute(f"""
+                    SELECT COUNT(*) AS n FROM members WHERE guild_id = ? AND is_active = 1{fclause}
+                """, (guild_id, *fparams))
                 result['active_members'] = cursor.fetchone()['n'] or 0
 
                 def count_window(sql: str, start: int, end: int) -> int:
-                    cursor.execute(sql, (guild_id, start, end))
+                    cursor.execute(sql, (guild_id, start, end, *fparams))
                     return cursor.fetchone()['n'] or 0
 
-                joins_sql = """
+                joins_sql = f"""
                     SELECT COUNT(*) AS n FROM members
-                    WHERE guild_id = ? AND join_date >= ? AND join_date < ?
+                    WHERE guild_id = ? AND join_date >= ? AND join_date < ?{fclause}
                 """
                 leaves_sql = f"""
                     SELECT COUNT(*) AS n FROM members
-                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} < ?
+                    WHERE guild_id = ? AND {LEFT_TS_SQL} >= ? AND {LEFT_TS_SQL} < ?{fclause}
                 """
-                returns_sql = """
+                returns_sql = f"""
                     SELECT COUNT(*) AS n FROM member_returns
-                    WHERE guild_id = ? AND returned_at >= ? AND returned_at < ?
+                    WHERE guild_id = ? AND returned_at >= ? AND returned_at < ?{fclause}
                 """
                 result['joins_30d'] = count_window(joins_sql, now - 30 * d, now + 1)
                 result['joins_prev_30d'] = count_window(joins_sql, now - 60 * d, now - 30 * d)
@@ -3793,7 +3813,8 @@ class DatabaseManager:
                 def activation_cohort(start: int, end: int) -> Optional[Dict[str, Any]]:
                     if start < now - retention_days * d:
                         return None
-                    cursor.execute("""
+                    mclause, mparams = self._member_filter_clause(user_ids, column="m.user_id")
+                    cursor.execute(f"""
                         SELECT COUNT(*) AS matured,
                                COALESCE(SUM(CASE WHEN EXISTS (
                                    SELECT 1 FROM message_activity ma
@@ -3802,8 +3823,8 @@ class DatabaseManager:
                                      AND ma.date <= (m.join_date - m.join_date % ?) + 7 * ?
                                ) THEN 1 ELSE 0 END), 0) AS activated
                         FROM members m
-                        WHERE m.guild_id = ? AND m.join_date >= ? AND m.join_date < ? AND m.join_date >= ?
-                    """, (d, d, d, guild_id, start, end, added_at))
+                        WHERE m.guild_id = ? AND m.join_date >= ? AND m.join_date < ? AND m.join_date >= ?{mclause}
+                    """, (d, d, d, guild_id, start, end, added_at, *mparams))
                     r = cursor.fetchone()
                     if r['matured'] < self._ACTIVATION_MIN_COHORT:
                         return None
@@ -4069,7 +4090,8 @@ class DatabaseManager:
             logger.error(f"Failed to get activity by day for guild {guild_id}: {e}")
             return {}
 
-    def get_server_activity_windows(self, guild_id: int, days: int = 30, tz_str: str = 'UTC') -> Dict[str, Any]:
+    def get_server_activity_windows(self, guild_id: int, days: int = 30, tz_str: str = 'UTC',
+                                    user_ids: Optional[List[int]] = None) -> Dict[str, Any]:
         """Aggregate guild-wide message activity into local-time weekday/hour windows.
 
         Reads message_activity_hourly only (never presence), re-bucketing every
@@ -4083,6 +4105,7 @@ class DatabaseManager:
             guild_id: Discord guild ID
             days: Look-back window in days (default 30)
             tz_str: Guild timezone name for local-time bucketing (default UTC)
+            user_ids: Optional member filter (track_only_roles scope)
 
         Returns:
             Dict with 'total', 'active_days', 'by_weekday' (0=Mon..6=Sun ->
@@ -4111,13 +4134,14 @@ class DatabaseManager:
             now = int(datetime.now(timezone.utc).timestamp())
             period_start = now - (days * SECONDS_PER_DAY)
 
+            fclause, fparams = self._member_filter_clause(user_ids)
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT timestamp, message_count
                     FROM message_activity_hourly
-                    WHERE guild_id = ? AND timestamp >= ?
-                """, (guild_id, period_start))
+                    WHERE guild_id = ? AND timestamp >= ?{fclause}
+                """, (guild_id, period_start, *fparams))
                 rows = cursor.fetchall()
 
             if not rows:
