@@ -51,6 +51,7 @@ MASS_DEPARTURE_MIN = 50
 MASS_DEPARTURE_RATIO = 0.2
 SNAPSHOT_YIELD_EVERY = 5000  # Yield to the event loop while snapshotting huge guilds
 HEARTBEAT_KEY = 'heartbeat'  # bot_state key: last time every shard was connected
+PROVISIONAL_ACCOUNT_FLAG = 1 << 23  # User public flag; not defined by discord.py
 
 
 class MemberDiff(NamedTuple):
@@ -992,7 +993,14 @@ class TrackingCog(commands.Cog):
         # flagged as a bot — its entries would only be dropped at flush time.
         if message.webhook_id is not None:
             return
-        
+
+        # Skip provisional accounts: game players without a Discord login, whose
+        # in-game chat is relayed to a linked channel. They never join the guild,
+        # so their entries would only be dropped at flush time. Guild members
+        # arrive as discord.Member, so they never reach the flag check.
+        if isinstance(message.author, discord.User) and message.author.public_flags.value & PROVISIONAL_ACCOUNT_FLAG:
+            return
+
         # Skip if message is a DM (no guild)
         if message.guild is None:
             return
@@ -1036,7 +1044,16 @@ class TrackingCog(commands.Cog):
                 await self.flush_activity_buffer()
             
             logger.debug(f"Buffered message from {message.author} in {message.guild.name}")
-        
+
+            # Diagnostic: Discord sent no member data for this author, who also
+            # isn't a bot, webhook or provisional account. Such authors have no
+            # join event and no row, so their entries are dropped at flush time.
+            # Metadata only, never message content.
+            if not isinstance(message.author, discord.Member):
+                logger.info(f"Message from non-member {message.author} ({user_id}) in {message.guild.name}: "
+                            f"type={message.type}, application_id={message.application_id}, "
+                            f"public_flags={message.author.public_flags.value}, channel_type={message.channel.type}")
+
         except Exception as e:
             logger.error(f"Error tracking message activity: {e}", exc_info=True)
 
