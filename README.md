@@ -1,5 +1,8 @@
 # LastSeen Discord Bot
 
+This Python project has been ported into the Go language:
+https://github.com/Garry-Marshall/LastSeen-Go
+
 A modular Discord bot for monitoring and tracking user activity across guilds. Tracks user joins, leaves, nickname changes, role updates, and presence status.
 
 
